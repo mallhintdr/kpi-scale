@@ -10,7 +10,7 @@ import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import {
   Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, LabelList, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { REV_BAND, bandOf, fmtPKR, monthLabel, revColor, type RevBand } from '../lib/rev';
+import { MILLIONS, REV_BAND, bandOf, fmtPKR, monthLabel, revColor, type RevBand } from '../lib/rev';
 
 /* ------------------------------------------------------------------ */
 /*  Band badge: colour + icon + label (never colour alone)              */
@@ -122,6 +122,80 @@ export function Bullet({ value, pace, height = 10 }: { value: number | null; pac
 }
 
 /* ------------------------------------------------------------------ */
+/*  Metric card: target / achieved / balance at equal weight            */
+/* ------------------------------------------------------------------ */
+export interface MetricCardProps {
+  title: string;
+  /** Short group label above the title, e.g. "Revenue" */
+  eyebrow?: string;
+  achieved: number;
+  total: number;
+  fmt: (v: number) => string;
+  labels?: { total?: string; achieved?: string; balance?: string };
+  pace?: number | null; // % of the period elapsed → "Expected by now"
+  extras?: { label: string; value: string; tone?: 'warn' | 'bad' | 'muted' }[];
+  unit: string;
+  compact?: boolean;
+  action?: ReactNode;
+}
+
+export function MetricCard({ title, eyebrow, achieved, total, fmt, labels = {}, pace, extras = [], unit, compact, action }: MetricCardProps) {
+  const pct = total > 0 ? Math.min(100, (achieved / total) * 100) : null;
+  const balance = Math.max(0, total - achieved);
+  const expected = pace != null && total > 0 ? (total * pace) / 100 : null;
+  const gap = expected != null ? achieved - expected : null;
+  const allExtras = [
+    ...(expected != null ? [{ label: 'Expected by now', value: fmt(expected), tone: 'muted' as const }] : []),
+    ...(gap != null ? [{ label: gap >= 0 ? 'Ahead by' : 'Short by', value: fmt(Math.abs(gap)), tone: (gap >= 0 ? 'muted' : 'bad') as 'muted' | 'bad' }] : []),
+    ...extras,
+  ];
+  const fig = compact ? 'text-sm' : 'text-base sm:text-lg';
+  return (
+    <div className={clsx('flex h-full flex-col rounded-xl bg-white ring-1 ring-slate-200/80 dark:bg-slate-900 dark:ring-slate-800', compact ? 'p-3' : 'p-3.5')}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          {eyebrow && <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{eyebrow}</div>}
+          <div className={clsx('truncate font-semibold text-slate-800 dark:text-slate-100', compact ? 'text-[13px]' : 'text-sm')} title={title}>{title}</div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="rounded-lg px-2 py-0.5 text-lg font-bold leading-tight text-slate-900 tabular-nums dark:text-white" style={{ boxShadow: `inset 0 -3px 0 ${revColor(pct)}` }}>
+            {pct == null ? '—' : `${Math.round(pct)}%`}
+          </span>
+          {action}
+        </div>
+      </div>
+
+      <div className="mt-2.5 grid grid-cols-3 divide-x divide-slate-100 rounded-lg bg-slate-50 py-2 text-center dark:divide-slate-800 dark:bg-slate-800/50">
+        {[
+          { l: labels.total ?? 'Target', v: total },
+          { l: labels.achieved ?? 'Recovered', v: achieved },
+          { l: labels.balance ?? 'Balance', v: balance },
+        ].map((c) => (
+          <div key={c.l} className="min-w-0 px-1">
+            <div className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-500">{c.l}</div>
+            <div className={clsx('truncate font-bold text-slate-900 tabular-nums dark:text-white', fig)}>{fmt(c.v)}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-2.5"><Bullet value={pct} pace={pace} height={8} /></div>
+
+      {allExtras.length > 0 && (
+        <div className="mt-2 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-[11px]">
+          {allExtras.map((e) => (
+            <span key={e.label} className="tabular-nums text-slate-500">
+              {e.label}{' '}
+              <b className={clsx(e.tone === 'bad' ? 'text-rose-700 dark:text-rose-400' : e.tone === 'warn' ? 'text-amber-700 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200')}>{e.value}</b>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="mt-auto pt-2 text-center text-[10px] font-medium tracking-wide text-slate-400">{unit}</div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Shared tooltip shell                                                 */
 /* ------------------------------------------------------------------ */
 function TipShell({ title, rows }: { title: string; rows: { key: string; label: string; value: string; swatch?: string; line?: boolean }[] }) {
@@ -210,7 +284,7 @@ export function CollectionTrend({ trend, target }: { trend: TrendData; target: n
           </defs>
           <CartesianGrid vertical={false} stroke="var(--viz-grid)" />
           <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={{ stroke: 'var(--viz-grid)' }} interval="preserveStartEnd" minTickGap={6} />
-          <YAxis tick={axisTick} tickLine={false} axisLine={false} width={56} tickFormatter={(v) => fmtPKR(v)} />
+          <YAxis tick={axisTick} tickLine={false} axisLine={false} width={56} tickFormatter={(v) => (v / 1e6).toLocaleString('en-PK', { maximumFractionDigits: 0 })} />
           <Tooltip
             cursor={{ stroke: 'var(--viz-axis)', strokeWidth: 1 }}
             content={({ active, payload }) => {
@@ -220,9 +294,9 @@ export function CollectionTrend({ trend, target }: { trend: TrendData; target: n
                 <TipShell
                   title={monthLabel(d.month)}
                   rows={[
-                    ...(d.thisFy != null ? [{ key: 'a', label: `FY ${trend.fy}`, value: `Rs ${fmtPKR(d.thisFy)}`, swatch: 'var(--viz-s1)' }] : []),
-                    { key: 'b', label: `FY ${trend.prevFy}`, value: `Rs ${fmtPKR(d.lastFy)}`, swatch: 'var(--viz-s2)' },
-                    { key: 'c', label: 'Even pace', value: `Rs ${fmtPKR(d.pace)}`, swatch: 'var(--viz-pace)', line: true },
+                    ...(d.thisFy != null ? [{ key: 'a', label: `FY ${trend.fy}`, value: fmtPKR(d.thisFy), swatch: 'var(--viz-s1)' }] : []),
+                    { key: 'b', label: `FY ${trend.prevFy}`, value: fmtPKR(d.lastFy), swatch: 'var(--viz-s2)' },
+                    { key: 'c', label: 'Even pace', value: fmtPKR(d.pace), swatch: 'var(--viz-pace)', line: true },
                   ]}
                 />
               );
@@ -250,6 +324,7 @@ export function CollectionTrend({ trend, target }: { trend: TrendData; target: n
           </Area>
         </ComposedChart>
       </ResponsiveContainer>
+      <div className="text-center text-[10px] font-medium tracking-wide text-slate-400">{MILLIONS}</div>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { Plus, Search, UserMinus } from 'lucide-react';
 import { useDeferredValue, useEffect, useState, type FormEvent } from 'react';
 import { PageHeader } from '../../components/AppShell';
 import { UnitField } from '../../components/rev';
-import { Avatar, Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Select, Sheet } from '../../components/ui';
+import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Select, Sheet } from '../../components/ui';
 import { get, post } from '../../lib/api';
 import { fmtDate } from '../../lib/format';
 import { UNIT_LABEL, useCaps, useMeta, type Post, type UnitRef } from '../../lib/rev';
@@ -31,7 +31,7 @@ export default function Postings() {
   return (
     <>
       <PageHeader title="Postings" subtitle="Who holds charge of each unit" actions={unit && POSTS_FOR[unit.type]?.length > 0 && <Button size="sm" onClick={() => setAdding(true)}><Plus className="size-4" />Post officer</Button>} />
-      <div className="mb-4"><UnitField value={unit} onChange={setUnit} /></div>
+      <div className="mb-4"><UnitField value={unit} onChange={setUnit} scope="work" /></div>
       {isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : (
         <>
           <SectionTitle>Current · {unit && UNIT_LABEL[unit.type]}</SectionTitle>
@@ -39,7 +39,6 @@ export default function Postings() {
             <Card className="divide-y divide-slate-100 dark:divide-slate-800">
               {active.map((c) => (
                 <div key={c._id} className="flex items-center gap-3 px-4 py-3">
-                  <Avatar name={c.userId.name} size={38} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">{c.userId.name}{c.userId.bps && <span className="ml-1 text-xs text-slate-400">BPS-{c.userId.bps}</span>}</div>
                     <div className="text-xs text-slate-500">{c.postLabel} · since {fmtDate(c.from, { day: 'numeric', month: 'short', year: 'numeric' })}</div>
@@ -90,7 +89,6 @@ function PostSheet({ unit, onClose }: { unit: UnitRef; onClose: () => void }) {
         </div>
         {who ? (
           <Card className="flex items-center gap-3 p-3">
-            <Avatar name={who.name} size={36} />
             <div className="min-w-0 flex-1"><div className="font-medium">{who.name}</div><div className="text-xs text-slate-500">{who.designation} · {who.email}</div></div>
             <Button type="button" size="sm" variant="ghost" onClick={() => setWho(null)}>Change</Button>
           </Card>
@@ -104,7 +102,6 @@ function PostSheet({ unit, onClose }: { unit: UnitRef; onClose: () => void }) {
               <Card className="max-h-60 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
                 {users.data.items.map((u) => (
                   <button type="button" key={u._id} onClick={() => setWho(u)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800">
-                    <Avatar name={u.name} size={30} />
                     <div className="min-w-0"><div className="truncate text-sm font-medium">{u.name}</div><div className="truncate text-xs text-slate-500">{u.designation} · {u.email}</div></div>
                   </button>
                 ))}

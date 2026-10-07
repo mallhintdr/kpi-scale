@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ChevronRight, Plus, Search } from 'lucide-react';
 import { useDeferredValue, useState, type FormEvent } from 'react';
 import { PageHeader } from '../../components/AppShell';
-import { Avatar, Badge, Button, Card, Empty, ErrorState, Field, Input, Loading, PasswordInput, Select, Sheet } from '../../components/ui';
+import { Badge, Button, Card, Empty, ErrorState, Field, Input, Loading, PasswordInput, Select, Sheet } from '../../components/ui';
 import { get, patch, post, qs } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import type { Role, UserRow } from '../../lib/types';
@@ -39,7 +39,6 @@ export default function People() {
           <Card className="divide-y divide-slate-100 dark:divide-slate-800">
             {data.items.map((u) => (
               <button key={u._id} onClick={() => setEditing(u)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-slate-50 dark:active:bg-slate-800">
-                <Avatar name={u.name} size={38} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className={`truncate font-medium ${u.status === 'disabled' ? 'text-slate-400 line-through' : ''}`}>{u.name}</span>

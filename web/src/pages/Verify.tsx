@@ -64,7 +64,7 @@ export default function Verify() {
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium">{e.headName}</div>
                         <div className="text-xs text-slate-500">
-                          {e.kind === 'revenue' ? <>Current Rs {fmtPKR(e.current, { short: false })} · Arrears Rs {fmtPKR(e.arrear, { short: false })}{e.ref && <> · {e.ref}</>}</> : <>Received {e.received} · Disposed {e.disposed}</>}
+                          {e.kind === 'revenue' ? <>Current {fmtPKR(e.current, { exact: true })} · Arrears {fmtPKR(e.arrear, { exact: true })} (Rs){e.ref && <> · {e.ref}</>}</> : <>Received {e.received} · Disposed {e.disposed}</>}
                         </div>
                       </div>
                     </label>

@@ -3,11 +3,12 @@ import { ArrowDownRight, ArrowUpRight, ChevronRight, Phone, Timer } from 'lucide
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PageHeader } from '../components/AppShell';
-import { BandChip, Bullet, CaseBars, CollectionTrend, RankBars, Ring, ScoreGauge, type TrendData } from '../components/charts';
+import { BandChip, Bullet, CaseBars, CollectionTrend, MetricCard, RankBars, Ring, ScoreGauge, type TrendData } from '../components/charts';
 import { BlockBars, FyPicker } from '../components/rev';
-import { Avatar, Badge, Card, Empty, ErrorState, Loading, Segmented } from '../components/ui';
+import { achievement, useViewMode } from '../lib/mode';
+import { Badge, Card, Empty, ErrorState, Loading, Segmented, UnitCaption } from '../components/ui';
 import { get } from '../lib/api';
-import { UNIT_LABEL, fmtPKR, fmtPct, useFy, type Block, type RevBand, type UnitRef } from '../lib/rev';
+import { MILLIONS, UNIT_LABEL, fmtPKR, fmtPct, useFy, type Block, type RevBand, type UnitRef } from '../lib/rev';
 
 export interface UnitData {
   fy: string;
@@ -73,17 +74,27 @@ export function UnitBody({ data }: { data: UnitData }) {
   const collectedPct = pct(data.totals.collected, data.totals.target);
   const gap = collectedPct == null ? null : collectedPct - data.elapsed;
   const cases = data.cases.reduce((a, c) => ({ load: a.load + c.opening + c.received, disp: a.disp + c.disposed }), { load: 0, disp: 0 });
+  const [mode] = useViewMode();
+  const perf = mode === 'performance';
+  // Plain achievement per area (Performance mode) — not weighted, not capped by scoring rules
+  const achieved: Record<Block, number | null> = {
+    revenue: collectedPct,
+    arrears: achievement(data.arrears.total.collected, data.arrears.total.demand),
+    cases: achievement(cases.disp, cases.load),
+    audit: data.audit.n ? achievement(data.audit.rec, data.audit.amt) : null,
+    tasks: achievement(data.tasks.onTime, data.tasks.due),
+  };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* ---------- Hero ---------- */}
       <Card className="overflow-hidden">
         <div className="h-1.5 bg-gradient-to-r from-brand-700 via-brand-500 to-gold-400" />
-        <div className="grid gap-5 p-5 lg:grid-cols-[auto_1fr] lg:gap-8">
+        <div className="grid gap-4 p-4 lg:grid-cols-[auto_1fr] lg:gap-6">
           <div className="flex items-center gap-5 lg:flex-col lg:items-center lg:gap-2">
-            <ScoreGauge value={data.score} size={164} />
+            <ScoreGauge value={perf ? collectedPct : data.score} size={148} label={perf ? 'Achievement %' : 'Overall score'} />
             <div className="space-y-2 lg:text-center">
-              <BandChip band={data.band} size="md" />
+              {!perf && <BandChip band={data.band} size="md" />}
               {gap != null && (
                 <div className={`flex items-center gap-1 text-xs font-medium lg:justify-center ${gap >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}`}>
                   {gap >= 0 ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
@@ -93,17 +104,22 @@ export function UnitBody({ data }: { data: UnitData }) {
               <div className="flex items-center gap-1 text-[11px] text-slate-500 lg:justify-center"><Timer className="size-3" />{data.elapsed}% of FY {data.fy} elapsed</div>
             </div>
           </div>
-          <BlockBars blocks={data.blocks} weights={data.weights} />
+          {perf ? <BlockBars blocks={achieved} note={false} /> : <BlockBars blocks={data.blocks} weights={data.weights} />}
         </div>
       </Card>
 
       {/* ---------- Headline tiles ---------- */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label="Revenue collected" value={`Rs ${fmtPKR(data.totals.collected)}`} sub={`of Rs ${fmtPKR(data.totals.target)} target`} pct={collectedPct} pace={data.elapsed}
-          note={data.totals.pending > 0 ? `+Rs ${fmtPKR(data.totals.pending)} awaiting verification` : undefined} />
-        <StatTile label="Arrears recovered" value={`Rs ${fmtPKR(data.arrears.total.collected)}`} sub={`of Rs ${fmtPKR(data.arrears.total.demand)}`} pct={pct(data.arrears.total.collected, data.arrears.total.demand)} />
-        <StatTile label="Cases disposed" value={cases.disp.toLocaleString()} sub={`of ${cases.load.toLocaleString()} cases`} pct={pct(cases.disp, cases.load)} />
-        <StatTile label="Audit paras settled" value={data.audit.n ? `${data.audit.settled} / ${data.audit.n}` : '—'} sub={data.audit.n ? `Rs ${fmtPKR(data.audit.rec)} of ${fmtPKR(data.audit.amt)} recovered` : 'No paras'} pct={data.audit.n ? pct(data.audit.rec, data.audit.amt) : null} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          title="Revenue — current year" achieved={data.totals.collected} total={data.totals.target} fmt={fmtPKR} pace={data.elapsed}
+          extras={data.totals.pending > 0 ? [{ label: 'Unverified', value: fmtPKR(data.totals.pending), tone: 'warn' }] : []} unit={MILLIONS}
+        />
+        <MetricCard title="Arrears — previous years" achieved={data.arrears.total.collected} total={data.arrears.total.demand} fmt={fmtPKR} labels={{ total: 'Arrears' }} unit={MILLIONS} />
+        <MetricCard title="Case registers" achieved={cases.disp} total={cases.load} fmt={(v) => v.toLocaleString()} labels={{ total: 'Total', achieved: 'Disposed', balance: 'Pending' }} unit="(Cases)" />
+        <MetricCard
+          title="Audit paras" achieved={data.audit.rec} total={data.audit.amt} fmt={fmtPKR} labels={{ total: 'Amount' }}
+          extras={data.audit.n ? [{ label: 'Paras settled', value: `${data.audit.settled} / ${data.audit.n}` }] : []} unit={data.audit.n ? MILLIONS : '(No paras)'}
+        />
       </div>
 
       {/* ---------- Trend ---------- */}
@@ -131,8 +147,8 @@ export function UnitBody({ data }: { data: UnitData }) {
 
 export function ChartCard({ title, subtitle, children, action }: { title: string; subtitle?: string; children: ReactNode; action?: ReactNode }) {
   return (
-    <Card className="p-4 sm:p-5">
-      <div className="mb-4 flex items-start justify-between gap-3">
+    <Card className="p-3.5 sm:p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="text-[15px] font-semibold text-slate-900 dark:text-white">{title}</h3>
           {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
@@ -144,28 +160,13 @@ export function ChartCard({ title, subtitle, children, action }: { title: string
   );
 }
 
-function StatTile({ label, value, sub, pct: p, pace, note }: { label: string; value: string; sub: string; pct: number | null; pace?: number; note?: string }) {
-  return (
-    <Card className="flex flex-col p-4">
-      <div className="text-xs font-medium text-slate-500">{label}</div>
-      <div className="mt-1 flex items-end justify-between gap-2">
-        <div className="whitespace-nowrap text-base font-bold leading-tight text-slate-900 sm:text-2xl dark:text-white">{value}</div>
-        <div className="text-sm font-semibold text-slate-700 tabular-nums dark:text-slate-200">{fmtPct(p == null ? null : Math.round(p))}</div>
-      </div>
-      <div className="mb-2.5 text-[11px] text-slate-400">{sub}</div>
-      <div className="mt-auto"><Bullet value={p} pace={pace} height={8} /></div>
-      {note && <div className="mt-2 text-[11px] font-medium text-amber-700 dark:text-amber-400">{note}</div>}
-    </Card>
-  );
-}
-
 /* ---------- Heads: bullet bars grouped by head family ---------- */
 function Heads({ data }: { data: UnitData }) {
   const rows = data.revenue.filter((r) => r.target > 0 || r.collected > 0);
   const groups = [...new Set(rows.map((r) => r.group))];
   const cases = data.cases.filter((c) => c.opening + c.received > 0);
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid gap-3 xl:grid-cols-2">
       <ChartCard
         title="Revenue recovery by head"
         subtitle="Current-year demand · bar = collected, tick = where an even pace would be today"
@@ -182,7 +183,7 @@ function Heads({ data }: { data: UnitData }) {
                         <span className="truncate text-slate-700 dark:text-slate-200">{r.crop ? r.crop[0].toUpperCase() + r.crop.slice(1) : r.name}</span>
                         <span className="shrink-0 text-xs text-slate-500">
                           <b className="text-sm text-slate-900 tabular-nums dark:text-white">{fmtPct(r.pct == null ? null : Math.round(r.pct))}</b>
-                          <span className="ml-1.5">Rs {fmtPKR(r.collected)} / {fmtPKR(r.target)}</span>
+                          <span className="ml-1.5 tabular-nums">{fmtPKR(r.collected)} / {fmtPKR(r.target)}</span>
                         </span>
                       </div>
                       <Bullet value={r.pct} pace={r.crop ? null : data.elapsed} height={10} />
@@ -192,6 +193,7 @@ function Heads({ data }: { data: UnitData }) {
               </div>
             ))}
             <p className="text-[11px] text-slate-400">Crop heads (Rabi, Kharif) are seasonal, so they show no even-pace tick.</p>
+            <UnitCaption>{MILLIONS}</UnitCaption>
           </div>
         )}
       </ChartCard>
@@ -206,28 +208,40 @@ function Heads({ data }: { data: UnitData }) {
 /* ---------- Ranking ---------- */
 function Ranking({ data }: { data: UnitData }) {
   const navigate = useNavigate();
+  const [mode] = useViewMode();
+  const perf = mode === 'performance';
+  const value = (c: UnitData['children'][number]) => (perf ? achievement(c.collected, c.target) : c.score);
+  const ordered = [...data.children].sort((a, b) => (value(b) ?? -1) - (value(a) ?? -1));
   const holderOf = (unitId: string) => data.childHolders.filter((h) => h.unitId === unitId && !['wasilbaqi', 'sci'].includes(h.post));
   return (
     <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
-      <ChartCard title={`${data.children[0] ? UNIT_LABEL[data.children[0].type] : 'Unit'} scores`} subtitle="Click a bar to drill down">
+      <ChartCard title={`${data.children[0] ? UNIT_LABEL[data.children[0].type] : 'Unit'} ${perf ? 'achievement %' : 'scores'}`} subtitle={perf ? 'Revenue recovered against target · click a bar to drill down' : 'Weighted KPI score · click a bar to drill down'}>
         <RankBars
-          items={data.children.map((c) => ({ id: c._id, name: c.name, score: c.score, sub: c.target ? `Rs ${fmtPKR(c.collected)} of ${fmtPKR(c.target)}` : undefined }))}
+          items={ordered.map((c) => ({ id: c._id, name: c.name, score: value(c), sub: c.target ? `${fmtPKR(c.collected)} / ${fmtPKR(c.target)} ${MILLIONS}` : undefined }))}
           onPick={(id) => navigate(`/units/${id}`)}
         />
       </ChartCard>
-      <Card className="divide-y divide-slate-100 self-start dark:divide-slate-800">
-        {data.children.map((c) => {
+      <Card className="divide-y divide-slate-200 self-start overflow-hidden dark:divide-slate-700">
+        <div className="flex bg-brand-700 text-[11px] font-semibold uppercase tracking-wide text-white">
+          <span className="w-10 shrink-0 border-r border-white/20 py-2.5 text-center">#</span>
+          <span className="flex-1 px-3 py-2.5">{data.children[0] ? UNIT_LABEL[data.children[0].type] : 'Unit'} · officers</span>
+          <span className="px-3 py-2.5">{perf ? 'Achieved' : 'Band'}</span>
+        </div>
+        {ordered.map((c, i) => {
           const h = holderOf(c._id);
+          const v = value(c);
           return (
-            <Link key={c._id} to={`/units/${c._id}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800">
-              <span className="w-5 text-center text-xs font-bold text-slate-400 tabular-nums">{c.rank ?? '–'}</span>
+            <Link key={c._id} to={`/units/${c._id}`} className="flex items-stretch hover:bg-slate-50 dark:hover:bg-slate-800">
+              <span className="flex w-10 shrink-0 items-center justify-center border-r border-slate-200 text-xs font-bold text-slate-500 tabular-nums dark:border-slate-700">{v == null ? '–' : i + 1}</span>
+              <div className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{c.name}</div>
                 <div className="truncate text-[11px] text-slate-500">
                   {h.length ? h.map((x) => x.user.name).join(', ') : c.type === 'circle' ? <span className="text-amber-600">Vacant</span> : '—'}
                 </div>
               </div>
-              <BandChip band={c.band} />
+              {perf ? <span className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{v == null ? '—' : `${Math.round(v)}%`}</span> : <BandChip band={c.band} />}
+              </div>
             </Link>
           );
         })}
@@ -256,8 +270,9 @@ function Arrears({ data }: { data: UnitData }) {
               <Ring value={p} size={64} stroke={7}><span className="text-xs">{p == null ? '—' : `${Math.round(p)}%`}</span></Ring>
               <div className="min-w-0">
                 <div className="text-xs font-medium text-slate-500">{t.label}</div>
-                <div className="text-base font-bold text-slate-900 dark:text-white">Rs {fmtPKR(a[t.k].collected)}</div>
-                <div className="text-[11px] text-slate-400">of Rs {fmtPKR(a[t.k].demand)}</div>
+                <div className="text-base font-bold text-slate-900 tabular-nums dark:text-white">{fmtPKR(a[t.k].collected)}</div>
+                <div className="text-[11px] text-slate-400 tabular-nums">/ {fmtPKR(a[t.k].demand)}</div>
+                <div className="text-[10px] text-slate-400">{MILLIONS}</div>
               </div>
             </Card>
           );
@@ -271,13 +286,14 @@ function Arrears({ data }: { data: UnitData }) {
                 <span className="truncate text-slate-700 dark:text-slate-200">{r.name}</span>
                 <span className="shrink-0 text-xs text-slate-500">
                   <b className="text-sm text-slate-900 tabular-nums dark:text-white">{fmtPct(r.arrearPct == null ? null : Math.round(r.arrearPct))}</b>
-                  <span className="ml-1.5">Rs {fmtPKR(r.arrearCollected)} / {fmtPKR(r.arrearDemand)}</span>
+                  <span className="ml-1.5 tabular-nums">{fmtPKR(r.arrearCollected)} / {fmtPKR(r.arrearDemand)}</span>
                 </span>
               </div>
               <Bullet value={r.arrearPct} height={10} />
             </div>
           ))}
         </div>
+        <UnitCaption>{MILLIONS}</UnitCaption>
       </ChartCard>
     </div>
   );
@@ -292,7 +308,6 @@ function Officers({ data }: { data: UnitData }) {
     <Card className="divide-y divide-slate-100 dark:divide-slate-800">
       {all.map((h, i) => (
         <div key={i} className="flex items-center gap-3 px-4 py-3">
-          <Avatar name={h.user.name} size={38} />
           <div className="min-w-0 flex-1">
             <Link to={`/officers/${h.user._id}`} className="block truncate font-medium hover:text-brand-700 hover:underline">{h.user.name}{h.user.bps && <span className="ml-1.5 text-xs text-slate-400">BPS-{h.user.bps}</span>}</Link>
             <div className="truncate text-xs text-slate-500">{h.postLabel} · {unitName(h.unitId)}</div>

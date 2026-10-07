@@ -5,7 +5,7 @@ import { PageHeader } from '../components/AppShell';
 import { Bar, UnitField } from '../components/rev';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, Sheet, Textarea } from '../components/ui';
 import { get, patch, post } from '../lib/api';
-import { fmtPKR, useCaps, useMeta, type UnitRef } from '../lib/rev';
+import { MILLIONS, fmtPKR, useCaps, useMeta, type UnitRef } from '../lib/rev';
 import { useSave } from './admin/shared';
 
 interface Para {
@@ -43,8 +43,8 @@ export default function AuditParas() {
           {tot && tot.n > 0 && (
             <Card className="mb-3 grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-800">
               <Mini label="Paras" value={`${tot.settled}/${tot.n}`} sub="settled" />
-              <Mini label="Amount" value={fmtPKR(tot.amount)} />
-              <Mini label="Recovered" value={fmtPKR(tot.recovered)} sub={tot.amount ? `${Math.round((tot.recovered / tot.amount) * 100)}%` : undefined} />
+              <Mini label="Amount" value={fmtPKR(tot.amount)} unit={MILLIONS} />
+              <Mini label="Recovered" value={fmtPKR(tot.recovered)} sub={tot.amount ? `${Math.round((tot.recovered / tot.amount) * 100)}%` : undefined} unit={MILLIONS} />
             </Card>
           )}
           {data.summary.length > 0 && (
@@ -55,7 +55,7 @@ export default function AuditParas() {
                   const p = s.amount ? (s.recovered / s.amount) * 100 : null;
                   return (
                     <div key={s._id} className="px-4 py-2.5">
-                      <div className="mb-1 flex justify-between text-sm"><span className="font-medium">{s._id}</span><span className="text-slate-500">{s.settled}/{s.n} settled · {fmtPKR(s.recovered)} / {fmtPKR(s.amount)}</span></div>
+                      <div className="mb-1 flex justify-between text-sm"><span className="font-medium">{s._id}</span><span className="text-slate-500 tabular-nums">{s.settled}/{s.n} · {fmtPKR(s.recovered)} / {fmtPKR(s.amount)}</span></div>
                       <Bar value={p} />
                     </div>
                   );
@@ -74,7 +74,7 @@ export default function AuditParas() {
                       <span className="text-xs text-slate-500">{p.auditYear} · {p.category}</span>
                     </div>
                     <div className="truncate text-xs text-slate-500">{p.unitId?.name}{p.subject && <> · {p.subject}</>}</div>
-                    <div className="mt-1 text-xs">Recovered <b>{fmtPKR(p.recovered)}</b> of {fmtPKR(p.amount)}</div>
+                    <div className="mt-1 text-xs tabular-nums"><b>{fmtPKR(p.recovered)}</b> / {fmtPKR(p.amount)}</div>
                   </div>
                   <Badge tone={p.status === 'settled' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'} className="capitalize">{p.status}</Badge>
                 </button>
@@ -88,10 +88,11 @@ export default function AuditParas() {
   );
 }
 
-const Mini = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
+const Mini = ({ label, value, sub, unit }: { label: string; value: string; sub?: string; unit?: string }) => (
   <div className="p-3 text-center">
     <div className="text-lg font-bold tabular-nums">{value}</div>
     <div className="text-[11px] text-slate-500">{label}{sub && ` · ${sub}`}</div>
+    {unit && <div className="text-[10px] text-slate-400">{unit}</div>}
   </div>
 );
 
@@ -114,7 +115,7 @@ function ParaSheet({ para, defaultUnit, onClose }: { para: Para | null; defaultU
   return (
     <Sheet open onClose={onClose} title={para ? `Para ${para.paraNo}` : 'New audit para'} footer={<Button form="para-form" type="submit" block loading={save.isPending}>Save</Button>}>
       <form id="para-form" onSubmit={submit} className="space-y-4">
-        {!para && <Field label="Tehsil or patwar circle">{() => <UnitField value={unit} onChange={setUnit} accept={['tehsil', 'circle']} />}</Field>}
+        {!para && <Field label="Tehsil or patwar circle">{() => <UnitField value={unit} onChange={setUnit} accept={['tehsil', 'circle']} scope="work" />}</Field>}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Category">{(id) => <Select id={id} value={f.category} onChange={set('category')}>{meta?.auditCategories.map((c) => <option key={c}>{c}</option>)}</Select>}</Field>
           <Field label="Audit year">{(id) => <Input id={id} required pattern="\d{4}-\d{2}" placeholder="2024-25" value={f.auditYear} onChange={set('auditYear')} disabled={!!para} />}</Field>

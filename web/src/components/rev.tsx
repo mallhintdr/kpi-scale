@@ -23,7 +23,7 @@ export function FyPicker() {
 export const Bar = ({ value, pace }: { value: number | null; max?: number; pace?: number | null }) => <Bullet value={value} pace={pace} height={8} />;
 
 /** Five score blocks as ring tiles; N/A tiles are dimmed and say why. */
-export function BlockBars({ blocks, weights }: { blocks: Record<Block, number | null>; weights?: Record<Block, number> }) {
+export function BlockBars({ blocks, weights, note = true }: { blocks: Record<Block, number | null>; weights?: Record<Block, number>; note?: boolean }) {
   return (
     <div>
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-5">
@@ -32,21 +32,22 @@ export function BlockBars({ blocks, weights }: { blocks: Record<Block, number | 
             <Ring value={blocks[b]} size={52} stroke={5} />
             <div className="min-w-0">
               <div className="text-[13px] font-medium leading-tight text-slate-700 dark:text-slate-200">{BLOCK_LABEL[b]}</div>
-              <div className="mt-0.5 text-[11px] text-slate-400">{blocks[b] == null ? 'Not applicable' : weights ? `Weight ${weights[b]}%` : ''}</div>
+              <div className="mt-0.5 text-[11px] text-slate-400">{blocks[b] == null ? 'Not applicable' : weights ? `Weight ${weights[b]}%` : note ? '' : 'Achieved'}</div>
             </div>
           </div>
         ))}
       </div>
-      <p className="mt-2 text-[11px] text-slate-400">Blocks marked “Not applicable” are left out; their weight is shared by the others.</p>
+      {note && <p className="mt-2 text-[11px] text-slate-400">Blocks marked “Not applicable” are left out; their weight is shared by the others.</p>}
     </div>
   );
 }
 
 /** Drill-down territory picker. `accept` limits which unit types can be chosen. */
 export function UnitPicker({
-  open, onClose, onPick, accept, title = 'Choose a unit',
-}: { open: boolean; onClose: () => void; onPick: (u: UnitRef) => void; accept?: UnitRef['type'][]; title?: string }) {
-  const { roots } = useCaps();
+  open, onClose, onPick, accept, title = 'Choose a unit', scope = 'browse',
+}: { open: boolean; onClose: () => void; onPick: (u: UnitRef) => void; accept?: UnitRef['type'][]; title?: string; scope?: 'browse' | 'work' }) {
+  const caps = useCaps();
+  const roots = scope === 'work' || !caps.browseRoots.length ? caps.roots : caps.browseRoots;
   const [trail, setTrail] = useState<UnitRef[]>([]);
   const current = trail[trail.length - 1];
   const { data: children, isLoading } = useQuery({
@@ -64,7 +65,7 @@ export function UnitPicker({
   return (
     <Sheet open={open} onClose={onClose} title={title}>
       <div className="flex flex-wrap items-center gap-1 text-sm">
-        <button className="font-medium text-brand-600" onClick={() => setTrail([])}>My jurisdiction</button>
+        <button className="font-medium text-brand-600" onClick={() => setTrail([])}>{scope === 'work' ? 'My jurisdiction' : 'All areas'}</button>
         {trail.map((t, i) => (
           <span key={t._id} className="flex items-center gap-1">
             <ChevronRight className="size-3.5 text-slate-400" />
@@ -95,7 +96,7 @@ export function UnitPicker({
 }
 
 /** Button that shows the chosen unit and opens a UnitPicker. */
-export function UnitField({ value, onChange, accept, placeholder = 'Choose unit' }: { value: UnitRef | null; onChange: (u: UnitRef) => void; accept?: UnitRef['type'][]; placeholder?: string }) {
+export function UnitField({ value, onChange, accept, placeholder = 'Choose unit', scope = 'browse' }: { value: UnitRef | null; onChange: (u: UnitRef) => void; accept?: UnitRef['type'][]; placeholder?: string; scope?: 'browse' | 'work' }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -108,7 +109,7 @@ export function UnitField({ value, onChange, accept, placeholder = 'Choose unit'
         <span className="min-w-0 flex-1 truncate">{value ? <>{value.name} <span className="text-xs text-slate-500">· {UNIT_LABEL[value.type]}</span></> : <span className="text-slate-400">{placeholder}</span>}</span>
         <ChevronRight className="size-4 text-slate-400" />
       </button>
-      <UnitPicker open={open} onClose={() => setOpen(false)} onPick={onChange} accept={accept} />
+      <UnitPicker open={open} onClose={() => setOpen(false)} onPick={onChange} accept={accept} scope={scope} />
     </>
   );
 }

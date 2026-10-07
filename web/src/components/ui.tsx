@@ -57,7 +57,7 @@ export const Card = ({ className, children, onClick }: { className?: string; chi
 );
 
 export const SectionTitle = ({ children, action }: { children: ReactNode; action?: ReactNode }) => (
-  <div className="mb-2 mt-6 flex items-center justify-between px-1 first:mt-0">
+  <div className="mb-1.5 mt-4 flex items-center justify-between px-0.5 first:mt-0">
     <h2 className="text-[13px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{children}</h2>
     {action}
   </div>
@@ -129,6 +129,11 @@ export const GovLogo = ({ className }: { className?: string }) => (
       if (!img.src.endsWith('/emblem.svg')) img.src = '/emblem.svg';
     }}
   />
+);
+
+/** Single unit caption, bottom-centre of a card or chart, e.g. "(Rs in Millions)". */
+export const UnitCaption = ({ children, className }: { children: ReactNode; className?: string }) => (
+  <div className={clsx('mt-2 text-center text-[10px] font-medium tracking-wide text-slate-400', className)}>{children}</div>
 );
 
 /* ---------- Bits ---------- */

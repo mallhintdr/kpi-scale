@@ -6,7 +6,7 @@ import { audit, notify } from '../../lib/notify.js';
 import { requireRole } from '../../middleware/auth.js';
 import { objectId, q, validate } from '../../middleware/validate.js';
 import { AuditPara, Charge, ScoreConfig, Task, Unit, User } from '../../models/index.js';
-import { activeFilter, assertCanSee, isWasilBaqiFor, myCharges, scopeRoots } from './access.js';
+import { activeFilter, assertCanRead, assertCanSee, isWasilBaqiFor, myCharges, scopeRoots } from './access.js';
 import { AUDIT_CATEGORIES, BLOCKS, LEVELS, POSTS, POST_LABEL, POST_UNIT, SINGLE_HOLDER, type Post } from './catalog.js';
 import { configResolver } from './scoring.js';
 
@@ -20,7 +20,7 @@ router.get(
   validate({ query: z.object({ unitId: objectId, status: z.enum(['pending', 'settled']).optional(), category: z.enum(AUDIT_CATEGORIES).optional() }) }),
   async (req, res) => {
     const { unitId, status, category } = q<any>(req);
-    const unit = await assertCanSee(req.user!, unitId);
+    const unit = await assertCanRead(req.user!, unitId);
     const filter: Record<string, unknown> = { anc: unit._id };
     if (status) filter.status = status;
     if (category) filter.category = category;

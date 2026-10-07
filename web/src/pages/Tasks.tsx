@@ -3,7 +3,7 @@ import { CheckCircle2, Plus, Search } from 'lucide-react';
 import { useDeferredValue, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/AppShell';
-import { Avatar, Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, Segmented, Select, Sheet, Textarea, useToast } from '../components/ui';
+import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, Segmented, Select, Sheet, Textarea, useToast } from '../components/ui';
 import { get, post } from '../lib/api';
 import { fmtDate, toDateInput } from '../lib/format';
 import { useCaps } from '../lib/rev';
@@ -53,7 +53,6 @@ function TaskCard({ t, box }: { t: Task; box: 'mine' | 'assigned' }) {
   return (
     <Card className="p-4">
       <div className="flex items-start gap-3">
-        <Avatar name={person.name} size={36} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-medium">{t.title}</span>
@@ -92,7 +91,6 @@ function NewTask({ onClose }: { onClose: () => void }) {
       <form id="task-form" onSubmit={submit} className="space-y-4">
         {who ? (
           <Card className="flex items-center gap-3 p-3">
-            <Avatar name={who.name} size={36} />
             <div className="min-w-0 flex-1"><div className="font-medium">{who.name}</div><div className="text-xs text-slate-500">{who.postLabel} · {who.unitName}</div></div>
             <Button type="button" size="sm" variant="ghost" onClick={() => setWho(null)}>Change</Button>
           </Card>
@@ -105,7 +103,6 @@ function NewTask({ onClose }: { onClose: () => void }) {
             <Card className="max-h-64 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
               {isLoading ? <div className="p-4"><Loading /></div> : people.map((p) => (
                 <button type="button" key={`${p.userId}${p.unitId}`} onClick={() => setWho(p)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800">
-                  <Avatar name={p.name} size={30} />
                   <div className="min-w-0"><div className="truncate text-sm font-medium">{p.name}</div><div className="truncate text-xs text-slate-500">{p.postLabel} · {p.unitName}</div></div>
                 </button>
               ))}

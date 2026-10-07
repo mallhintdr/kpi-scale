@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 import {
   Bell, BarChart3, CheckSquare, ClipboardEdit, Home, LayoutGrid, ListChecks, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
-  ShieldCheck, SlidersHorizontal, Table2, Target, UserCog,
+  FileSpreadsheet, GitCompareArrows, ShieldCheck, SlidersHorizontal, Table2, Target, UserCog,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { get } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useCaps } from '../lib/rev';
+import { useViewMode } from '../lib/mode';
 import { Avatar, GovLogo, IconButton } from './ui';
 
 type Caps = ReturnType<typeof useCaps>;
@@ -23,8 +24,10 @@ export interface NavItem {
 export const NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/explore', label: 'Performance', icon: BarChart3 },
-  { to: '/staff', label: 'Staff performance', icon: Table2, show: (c) => c.isOfficer },
-  { to: '/league', label: 'League tables', icon: Medal, show: (c) => c.isOfficer },
+  { to: '/staff', label: 'Staff performance', icon: Table2 },
+  { to: '/league', label: 'League tables', icon: Medal },
+  { to: '/compare', label: 'Compare areas', icon: GitCompareArrows, show: (c) => c.canCompare },
+  { to: '/reports', label: 'Report builder', icon: FileSpreadsheet },
   { to: '/entry', label: 'Enter figures', icon: ClipboardEdit, show: (c) => c.canEnter },
   { to: '/verify', label: 'Verify', icon: ShieldCheck, show: (c) => c.isWasilBaqi && !c.isAdmin },
   { to: '/targets', label: 'Targets & demand', icon: Target, show: (c) => c.isWasilBaqi && !c.isAdmin },
@@ -72,7 +75,7 @@ export function AppShell() {
   const tabs = [
     byPath('/'),
     byPath('/explore'),
-    caps.canEnter ? { ...byPath('/entry'), label: 'Entry' } : caps.isOfficer ? { ...byPath('/league'), label: 'League' } : byPath('/audit-paras'),
+    caps.canEnter ? { ...byPath('/entry'), label: 'Entry' } : { ...byPath('/league'), label: 'League' },
     byPath('/tasks'),
     { to: '/more', label: 'More', icon: LayoutGrid },
   ];
@@ -81,13 +84,13 @@ export function AppShell() {
   return (
     <div className="min-h-dvh lg:flex">
       {/* Desktop sidebar: collapses to an icon rail */}
-      <aside className={clsx('sticky top-0 hidden h-dvh shrink-0 flex-col bg-brand-800 text-white transition-[width] duration-200 lg:flex', collapsed ? 'w-[76px]' : 'w-64')}>
-        <div className={clsx('flex border-b border-white/10', collapsed ? 'flex-col items-center gap-1 py-2' : 'h-[75px] items-center gap-2 pl-3 pr-2')}>
+      <aside className={clsx('sticky top-0 hidden h-dvh shrink-0 flex-col bg-brand-800 text-white transition-[width] duration-200 lg:flex print:!hidden', collapsed ? 'w-[60px]' : 'w-52')}>
+        <div className={clsx('flex border-b border-white/10', collapsed ? 'flex-col items-center gap-0.5 py-1.5' : 'h-[59px] items-center gap-2 pl-2.5 pr-1.5')}>
           <Link to="/" title="Government of the Punjab" className="flex min-w-0 flex-1 items-center gap-2.5">
-            <GovLogo className="size-[51px] shrink-0" />
+            <GovLogo className="size-[42px] shrink-0" />
             {!collapsed && (
               <div className="min-w-0 leading-tight">
-                <div className="text-[12.5px] font-bold uppercase tracking-wide">Government of the Punjab</div>
+                <div className="text-[11px] font-bold uppercase leading-tight tracking-wide">Government<br />of the Punjab</div>
               </div>
             )}
           </Link>
@@ -96,21 +99,21 @@ export function AppShell() {
             aria-label={collapsed ? 'Expand menu' : 'Collapse menu'}
             aria-expanded={!collapsed}
             title={collapsed ? 'Expand menu' : 'Collapse menu'}
-            className="grid size-9 shrink-0 place-items-center rounded-lg text-brand-100 hover:bg-white/15 hover:text-white"
+            className="grid size-8 shrink-0 place-items-center rounded-md text-brand-100 hover:bg-white/15 hover:text-white"
           >
             {collapsed ? <PanelLeftOpen className="size-5" /> : <PanelLeftClose className="size-5" />}
           </button>
         </div>
 
-        <nav className={clsx('flex-1 space-y-0.5 overflow-hidden py-3', collapsed ? 'px-2' : 'px-3')}>
+        <nav className={clsx('flex-1 space-y-px overflow-hidden py-2', collapsed ? 'px-1.5' : 'px-2')}>
           {items.filter((i) => i.group !== 'admin').map((i) => (
             <SideLink key={i.to} item={i} collapsed={collapsed} badge={i.to === '/notifications' ? unread : 0} />
           ))}
           {items.some((i) => i.group === 'admin') &&
             (collapsed ? (
-              <div className="mx-3 my-2 border-t border-white/15" />
+              <div className="mx-2 my-1.5 border-t border-white/15" />
             ) : (
-              <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-gold-400">Manage</div>
+              <div className="px-2.5 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-gold-400">Manage</div>
             ))}
           {items.filter((i) => i.group === 'admin').map((i) => <SideLink key={i.to} item={i} collapsed={collapsed} />)}
         </nav>
@@ -119,16 +122,17 @@ export function AppShell() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Government header band */}
-        <div className="pt-safe sticky top-0 z-30 border-b-[3px] border-gold-500 bg-brand-700 text-white">
-          <div className="flex h-[72px] items-center gap-2 px-3 sm:px-5">
-            <GovLogo className="size-[46px] shrink-0 lg:hidden" />
+        <div className="pt-safe sticky top-0 z-30 border-b-[3px] border-gold-500 bg-brand-700 text-white print:hidden">
+          <div className="flex h-14 items-center gap-2 px-3 lg:px-4">
+            <GovLogo className="size-9 shrink-0 lg:hidden" />
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-[11px] font-semibold uppercase tracking-wide text-gold-400 lg:hidden">Government of the Punjab</div>
-              <div className="truncate text-[15px] font-semibold sm:text-base">Employee Performance Dashboard</div>
-              <div className="truncate text-xs text-brand-100">{session!.tenant.name}</div>
+              <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-gold-400 sm:text-[11px] lg:hidden">Govt. of the Punjab</div>
+              <div className="truncate text-[14px] font-semibold leading-tight sm:text-base"><span className="sm:hidden">Dashboard</span><span className="hidden sm:inline">Employee Performance Dashboard</span></div>
+              <div className="hidden truncate text-xs text-brand-100 sm:block">{session!.tenant.name}</div>
             </div>
 
             {/* Top-right actions */}
+            <ModeSwitch />
             <Link to="/notifications" aria-label={`Notifications${unread ? ` (${unread} unread)` : ''}`} title="Notifications" className="relative grid size-10 place-items-center rounded-lg hover:bg-white/15">
               <Bell className="size-[22px]" />
               {unread > 0 && (
@@ -137,7 +141,7 @@ export function AppShell() {
                 </span>
               )}
             </Link>
-            <Link to="/profile" title={session!.user.name} className="flex items-center gap-2 rounded-lg p-1 hover:bg-white/15">
+            <Link to="/profile" title={session!.user.name} className="hidden items-center gap-2 rounded-lg p-1 hover:bg-white/15 sm:flex">
               <Avatar name={session!.user.name} size={34} />
               <div className="hidden max-w-36 leading-tight md:block">
                 <div className="truncate text-sm font-medium">{session!.user.name}</div>
@@ -149,16 +153,16 @@ export function AppShell() {
             </IconButton>
           </div>
         </div>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 sm:px-6 lg:pb-8">
+        <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 pb-24 sm:px-4 lg:pb-5">
           <Outlet />
         </main>
-        <footer className="mx-auto hidden w-full max-w-6xl border-t border-slate-200 px-6 py-4 text-xs text-slate-500 lg:block dark:border-slate-800">
+        <footer className="mx-auto hidden w-full max-w-[1600px] print:!hidden border-t border-slate-200 px-4 py-2.5 text-[11px] text-slate-500 lg:block dark:border-slate-800">
           © {new Date().getFullYear()} Government of the Punjab · Employee Performance Dashboard
         </footer>
       </div>
 
       {/* Mobile bottom tab bar */}
-      <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-lg lg:hidden dark:border-slate-800 dark:bg-slate-900/95">
+      <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-lg lg:hidden print:hidden dark:border-slate-800 dark:bg-slate-900/95">
         <div className="mx-auto grid max-w-lg grid-cols-5">
           {tabs.map((t) => {
             const active = isActive(t.to);
@@ -188,8 +192,8 @@ function SideLink({ item, badge = 0, collapsed }: { item: NavItem; badge?: numbe
       aria-label={collapsed ? item.label : undefined}
       className={({ isActive }) =>
         clsx(
-          'relative flex h-9 items-center gap-3 rounded-lg text-sm font-medium transition',
-          collapsed ? 'justify-center' : 'px-3',
+          'relative flex h-8 items-center gap-2.5 rounded-md text-[13px] font-medium transition',
+          collapsed ? 'justify-center' : 'px-2.5',
           isActive
             ? 'bg-white/15 text-white before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-gold-400'
             : 'text-brand-100 hover:bg-white/10 hover:text-white',
@@ -208,19 +212,41 @@ function SideLink({ item, badge = 0, collapsed }: { item: NavItem; badge?: numbe
   );
 }
 
+/** Performance (default) vs KPI evaluation, shown in the green header band. */
+function ModeSwitch() {
+  const [mode, setMode] = useViewMode();
+  const opt = (m: 'performance' | 'kpi', long: string, short: string) => (
+    <button
+      onClick={() => setMode(m)}
+      aria-pressed={mode === m}
+      title={m === 'performance' ? 'Achievement against targets' : 'Weighted KPI scores, bands and rankings'}
+      className={clsx('rounded-md px-2 py-1 text-[11px] font-semibold transition sm:px-2.5 sm:text-xs', mode === m ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-100 hover:text-white')}
+    >
+      <span className="hidden sm:inline">{long}</span>
+      <span className="sm:hidden">{short}</span>
+    </button>
+  );
+  return (
+    <div className="flex shrink-0 rounded-lg bg-white/15 p-0.5" role="group" aria-label="View mode">
+      {opt('performance', 'Performance', 'Perf')}
+      {opt('kpi', 'KPI evaluation', 'KPI')}
+    </div>
+  );
+}
+
 /** Page header: title with optional back link and actions. Includes the bell on mobile. */
 export function PageHeader({ title, subtitle, back, actions }: { title: string; subtitle?: ReactNode; back?: string; actions?: ReactNode }) {
   const navigate = useNavigate();
   return (
-    <header className="flex items-end justify-between gap-3 pb-4 pt-5 lg:pt-7">
-      <div className="min-w-0">
+    <header className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 pb-3 pt-3 lg:pt-4 print:hidden">
+      <div className="min-w-0 flex-1 basis-52">
         {back && (
           <button onClick={() => (history.length > 1 ? navigate(-1) : navigate(back))} className="-ml-1 mb-1 flex h-8 items-center text-sm font-medium text-brand-600">
             ‹ Back
           </button>
         )}
-        <h1 className="truncate border-l-4 border-gold-500 pl-3 text-2xl font-bold text-brand-800 lg:text-[28px] dark:text-white">{title}</h1>
-        {subtitle && <div className="mt-1 pl-4 text-sm text-slate-500">{subtitle}</div>}
+        <h1 className="line-clamp-2 break-words border-l-4 border-gold-500 pl-2.5 text-lg font-bold leading-snug text-brand-800 sm:text-xl lg:text-2xl dark:text-white">{title}</h1>
+        {subtitle && <div className="mt-0.5 pl-3.5 text-[13px] text-slate-500">{subtitle}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {actions}

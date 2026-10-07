@@ -5,7 +5,7 @@ import { badRequest, forbidden } from '../../lib/errors.js';
 import { atLeast } from '../../middleware/auth.js';
 import { objectId, q, validate } from '../../middleware/validate.js';
 import { Charge, RevEntry, RevTarget, Unit, User } from '../../models/index.js';
-import { activeFilter, assertCanSee, myCharges, scopeRoots } from './access.js';
+import { activeFilter, assertCanRead, browseRoots, myCharges, scopeRoots } from './access.js';
 import {
   AUDIT_CATEGORIES, DATA_POSTS, HEADS, POSTS, POST_LABEL, POST_LEVEL, UNIT_LEVEL, fyElapsed, fyMonths, fyOf, isValidFy, type Post,
 } from './catalog.js';
@@ -36,13 +36,18 @@ router.get('/meta', (_req, res) => {
 router.get('/me', async (req, res) => {
   const me = req.user!;
   const [charges, roots] = await Promise.all([myCharges(me.id), scopeRoots(me)]);
-  const rootUnits = await Unit.find({ _id: { $in: roots } }).select('type name').sort({ type: 1, name: 1 }).lean();
+  const [rootUnits, browse] = await Promise.all([
+    Unit.find({ _id: { $in: roots } }).select('type name').sort({ type: 1, name: 1 }).lean(),
+    browseRoots(),
+  ]);
   // Breadcrumb names for each charge
   const ancIds = [...new Set(charges.flatMap((c) => c.unit.anc.map(String)))];
   const names = new Map((await Unit.find({ _id: { $in: ancIds } }).select('name type').lean()).map((u) => [String(u._id), u]));
   res.json({
     isAdmin: atLeast(me.role, 'admin'),
     roots: rootUnits,
+    browseRoots: browse,
+    canCompare: atLeast(me.role, 'admin') || charges.some((c) => ['commissioner', 'dc', 'adc_rev'].includes(c.post)),
     charges: charges.map((c) => ({
       _id: c._id,
       post: c.post,
@@ -56,7 +61,7 @@ router.get('/me', async (req, res) => {
 
 /* Child units for pickers */
 router.get('/units/:id/children', validate({ params: z.object({ id: objectId }) }), async (req, res) => {
-  await assertCanSee(req.user!, req.params.id as string);
+  await assertCanRead(req.user!, req.params.id as string);
   res.json(await Unit.find({ parentId: req.params.id }).select('type name code').sort({ name: 1 }).lean());
 });
 
@@ -65,7 +70,7 @@ router.get(
   '/units/:id/descendants',
   validate({ params: z.object({ id: objectId }), query: z.object({ type: z.enum(['district', 'tehsil', 'qanungoi', 'circle', 'mouza']) }) }),
   async (req, res) => {
-    await assertCanSee(req.user!, req.params.id as string);
+    await assertCanRead(req.user!, req.params.id as string);
     const items = await Unit.find({ anc: new Types.ObjectId(req.params.id as string), type: q<any>(req).type }).select('type name code parentId').sort({ name: 1 }).lean();
     res.json(items);
   },
@@ -81,7 +86,7 @@ async function holdersOf(unitIds: Types.ObjectId[]) {
 /* Unit explorer: score, breakdown, ranked children, officers in charge */
 router.get('/units/:id', validate({ params: z.object({ id: objectId }), query: fyQuery }), async (req, res) => {
   const fy = resolveFy(q<any>(req).fy);
-  const unit = await assertCanSee(req.user!, req.params.id as string);
+  const unit = await assertCanRead(req.user!, req.params.id as string);
   const [facts, resolve, path, children] = await Promise.all([
     loadFacts(unit._id, fy),
     configResolver(),
@@ -183,7 +188,7 @@ router.get(
   async (req, res) => {
     const { unitId, post } = q<{ unitId: string; post: Post }>(req);
     const fy = resolveFy(q<any>(req).fy);
-    const unit = await assertCanSee(req.user!, unitId);
+    const unit = await assertCanRead(req.user!, unitId);
     if (DATA_POSTS.includes(post)) throw badRequest(`${POST_LABEL[post]} is not scored`);
 
     const [facts, resolve] = await Promise.all([loadFacts(unit._id, fy), configResolver()]);
@@ -247,6 +252,45 @@ router.get('/my-score', validate({ query: fyQuery }), async (req, res) => {
  * ------------------------------------------------------------------ */
 type MyChargeLite = Awaited<ReturnType<typeof myCharges>>[number];
 
+/* ------------------------------------------------------------------ *
+ *  Comparison: every district / tehsil / qanungoi under a unit, per head
+ *  (Commissioner, DC, ADC(R) and admins)
+ * ------------------------------------------------------------------ */
+router.get(
+  '/compare',
+  validate({ query: fyQuery.extend({ unitId: objectId, type: z.enum(['district', 'tehsil', 'qanungoi']) }) }),
+  async (req, res) => {
+    const me = req.user!;
+    const charges = await myCharges(me.id);
+    if (!atLeast(me.role, 'admin') && !charges.some((c) => ['commissioner', 'dc', 'adc_rev'].includes(c.post))) {
+      throw forbidden('Comparison is available to the Commissioner, DC and ADC (Revenue)');
+    }
+    const { unitId, type } = q<{ unitId: string; type: 'district' | 'tehsil' | 'qanungoi' }>(req);
+    const fy = resolveFy(q<any>(req).fy);
+    const root = await assertCanRead(me, unitId);
+    const [facts, resolve] = await Promise.all([loadFacts(root._id, fy), configResolver()]);
+    const units = [...facts.units.values()].filter((u) => u.type === type).sort((a, b) => a.name.localeCompare(b.name));
+    const parentName = (u: (typeof units)[number]) => (u.parentId ? facts.units.get(String(u.parentId))?.name : undefined);
+
+    const items = units.map((u) => {
+      const f = rollup(facts.rows, inUnit(String(u._id)));
+      const b = breakdown(f);
+      const s = scoreFacts(f, UNIT_LEVEL[type] ?? 'tehsil', resolve(u.anc.map(String)));
+      const heads: Record<string, { pct: number | null; done: number; of: number }> = {};
+      const pct = (d: number, o: number) => (o > 0 ? Math.round(Math.min(100, (d / o) * 100) * 10) / 10 : null);
+      for (const r of b.revenue) if (r.target > 0) heads[r.code] = { pct: r.pct, done: r.collected, of: r.target };
+      for (const c of b.cases) if (c.opening + c.received > 0) heads[c.code] = { pct: c.pct, done: c.disposed, of: c.opening + c.received };
+      heads.REVENUE = { pct: pct(b.totals.collected, b.totals.target), done: b.totals.collected, of: b.totals.target };
+      if (b.arrears.total.demand > 0) heads.ARREARS = { pct: pct(b.arrears.total.collected, b.arrears.total.demand), done: b.arrears.total.collected, of: b.arrears.total.demand };
+      if (b.audit.n > 0) heads.AUDIT = { pct: b.audit.amt ? pct(b.audit.rec, b.audit.amt) : null, done: b.audit.rec, of: b.audit.amt };
+      if (b.tasks.due > 0) heads.TASKS = { pct: pct(b.tasks.onTime, b.tasks.due), done: b.tasks.onTime, of: b.tasks.due };
+      if (s.score != null) heads.SCORE = { pct: s.score, done: s.score, of: 100 };
+      return { _id: u._id, name: u.name, parent: parentName(u), heads };
+    });
+    res.json({ fy, root: { _id: root._id, name: root.name, type: root.type }, type, items });
+  },
+);
+
 router.get(
   '/officers/:userId',
   validate({ params: z.object({ userId: objectId }), query: fyQuery.extend({ post: z.enum(POSTS).optional() }) }),
@@ -261,11 +305,7 @@ router.get(
     const charges = all.filter((c) => !DATA_POSTS.includes(c.post));
     if (!charges.length) throw badRequest('This officer holds no scored posting');
 
-    // Visibility: self, admins, or anyone whose jurisdiction contains one of the officer's units
-    if (userId !== req.user!.id && !atLeast(req.user!.role, 'admin')) {
-      const roots = (await scopeRoots(req.user!)).map(String);
-      if (!charges.some((c) => c.unit.anc.some((a) => roots.includes(String(a))))) throw forbidden('This officer is outside your jurisdiction');
-    }
+    // Read-only: every employee may view any officer's performance in the organisation.
 
     // Group charges by scoring post; an officer may hold more than one
     const byPost = new Map<Post, MyChargeLite[]>();

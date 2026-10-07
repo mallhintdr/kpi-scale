@@ -16,6 +16,9 @@ export interface UnitRef { _id: string; type: UnitType; name: string; code?: str
 export interface RevMe {
   isAdmin: boolean;
   roots: UnitRef[];
+  /** Units everyone may browse read-only (whole organisation). */
+  browseRoots: UnitRef[];
+  canCompare: boolean;
   charges: { _id: string; post: Post; postLabel: string; chargeType: string; unit: UnitRef; path: string[] }[];
 }
 
@@ -43,14 +46,17 @@ export const bandOf = (v: number | null | undefined): RevBand =>
 /** Mark colour (fills, strokes) for a 0–100 value. Never use for text. */
 export const revColor = (v: number | null | undefined) => REV_BAND[bandOf(v)].color;
 
-/** Pakistani number formatting: lakh / crore. */
-export const fmtPKR = (v: number | null | undefined, opts: { short?: boolean } = { short: true }) => {
+/**
+ * Amounts are always shown in millions of rupees with no unit text; each card/chart carries
+ * a single "(Rs in Millions)" caption instead. Pass { exact: true } for full rupees (verification).
+ */
+export const fmtPKR = (v: number | null | undefined, opts: { exact?: boolean } = {}) => {
   if (v == null) return '—';
-  const abs = Math.abs(v);
-  if (opts.short && abs >= 1e7) return `${(v / 1e7).toLocaleString(undefined, { maximumFractionDigits: 2 })} Cr`;
-  if (opts.short && abs >= 1e5) return `${(v / 1e5).toLocaleString(undefined, { maximumFractionDigits: 2 })} Lac`;
-  return v.toLocaleString('en-PK', { maximumFractionDigits: 0 });
+  if (opts.exact) return v.toLocaleString('en-PK', { maximumFractionDigits: 0 });
+  return (v / 1e6).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
+export const MILLIONS = '(Rs in Millions)';
+
 export const fmtPct = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v * 10) / 10}%`);
 
 export const monthLabel = (m: string) => new Date(`${m}-15`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
@@ -72,6 +78,10 @@ export function useCaps() {
     canEnter: posts.has('patwari') || posts.has('wasilbaqi') || posts.has('sci') || posts.has('tehsildar') || posts.has('naib_tehsildar'),
     isOfficer: [...posts].some((p) => !['patwari', 'wasilbaqi', 'sci'].includes(p)) || !!data?.isAdmin,
     roots: data?.roots ?? [],
+    browseRoots: data?.browseRoots ?? [],
+    canCompare: !!data?.canCompare,
+    /** Best starting unit for read-only lists: own jurisdiction if it has staff below it, else the organisation. */
+    viewRoot: (data?.roots ?? []).find((r) => ['division', 'district', 'tehsil', 'qanungoi'].includes(r.type)) ?? data?.browseRoots?.[0] ?? null,
     charges: data?.charges ?? [],
   };
 }

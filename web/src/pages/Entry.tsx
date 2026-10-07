@@ -5,7 +5,7 @@ import { PageHeader } from '../components/AppShell';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, useToast } from '../components/ui';
 import { get, put } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { fmtPKR, fyMonthsUpToNow, monthLabel, useCaps, useFy, type HeadDef, type UnitRef } from '../lib/rev';
+import { MILLIONS, fmtPKR, fyMonthsUpToNow, monthLabel, useCaps, useFy, type HeadDef, type UnitRef } from '../lib/rev';
 
 interface EntryRow {
   head: HeadDef;
@@ -184,8 +184,9 @@ function EntrySheet({ unitId, roUserId, month }: { unitId: string; roUserId?: st
               <Card key={it.head.code} className="p-4">
                 {head(it)}
                 <div className="mb-3 grid grid-cols-2 gap-x-3 text-xs text-slate-500">
-                  <span>Target {fmtPKR(it.target?.target ?? 0)} · YTD {fmtPKR(it.ytd?.cur ?? 0)}</span>
-                  <span>Arrears {fmtPKR(it.target?.arrearDemand ?? 0)} · YTD {fmtPKR(it.ytd?.arr ?? 0)}</span>
+                  <span className="tabular-nums">Target {fmtPKR(it.target?.target ?? 0)} · YTD {fmtPKR(it.ytd?.cur ?? 0)}</span>
+                  <span className="tabular-nums">Arrears {fmtPKR(it.target?.arrearDemand ?? 0)} · YTD {fmtPKR(it.ytd?.arr ?? 0)}</span>
+                  <span className="col-span-2 text-[10px] text-slate-400">Target/YTD {MILLIONS} · enter amounts below in exact Rs</span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Current">{(id) => <Input id={id} type="number" inputMode="decimal" min={0} disabled={locked(it)} value={draft[it.head.code]?.current ?? ''} onChange={set(it.head.code, 'current')} />}</Field>

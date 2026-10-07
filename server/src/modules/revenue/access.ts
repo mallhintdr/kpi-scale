@@ -43,6 +43,20 @@ export async function loadUnit(unitId: string) {
   return unit;
 }
 
+/**
+ * Read-only access: every employee may VIEW performance data for any unit in their organisation
+ * (tenant isolation still applies), so staff can compare themselves up to division level.
+ * Writes keep using assertCanSee / role checks.
+ */
+export async function assertCanRead(_me: AuthUser, unitId: string) {
+  return loadUnit(unitId);
+}
+
+/** Top-level units everyone can browse (all divisions of the organisation). */
+export async function browseRoots() {
+  return Unit.find({ type: 'division' }).select('type name').sort({ name: 1 }).lean();
+}
+
 export async function canSeeUnit(me: AuthUser, unit: { anc: Types.ObjectId[] }) {
   if (atLeast(me.role, 'admin')) return true;
   const roots = (await scopeRoots(me)).map(String);
