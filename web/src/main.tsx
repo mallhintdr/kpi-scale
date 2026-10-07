@@ -1,0 +1,102 @@
+import { StrictMode, Suspense, lazy, type ReactNode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AppShell } from './components/AppShell';
+import { Card, Empty, Spinner, ToastProvider } from './components/ui';
+import { AuthProvider, useAuth } from './lib/auth';
+import { ApiError } from './lib/api';
+import { useCaps } from './lib/rev';
+import './index.css';
+
+const Login = lazy(() => import('./pages/Login'));
+const Home = lazy(() => import('./pages/Home'));
+const UnitView = lazy(() => import('./pages/UnitView'));
+const League = lazy(() => import('./pages/League'));
+const Staff = lazy(() => import('./pages/Staff'));
+const Officer = lazy(() => import('./pages/Officer'));
+const Entry = lazy(() => import('./pages/Entry'));
+const Verify = lazy(() => import('./pages/Verify'));
+const Targets = lazy(() => import('./pages/Targets'));
+const AuditParas = lazy(() => import('./pages/AuditParas'));
+const Tasks = lazy(() => import('./pages/Tasks'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const More = lazy(() => import('./pages/More'));
+const Profile = lazy(() => import('./pages/Profile'));
+const AdminPeople = lazy(() => import('./pages/admin/People'));
+const AdminPostings = lazy(() => import('./pages/admin/Postings'));
+const AdminScoring = lazy(() => import('./pages/admin/Scoring'));
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: true,
+      retry: (n, err) => !(err instanceof ApiError && err.status < 500) && n < 2,
+    },
+  },
+});
+
+const FullScreen = () => (
+  <div className="grid min-h-dvh place-items-center"><Spinner /></div>
+);
+
+function Protected({ children, admin }: { children: ReactNode; admin?: boolean }) {
+  const { session, loading, can } = useAuth();
+  if (loading) return <FullScreen />;
+  if (!session) return <Navigate to="/login" replace />;
+  if (admin && !can('admin')) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+/** /explore → the officer's own jurisdiction */
+function Explore() {
+  const caps = useCaps();
+  if (!caps.loaded) return <div className="py-16 text-center"><Spinner /></div>;
+  if (!caps.roots.length) return <Card className="mt-6"><Empty title="No posting assigned" /></Card>;
+  return <Navigate to={`/units/${caps.roots[0]._id}`} replace />;
+}
+
+function App() {
+  return (
+    <Suspense fallback={<FullScreen />}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route element={<Protected><AppShell /></Protected>}>
+          <Route index element={<Home />} />
+          <Route path="explore" element={<Explore />} />
+          <Route path="units/:id" element={<UnitView />} />
+          <Route path="league" element={<League />} />
+          <Route path="staff" element={<Staff />} />
+          <Route path="officers/:id" element={<Officer />} />
+          <Route path="entry" element={<Entry />} />
+          <Route path="verify" element={<Verify />} />
+          <Route path="targets" element={<Targets />} />
+          <Route path="audit-paras" element={<AuditParas />} />
+          <Route path="tasks" element={<Tasks />} />
+          <Route path="notifications" element={<Notifications />} />
+          <Route path="more" element={<More />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="admin/people" element={<Protected admin><AdminPeople /></Protected>} />
+          <Route path="admin/postings" element={<Protected admin><AdminPostings /></Protected>} />
+          <Route path="admin/scoring" element={<Protected admin><AdminScoring /></Protected>} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <ToastProvider>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </ToastProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
+  </StrictMode>,
+);

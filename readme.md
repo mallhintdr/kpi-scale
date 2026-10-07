@@ -1,103 +1,70 @@
-# Employee Review System
+# Performance Hub
 
-Employee reviews system is a project on performance reviews management of employees. Here the employee need to create there account and login and admin assign feedback to employees to take feedback
-for other employees and admin can see all reviews and assign tasks and view and edit details of all employees also can remove. The admin can promote other employees to admin and also can give feedbacks.
-
-## Table of Contents
-
-- [Introduction](#introduction)
-- [Features](#features)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Technologies Used](#technologies-used)
-- [Folder Structure](#folder-structure)
-- [Code Samples](#code-samples)
-- [Contributors](#contributors)
-
-
-## Introduction
-
-The Employee Review System is designed to streamline the process of employee feedback and performance evaluation. It includes functionalities for both employees and administrators:
-
-- **Employees**: Can submit feedback on their peers' performance which are assigned to them by admin, view received feedback, and view submitted feedbacks.
-- **Administrators**: Have access to an admin dashboard to oversee all reviews, assign feedback tasks, manage employees, and view aggregated performance data.
+Multi-tenant KPI and performance-review platform. It's mobile-first: field officers use it on phones, and managers and admins use it on any screen.
 
 ## Features
+- **Organisations (tenants)**: self-service signup. Every record is isolated per organisation.
+- **Roles**: owner › admin › manager › employee. Managers see their direct reports and the members of departments they head.
+- **Departments**: hierarchy, department heads, member counts.
+- **KPI library**: unit, direction (higher or lower is better), frequency, aggregation (sum, average, or latest), default weight.
+- **Review cycles**: draft → active → closed. Starting a cycle auto-creates self and manager reviews and notifies everyone.
+- **Targets**: assign one KPI to many people at once. People log progress and managers approve or reject entries.
+- **Reviews**: self, manager and peer reviews. Peer reviewers stay anonymous to non-admins.
+- **Scoring**: weighted KPI achievement (capped at 150%), blended with review ratings using the cycle's KPI weight, then banded from Outstanding to Needs focus.
+- **Reports**: org and department overview, score distribution, KPI achievement, top and bottom performers, per-person trend, CSV export.
+- **Notifications**: in-app, with an unread badge.
+- **PWA**: installable on phones, works offline with the last-known data.
 
-- **User Authentication**: Secure login system for employees and admins.
-- **Feedback Submission**: Employees can provide feedback on their peers.
-- **Performance Metrics**: Visualization of performance statistics.
-- **Admin Dashboard**: A dedicated space for administrators to manage reviews and employees and give feedbacks and also can update their feedbacks.
-- **Employee Management**: CRUD operations for employee records.
+## Stack
+| | |
+|---|---|
+| API | Node 22, Express 5, TypeScript, Mongoose 8, Zod, JWT + rotating refresh cookie, Helmet, rate limiting, Pino |
+| Web | React 19, Vite, Tailwind CSS 4, TanStack Query, React Router 7, Recharts, PWA |
+| DB | MongoDB |
 
-## Installation
+## Run locally
+```bash
+# 1. API
+cd server
+cp .env.example .env          # then set real JWT secrets
+npm install
+npm run seed                  # Bahawalpur Division pilot with test data
+npm run dev                   # http://localhost:4000
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/ParmodKumar28/Employee-Review-System.git
+# 2. Web (new terminal)
+cd web
+npm install
+npm run dev                   # http://localhost:5173  (proxies /api to :4000)
+```
+Test logins for the Bahawalpur pilot (password `Password123`): `admin@bwp.test` (BoR admin), `commissioner@bwp.test`, `dc.bahawalpur@bwp.test`, `adc.bahawalpur@bwp.test`, `ac.hasilpur@bwp.test`, `tehsildar.hasilpur@bwp.test`, `naib1.hasilpur@bwp.test`, `wasilbaqi.hasilpur@bwp.test`, `girdawar1.hasilpur@bwp.test`, `patwari1.hasilpur@bwp.test`. The same pattern works for every tehsil (e.g. `ac.yazman@bwp.test`).
 
-2.Navigate to the root directory:
-- cd Employee-Review-System
+Division, districts and tehsils are real; qanungois, patwar circles and mouzas are generated test names marked "(test)", and all figures are random test data.
 
-Install dependenciefa-spin
-- npm install
+## Architecture notes
 
-## Usage
+### Tenant isolation
+- Every tenant-owned collection has a `tenantId` field, and every index starts with it.
+- `server/src/lib/tenantPlugin.ts` injects `tenantId` into **every** query, update, delete and aggregate. It also stamps it on inserts.
+- A query that runs with no tenant in context **throws** rather than leaking data.
+- The tenant comes from the verified access token. It is stored in `AsyncLocalStorage` (`lib/tenantContext.ts`).
+- Cross-tenant code (login, token refresh, seeding) must opt out explicitly with `runUnscoped()`.
+- `bulkWrite` bypasses Mongoose middleware, so it must set `tenantId` itself (see `targets.routes.ts`).
 
-1. Start the application
-- npm Start
+### Auth
+- The access token is a short-lived JWT held only in memory.
+- The refresh token is an httpOnly, SameSite=strict cookie. It is stored as an HMAC hash and rotated on every use.
+- Changing a password or role, or disabling a user, bumps `tokenVersion` and deletes sessions, which revokes access right away.
+- Every request re-checks the user's status and the tenant's status.
 
-2. Access the application in a web browser: `http://localhost:<Port-Number>`
+### Performance
+- Each target stores its current `actualValue` and `achievement` directly on the document. These are updated when entries are written, so dashboards never re-aggregate raw entries.
+- Reports use two aggregations per request.
+- The dashboard loads in a single request.
 
-## Technologies Used
-
-- Node.js
-- Express
-- MongoDB 
-- Mongoose 
-- bcrypt 
-- dotenv 
-- ejs
-- express-session 
-- express-ejs-layouts 
-- cookie-parser 
-
-## Folder Structure 
-`/src`: Contains all project source files 
-`/public`: Public assets like Css folder for style code and assets folder for logo
-`/views`: EJS view templates 
-`/config`: Configration files like database connections
-
-## Routes
--There are three features following mvc pattern in the src folder and there routes are:-
-
-## Feedback Routes
-### feedbackRouter.get('/assigned',auth, getAssignedFeedbacks);
-### feedbackRouter.post('/:feedbackId/submit', auth, postSubmitFeedback);
-### feedbackRouter.get('/received', auth, getFeedbackReceived);
-### feedbackRouter.get('/employees-feedback', auth, getAllEmployeesFeedback);
-### feedbackRouter.post('/:feedbackId/update', auth, postUpdateFeedback);
-   
-## Employee Routes
-### employeeRouter.get('/', auth, getEmployeeHomePage);
-### employeeRouter.get('/register', getSignInForm);
-### employeeRouter.post('/signup', registerUser);
-### employeeRouter.post('/signin', signIn);
-### employeeRouter.get('/logout', logout);
-### Admin features
-### employeeRouter.get('/:employeeId/delete', auth, deleteEmployee);
-### employeeRouter.post('/:employeeId/update', auth, updateEmployee);
-
-## Admin Routes
-### adminRouter.get('/', auth, getAdminHomePage);
-### adminRouter.get('/assign', auth, getAssignPage);
-### adminRouter.post('/assign', auth, postAssignFeedback);
-### adminRouter.post('/add-employee', auth, postAddNewEmployee);
-### adminRouter.get('/employees', auth, getAllEmployees);
-
-## Thankyou, I tried to make this project ui cool enough and attractive and easy to use and i used Html, Css, Javascript and Bootstrap for that and i hope you will like this.
-Follow on github for more.
-
-### Github Repository: - https://github.com/ParmodKumar28/Employee-Review-System
-### Hosted Url:-  https://employee-review-system-r8tw.onrender.com/api/employee/register
-### Video Link: - https://youtu.be/mvHhUozvC0w
+## Scaling roadmap
+1. **Redis**: cache report results per tenant, cycle and scope; distributed rate-limit store; cache the user and tenant lookups done on each request.
+2. **Job queue (BullMQ)**: move cycle activation, bulk notifications and report pre-computation off the request path. Add email, SMS and web-push workers.
+3. **MongoDB Atlas**: replica set first; shard on `{ tenantId: 1, _id: 1 }` once a single cluster is outgrown.
+4. **Snapshots**: write a frozen score snapshot per person when a cycle closes, so history never changes.
+5. **Ops**: Dockerfiles, CI (typecheck, build, tests), integration tests for tenant isolation, OpenTelemetry tracing, run `syncIndexes` in deploys (autoIndex is off in production).
+6. **Product**: invitations by email, SSO, bulk CSV import of people and targets, custom review questions, per-tenant branding, audit log viewer.

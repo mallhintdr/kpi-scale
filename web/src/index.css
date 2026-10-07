@@ -1,0 +1,96 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Noto Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Government of the Punjab green + gold */
+  --color-brand-50: #ecf6ef;
+  --color-brand-100: #d2eadb;
+  --color-brand-200: #a7d4b7;
+  --color-brand-500: #2e9e5e;
+  --color-brand-600: #1e874b;
+  --color-brand-700: #187a43;
+  --color-brand-800: #146b3a;
+  --color-brand-900: #0f5a30;
+  --color-gold-400: #d9b84a;
+  --color-gold-500: #c9a227;
+}
+
+
+/* ---------- Chart tokens (validated: green/blue pass CVD + normal-vision checks in both modes) ---------- */
+:root {
+  --viz-s1: #1e874b;          /* this year / primary series (brand green) */
+  --viz-s2: #2a78d6;          /* comparison series (blue) */
+  --viz-pace: #898781;        /* expected pace / reference line */
+  --viz-track: #eef0ec;       /* unfilled track */
+  --viz-pending: #c9cfc6;     /* "still pending" segment */
+  --viz-grid: #e6e8e3;
+  --viz-axis: #94a3a0;
+  --viz-surface: #ffffff;
+  --st-good: #0ca30c;
+  --st-ok: #2a78d6;
+  --st-warning: #e09a00;
+  --st-serious: #ec835a;
+  --st-critical: #d03b3b;
+  --st-none: #a3a3a3;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    --viz-s1: #2e9e5e;
+    --viz-s2: #3987e5;
+    --viz-track: #1e293b;
+    --viz-pending: #475569;
+    --viz-grid: #263241;
+    --viz-axis: #7b8794;
+    --viz-surface: #0f172a;
+    --st-ok: #3987e5;
+    --st-warning: #fab219;
+  }
+}
+:root[data-theme='dark'] {
+  --viz-s1: #2e9e5e;
+  --viz-s2: #3987e5;
+  --viz-track: #1e293b;
+  --viz-pending: #475569;
+  --viz-grid: #263241;
+  --viz-axis: #7b8794;
+  --viz-surface: #0f172a;
+  --st-ok: #3987e5;
+  --st-warning: #fab219;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-[#f6f8f5] text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    overscroll-behavior-y: none;
+  }
+  /* 16px inputs stop iOS from zooming on focus */
+  input, select, textarea {
+    font-size: 16px;
+  }
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-sheet { animation: sheet-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.animate-fade { animation: fade-in 160ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet, .animate-fade { animation: none; }
+}
