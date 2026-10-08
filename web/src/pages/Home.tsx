@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, MapPin } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { PageHeader, useUnread, visibleNav } from '../components/AppShell';
+import { Link, useNavigate } from 'react-router-dom';
+import { PageHeader } from '../components/AppShell';
 import { BlockBars, FyPicker, RevBandBadge } from '../components/rev';
 import { Card, Empty, Loading, SectionTitle } from '../components/ui';
-import { Bullet, MetricCard, ScoreGauge, type MetricCardProps } from '../components/charts';
+import { MetricCard, ScoreGauge, type MetricCardProps } from '../components/charts';
 import { useViewMode } from '../lib/mode';
+import { TargetCard, useAssigned } from '../components/targets';
+import { TargetSummary } from './Assigned';
 import { get } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { MILLIONS, UNIT_LABEL, fmtPKR, useCaps, useFy, type Block, type RevBand } from '../lib/rev';
@@ -19,15 +20,11 @@ export default function Home() {
   const [fy] = useFy();
   const elapsed = (() => { const y = Number(fy.slice(0, 4)); const st = new Date(y, 6, 1).getTime(); return Math.max(0, Math.min(100, ((Date.now() - st) / (new Date(y + 1, 6, 1).getTime() - st)) * 100)); })();
   const [mode] = useViewMode();
-  const perf = mode === 'performance';
+  const perf = mode !== 'kpi';
+  const tmode = mode === 'targets';
   const myScore = useQuery({ queryKey: ['rev', 'my-score', fy], queryFn: () => get<{ items: MyScore[] }>(`/rev/my-score?fy=${fy}`), enabled: !!fy });
-  const pendingVerify = useQuery({ queryKey: ['rev', 'verify'], queryFn: () => get<unknown[]>('/rev/verify'), enabled: caps.isWasilBaqi && !caps.isAdmin });
-  const openTasks = useQuery({ queryKey: ['rev', 'tasks', 'mine', 'open'], queryFn: () => get<unknown[]>('/rev/tasks?box=mine&status=open') });
   const primary = caps.roots[0];
   const unit = useUnit(primary?._id, fy);
-  const { data: unread = 0 } = useUnread();
-  const modules = visibleNav(caps).filter((n) => n.to !== '/');
-  const counts: Record<string, number | undefined> = { '/verify': pendingVerify.data?.length, '/tasks': openTasks.data?.length, '/notifications': unread };
 
   const h = new Date().getHours();
   const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
@@ -40,15 +37,10 @@ export default function Home() {
         actions={<FyPicker />}
       />
 
-      {/* Every module this officer can use, same list as the menu */}
-      <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-3 sm:gap-2 lg:grid-cols-4 xl:grid-cols-6">
-        {modules.map((m) => (
-          <Action key={m.to} to={m.to === '/explore' && primary ? `/units/${primary._id}` : m.to} icon={m.icon} label={m.label} count={counts[m.to]} />
-        ))}
-      </div>
-
       {/* Personal scores */}
-      {myScore.data?.items.length ? (
+      {tmode && <MyTargets />}
+
+      {!tmode && myScore.data?.items.length ? (
         <>
           <SectionTitle>My performance · FY {fy}</SectionTitle>
           <div className={`grid gap-3 ${myScore.data.items.length > 1 ? '2xl:grid-cols-2' : ''}`}>
@@ -128,14 +120,15 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
           const p = c.total > 0 ? Math.min(100, (c.achieved / c.total) * 100) : null;
           const row = (
             <div className="px-3 py-2.5">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="min-w-0 truncate text-[13px] font-medium text-slate-800 dark:text-slate-100">{c.title}</span>
-                <span className="shrink-0 text-sm font-bold text-slate-900 tabular-nums dark:text-white">{p == null ? '—' : `${Math.round(p)}%`}</span>
-              </div>
-              <div className="my-1.5"><Bullet value={p} pace={c.pace} height={6} /></div>
-              <div className="flex justify-between gap-2 text-[11px] text-slate-600 tabular-nums dark:text-slate-300">
-                <span>{c.fmt(c.achieved)} / {c.fmt(c.total)}</span>
-                <span>{c.labels?.balance ?? 'Balance'} {c.fmt(Math.max(0, c.total - c.achieved))}</span>
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-medium text-slate-800 dark:text-slate-100">{c.title}</div>
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-slate-600 tabular-nums dark:text-slate-300">
+                    <span>{c.fmt(c.achieved)} / {c.fmt(c.total)}</span>
+                    <span>{c.labels?.balance ?? 'Balance'} {c.fmt(Math.max(0, c.total - c.achieved))}</span>
+                  </div>
+                </div>
+                <span className="shrink-0 text-base font-bold text-slate-900 tabular-nums dark:text-white">{p == null ? '—' : `${Math.round(p)}%`}</span>
               </div>
             </div>
           );
@@ -143,31 +136,112 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
         })}
         <div className="py-1.5 text-center text-[10px] font-medium text-slate-400">Revenue {MILLIONS} · cases, paras and tasks as counts</div>
       </Card>
-      <div className="hidden grid-cols-1 gap-2 sm:grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-        {cards.map(({ code, ...c }) =>
-          canDrill ? (
-            <Link key={code} to={`/staff?head=${code}`} title={`See every officer's ${c.title}`} className="group block rounded-xl transition hover:-translate-y-px hover:shadow-md">
-              <MetricCard {...c} compact action={<ChevronRight className="size-4 text-slate-300 group-hover:text-brand-600" />} />
-            </Link>
-          ) : (
-            <MetricCard key={code} {...c} compact />
-          ),
-        )}
-      </div>
+      <KpiTable cards={cards} canDrill={canDrill} />
       {canDrill && <p className="mt-1.5 px-1 text-[11px] text-slate-400">Tap a KPI to see every subordinate ranked on it.</p>}
     </>
   );
 }
 
-function Action({ to, icon: Icon, label, count }: { to: string; icon: typeof MapPin; label: string; count?: number }) {
+type KpiRowData = MetricCardProps & { code: string };
+const GROUPS: { key: string; label: string }[] = [
+  { key: 'Revenue', label: `Revenue · ${MILLIONS}` },
+  { key: 'Cases', label: 'Case registers · (cases)' },
+  { key: 'Other', label: 'Audit paras & tasks' },
+];
+
+/** Desktop / tablet KPI view: one aligned table, grouped by category, one KPI per row. */
+function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean }) {
+  const navigate = useNavigate();
+  const th = 'border-b border-r border-white/50 px-3 py-2.5 text-center font-semibold';
+  const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-3 py-2 text-right tabular-nums dark:border-slate-700';
+  let n = 0;
   return (
-    <Link to={to}>
-      {/* Phones: icon tile with a short label. Larger screens: icon + label row. */}
-      <Card className="relative flex h-full flex-col items-center gap-1 p-2 text-center transition hover:ring-brand-200 sm:flex-row sm:gap-2.5 sm:p-2.5 sm:text-left">
-        <span className="grid size-9 place-items-center rounded-lg bg-brand-50 text-brand-700 sm:size-8 dark:bg-brand-500/15 dark:text-brand-200"><Icon className="size-[18px] sm:size-4" /></span>
-        <span className="min-w-0 flex-1 text-[11px] font-medium leading-tight sm:text-sm">{label}</span>
-        {!!count && <span className="absolute right-1 top-1 rounded-full bg-rose-500 px-1.5 text-[10px] font-semibold text-white sm:static sm:px-2 sm:text-xs">{count}</span>}
-      </Card>
-    </Link>
+    <Card className="hidden overflow-hidden sm:block">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[13px]">
+          <thead className="bg-brand-700 text-center text-[12.5px] uppercase tracking-wide text-white">
+            <tr>
+              <th className="w-10 border-b border-r border-white/50 px-1 py-2.5 text-center font-semibold">#</th>
+              <th className="border-b border-r border-white/50 px-3 py-2.5 text-center font-semibold">KPI</th>
+              <th className={th}>Target</th>
+              <th className={th}>Achieved</th>
+              <th className={th}>Balance</th>
+              <th className={th}>Expected by now</th>
+              <th className={th}>Ahead / short</th>
+              <th className="w-16 border-b border-white/50 px-3 py-2.5 text-center font-semibold">%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {GROUPS.map((g) => {
+              const rows = cards.filter((c) => c.eyebrow === g.key);
+              if (!rows.length) return null;
+              return [
+                <tr key={g.key}>
+                  <td colSpan={8} className="border-b border-slate-300 bg-brand-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-800 dark:border-slate-600 dark:bg-brand-500/10 dark:text-brand-200">{g.label}</td>
+                </tr>,
+                ...rows.map((c) => {
+                  n += 1;
+                  const p = c.total > 0 ? Math.min(100, (c.achieved / c.total) * 100) : null;
+                  const expected = c.pace != null && c.total > 0 ? (c.total * c.pace) / 100 : null;
+                  const gap = expected != null ? c.achieved - expected : null;
+                  return (
+                    <tr key={c.code} onClick={canDrill ? () => navigate(`/staff?head=${c.code}`) : undefined}
+                      title={canDrill ? `See every officer's ${c.title}` : undefined}
+                      className={canDrill ? 'group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60' : ''}>
+                      <td className="border-b border-r border-b-slate-200 border-r-slate-300 text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700">{n}</td>
+                      <td className="border-b border-r border-b-slate-200 border-r-slate-300 px-3 py-2 dark:border-slate-700">
+                        <span className="font-medium text-slate-900 decoration-2 underline-offset-2 group-hover:underline dark:text-white">{c.title}</span>
+                        {c.extras?.filter((e) => e.label === 'Unverified').map((e) => <span key={e.label} className="ml-2 text-[11px] font-medium text-amber-700">+{e.value} unverified</span>)}
+                      </td>
+                      <td className={td}>{c.fmt(c.total)}</td>
+                      <td className={`${td} font-semibold text-slate-900 dark:text-white`}>{c.fmt(c.achieved)}</td>
+                      <td className={td}>{c.fmt(Math.max(0, c.total - c.achieved))}</td>
+                      <td className={`${td} text-slate-500`}>{expected == null ? '—' : c.fmt(expected)}</td>
+                      <td className={`${td} font-medium ${gap == null ? 'text-slate-400' : gap >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}`}>
+                        {gap == null ? '—' : `${gap >= 0 ? '+' : '−'}${c.fmt(Math.abs(gap))}`}
+                      </td>
+                      <td className="border-b border-b-slate-200 px-3 py-2 text-right font-bold text-slate-900 tabular-nums dark:border-slate-700 dark:text-white">{p == null ? '—' : `${Math.round(p)}%`}</td>
+                    </tr>
+                  );
+                }),
+              ];
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="border-t border-slate-200 px-3 py-1.5 text-center text-[10px] font-medium text-slate-400 dark:border-slate-700">
+        "Expected by now" assumes an even pace through the year; crop heads (Rabi / Kharif) are seasonal and show "—".
+      </div>
+    </Card>
+  );
+}
+
+/** Targets mode on Home: targets assigned to me (and, for officers, the ones I assigned). */
+function MyTargets() {
+  const { user } = useMe();
+  const caps = useCaps();
+  const mine = useAssigned('mine', undefined, 'all');
+  const byMe = useAssigned('assigned', undefined, 'all');
+  const open = (mine.data ?? []).filter((t) => t.state === 'running' || t.state === 'upcoming');
+  return (
+    <>
+      <SectionTitle action={<Link to="/assigned" className="text-[13px] font-medium text-brand-600 hover:underline">All targets →</Link>}>My assigned targets</SectionTitle>
+      {mine.isLoading ? <Loading /> : !mine.data?.length ? (
+        <Card><Empty title="No targets assigned to you yet" /></Card>
+      ) : (
+        <>
+          <TargetSummary items={mine.data} />
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {(open.length ? open : mine.data.slice(0, 3)).map((t) => <TargetCard key={t._id} t={t} viewer={user.id} compact />)}
+          </div>
+        </>
+      )}
+      {caps.isOfficer && !!byMe.data?.length && (
+        <>
+          <SectionTitle action={<Link to="/assigned?box=assigned" className="text-[13px] font-medium text-brand-600 hover:underline">Manage →</Link>}>Targets I assigned</SectionTitle>
+          <TargetSummary items={byMe.data} />
+        </>
+      )}
+    </>
   );
 }

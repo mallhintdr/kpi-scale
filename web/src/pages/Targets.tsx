@@ -103,7 +103,7 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
       </Card>
       <Card className="hidden overflow-x-auto sm:block">
         <table className="w-full min-w-[420px] text-sm">
-          <thead className="sticky top-0 bg-brand-700 text-left text-xs text-white">
+          <thead className="sticky top-0 bg-brand-700 text-center text-[14px] text-white">
             <tr className="border-b border-slate-100 dark:border-slate-800">
               <th className="w-12 border-r border-white/20 px-2 py-2.5 text-center font-medium">#</th>
               <th className="border-r border-white/20 px-3 py-2.5 font-medium">{data.head.level === 'ro' ? 'Revenue officer' : 'Patwar circle'}</th>

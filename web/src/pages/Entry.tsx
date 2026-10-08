@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Save } from 'lucide-react';
+import { ListChecks, Save } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/AppShell';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, useToast } from '../components/ui';
@@ -65,7 +66,7 @@ export default function Entry() {
 
   return (
     <>
-      <PageHeader title="Enter figures" subtitle={`FY ${fy}`} />
+      <PageHeader title="Enter figures" subtitle={`FY ${fy}`} actions={(caps.isPatwari || caps.isWasilBaqi) && <Link to="/audit-paras" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50"><ListChecks className="size-4" />Audit paras</Link>} />
       {!caps.canEnter ? <Card><Empty title="No data entry rights" body="Data is entered by Patwaris, Wasil Baqi Navees and Revenue Officers." /></Card> : (
         <>
           <Card className="mb-4 space-y-3 p-4">

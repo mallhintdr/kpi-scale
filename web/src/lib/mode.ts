@@ -3,17 +3,19 @@ import { useSyncExternalStore } from 'react';
 /**
  * View mode:
  *  - 'performance' (default): plain achievement — % of target achieved and amounts recovered.
+ *  - 'targets': assigned short-term targets (week / 15 days / month) — target vs achievement.
  *  - 'kpi': weighted KPI evaluation — composite scores, blocks, bands and score rankings.
  * Remembered per device.
  */
-export type ViewMode = 'performance' | 'kpi';
+export type ViewMode = 'performance' | 'targets' | 'kpi';
 
 const KEY = 'view-mode';
 const listeners = new Set<() => void>();
 
 const read = (): ViewMode => {
   try {
-    return localStorage.getItem(KEY) === 'kpi' ? 'kpi' : 'performance';
+    const v = localStorage.getItem(KEY);
+    return v === 'kpi' || v === 'targets' ? v : 'performance';
   } catch {
     return 'performance';
   }

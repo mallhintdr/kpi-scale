@@ -103,6 +103,28 @@ export function Ring({ value, size = 56, stroke = 6, children }: { value: number
   );
 }
 
+/** Compact donut for table cells: coloured arc for the %, the % itself in the middle. */
+export function MiniRing({ value, size = 38 }: { value: number | null | undefined; size?: number }) {
+  const stroke = Math.max(3.5, size * 0.11);
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = Math.min(100, Math.max(0, value ?? 0)) / 100;
+  return (
+    <div className="relative grid shrink-0 place-items-center" style={{ width: size, height: size }} role="img" aria-label={value == null ? 'No data' : `${Math.round(value)}%`}>
+      <svg width={size} height={size} className="-rotate-90" aria-hidden>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} stroke="var(--viz-track)" />
+        {value != null && pct > 0 && (
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} stroke={revColor(value)} strokeLinecap={pct >= 1 ? 'butt' : 'round'} strokeDasharray={c} strokeDashoffset={c * (1 - pct)} />
+        )}
+      </svg>
+      <span className="absolute font-bold text-slate-900 tabular-nums dark:text-white" style={{ fontSize: size * 0.27 }}>
+        {value == null ? '—' : Math.round(value)}
+        {value != null && <span style={{ fontSize: size * 0.18 }}>%</span>}
+      </span>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Bullet bar: fill = achieved, track = remainder, tick = expected pace */
 /* ------------------------------------------------------------------ */

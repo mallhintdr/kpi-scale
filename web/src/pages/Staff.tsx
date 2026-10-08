@@ -1,14 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Download, Search } from 'lucide-react';
+import { Download, Search } from 'lucide-react';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { achievement, useViewMode } from '../lib/mode';
+import { useTargetSummary } from '../components/targets';
 import { PageHeader } from '../components/AppShell';
 import { BandChip } from '../components/charts';
 import { FyPicker, UnitField } from '../components/rev';
 import { Card, Empty, ErrorState, Field, Input, Loading, Select } from '../components/ui';
 import { get } from '../lib/api';
-import { fmtPKR, revColor, useCaps, useFy, useMeta, type Block, type Post, type RevBand, type UnitRef } from '../lib/rev';
+import { fmtPKR, useCaps, useFy, useMeta, type Block, type Post, type RevBand, type UnitRef } from '../lib/rev';
 import { POSTS_BY_UNIT } from './League';
 
 interface Cell { pct: number | null; done: number; of: number }
@@ -16,6 +17,7 @@ interface StaffRow {
   user: { _id: string; name: string; designation?: string; bps?: number; phone?: string };
   charges: string[]; context: string; score: number | null; band: RevBand; blocks: Record<Block, number | null>;
   rank: number | null; target: number; collected: number; heads: Record<string, Cell>;
+  unitId: string; chargeType: string; chargeCount: number; district?: string; tehsil?: string;
 }
 
 const EXTRA: { code: string; name: string; money?: boolean }[] = [
@@ -55,9 +57,12 @@ export default function Staff() {
     return [...heads, ...EXTRA.filter((e) => present.has(e.code)).map((e) => ({ ...e, group: 'Other', money: !!e.money }))];
   }, [data, meta]);
   const [mode] = useViewMode();
-  const perf = mode === 'performance';
-  // Overall column: revenue achievement (Performance) or weighted KPI score (KPI evaluation)
+  const perf = mode !== 'kpi';
+  const tmode = mode === 'targets';
+  const tsum = useTargetSummary(unit?._id, post, fy, tmode);
+  // Overall column: revenue achievement (Performance), assigned-target achievement (Targets) or KPI score
   const overall = (r: StaffRow) => {
+    if (tmode) return tsum.get(`${r.user._id}|${r.unitId}`)?.pct ?? null;
     if (!perf) return r.score;
     const rev = Object.entries(r.heads).filter(([k]) => meta?.heads.some((h) => h.code === k && h.kind === 'revenue'));
     return achievement(rev.reduce((s, [, c]) => s + c.done, 0), rev.reduce((s, [, c]) => s + c.of, 0));
@@ -69,11 +74,16 @@ export default function Staff() {
     .filter((r) => !term || r.user.name.toLowerCase().includes(term) || r.charges.join(' ').toLowerCase().includes(term))
     .sort((a, b) => (focus ? (b.heads[focus]?.pct ?? -1) - (a.heads[focus]?.pct ?? -1) : 0));
   const focusName = focus && columns.find((c) => c.code === focus)?.name;
+  // Show District / Tehsil columns only when the list spans more than one of them
+  const multiDistrict = new Set(rows.map((r) => r.district)).size > 1;
+  const multiTehsil = new Set(rows.map((r) => r.tehsil)).size > 1;
+  // Clicked row stays highlighted so the officer's figures can be read across the whole table
+  const [selected, setSelected] = useState<string | null>(null);
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Rank', 'Name', 'BPS', 'Charge', 'Area', perf ? 'Revenue achievement %' : 'KPI score', ...columns.flatMap((c) => [`${c.name} %`, `${c.name} done`, `${c.name} of`])];
-    const lines = rows.map((r) => [r.rank, r.user.name, r.user.bps, r.charges.join(' + '), r.context, r.overall == null ? '' : Math.round(r.overall * 10) / 10, ...columns.flatMap((c) => [r.heads[c.code]?.pct, r.heads[c.code]?.done, r.heads[c.code]?.of])].map(esc).join(','));
+    const header = ['S.No', ...(multiDistrict ? ['District'] : []), ...(multiTehsil ? ['Tehsil'] : []), 'Name', 'Area', 'BPS', perf ? 'Revenue achievement %' : 'KPI score', ...columns.flatMap((c) => [`${c.name} %`, `${c.name} done`, `${c.name} of`])];
+    const lines = rows.map((r) => [r.rank, ...(multiDistrict ? [r.district] : []), ...(multiTehsil ? [r.tehsil] : []), r.user.name, r.charges.join(' + '), r.user.bps, r.overall == null ? '' : Math.round(r.overall * 10) / 10, ...columns.flatMap((c) => [r.heads[c.code]?.pct, r.heads[c.code]?.done, r.heads[c.code]?.of])].map(esc).join(','));
     const url = URL.createObjectURL(new Blob([[header.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv' }));
     Object.assign(document.createElement('a'), { href: url, download: `staff-${post}-${unit?.name}-${fy}.csv` }).click();
     URL.revokeObjectURL(url);
@@ -104,72 +114,92 @@ export default function Staff() {
         <>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
             <span>
-              {rows.length} {data?.postLabel ?? 'officers'} · revenue figures (Rs in Millions) · tap a name for the full profile
+              {rows.length} {data?.postLabel ?? 'officers'} · revenue figures (Rs in Millions) · tap a row to highlight it · tap a name for the profile
               {focusName && (
                 <> · sorted by <b className="text-slate-700 dark:text-slate-200">{focusName}</b>{' '}
                   <button className="font-medium text-brand-600 hover:underline" onClick={() => setParams({}, { replace: true })}>clear</button>
                 </>
               )}
             </span>
-            <span className="flex items-center gap-3">
-              {[95, 80, 65, 50, 20].map((v, i) => (
-                <span key={v} className="inline-flex items-center gap-1"><span className="size-2.5 rounded-sm" style={{ background: revColor(v) }} />{['≥90', '75–89', '60–74', '40–59', '<40'][i]}</span>
-              ))}
-            </span>
           </div>
           <Card className="overflow-hidden">
             <div className="max-h-[70vh] overflow-auto">
               <table className="w-max min-w-full border-separate border-spacing-0 text-sm">
-                <thead className="sticky top-0 z-20 bg-brand-700 text-left text-[11px] font-semibold uppercase tracking-wide text-white">
+                {/* Two header rows: group (head) on top, its sub-columns below. Headers ~15% larger, centred. */}
+                <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white">
                   <tr>
-                    <th className="sticky left-0 z-30 w-10 min-w-10 border-r border-white/20 bg-brand-700 px-1 py-2.5 text-center">#</th>
-                    <th className="sticky left-10 z-30 border-r border-white/20 bg-brand-700 px-3 py-2.5">Officer</th>
-                    <th className="border-r border-white/20 px-3 py-2.5 text-center">{perf ? 'Revenue achieved' : 'KPI score'}</th>
+                    <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2.5">#</th>
+                    {multiDistrict && <th rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">District</th>}
+                    {multiTehsil && <th rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">Tehsil</th>}
+                    <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2.5">Name</th>
+                    <th rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">Area</th>
+                    {perf ? (
+                      <th colSpan={4} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-3 py-2">{tmode ? 'Assigned targets' : 'Revenue (all heads)'}</th>
+                    ) : (
+                      <th rowSpan={2} className="border-b border-r-2 border-white/60 border-r-white/80 px-3 py-2.5">KPI score</th>
+                    )}
                     {columns.map((c) => (
                       <th
                         key={c.code}
+                        colSpan={4}
                         ref={c.code === focus ? (el) => el?.scrollIntoView({ inline: 'center', block: 'nearest' }) : undefined}
                         onClick={() => setParams({ head: c.code }, { replace: true })}
-                        className={`max-w-28 cursor-pointer border-r border-white/20 px-2 py-2.5 text-center normal-case leading-tight tracking-normal hover:bg-brand-600 ${c.code === focus ? 'bg-brand-900 text-gold-400' : ''}`}
+                        className={`cursor-pointer border-b border-r-2 border-b-white/30 border-r-white/80 px-2 py-2 leading-tight hover:bg-brand-600 ${c.code === focus ? 'bg-brand-900 text-gold-400' : ''}`}
                         title={`Sort by ${c.name}`}
                       >
-                        {c.name.replace('Water Rate — ', 'WR ').replace('Tawan — ', 'Tawan ').replace(' (State Land)', '')}
+                        {c.name}
                       </th>
                     ))}
                   </tr>
+                  <tr className="bg-brand-600 text-[11.5px] font-medium text-brand-50">
+                    {perf && (tmode ? ['Assigned', 'Met', 'Not met', '%'] : ['Target', 'Recovered', 'Balance', '%']).map((l, i) => (
+                      <th key={`o${l}`} className={`border-b border-white/30 px-2.5 py-1.5 ${i === 3 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25'}`}>{l}</th>
+                    ))}
+                    {columns.flatMap((c) => subLabels(c.code, c.money).map((l, i) => (
+                      <th key={c.code + l} className={`border-b border-white/30 px-2.5 py-1.5 ${i === 3 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25'}`}>{l}</th>
+                    )))}
+                  </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.user._id} className="group">
-                      <td className="sticky left-0 z-10 w-10 min-w-10 border-b border-r border-slate-200 bg-white px-1 py-2 text-center text-xs font-bold text-slate-500 tabular-nums group-hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:group-hover:bg-slate-800">{r.rank ?? '–'}</td>
-                      <td className="sticky left-10 z-10 border-b border-r border-slate-200 bg-white px-3 py-2 group-hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:group-hover:bg-slate-800">
-                        <Link to={`/officers/${r.user._id}?fy=${fy}`} className="flex items-center gap-2.5">
-                          <div className="min-w-0 max-w-[6.5rem] sm:max-w-44">
-                            <div className="truncate font-medium text-slate-900 dark:text-white">{r.user.name}</div>
-                            <div className="truncate text-[11px] text-slate-500">{r.charges.join(', ')}</div>
-                          </div>
-                          <ChevronRight className="hidden size-3.5 text-slate-300 sm:block" />
+                  {rows.map((r) => {
+                    const key = `${r.user._id}-${r.unitId}`;
+                    const on = selected === key;
+                    const stickyBg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800';
+                    const ts = tsum.get(`${r.user._id}|${r.unitId}`);
+                    return (
+                    <tr key={key} onClick={() => setSelected(on ? null : key)} aria-selected={on}
+                      className={`group cursor-pointer ${on ? 'bg-amber-100 outline outline-2 -outline-offset-2 outline-amber-400 dark:bg-amber-500/25' : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
+                      <td className={`sticky left-0 z-10 w-10 min-w-10 border-b border-r border-b-slate-300 border-r-slate-400 px-1 py-2 text-center text-xs font-bold text-slate-500 tabular-nums dark:border-slate-700 ${stickyBg}`}>{r.rank ?? '–'}</td>
+                      {multiDistrict && <td className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[13px] dark:border-slate-700">{r.district}</td>}
+                      {multiTehsil && <td className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[13px] dark:border-slate-700">{r.tehsil}</td>}
+                      <td className={`sticky left-10 z-10 border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 dark:border-slate-700 ${stickyBg}`}>
+                        <Link to={`/officers/${r.user._id}?fy=${fy}`} onClick={(e) => e.stopPropagation()} title={`Open ${r.user.name}'s profile`}
+                          className={`block max-w-[7.5rem] truncate font-medium text-slate-900 sm:max-w-48 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline ${on ? 'underline' : ''}`}>
+                          {r.user.name}
                         </Link>
                       </td>
-                      <td className="border-b border-r border-slate-200 px-3 py-2 text-center dark:border-slate-700">
-                        {perf ? (
-                          <div className="min-w-[8rem] text-left">
-                            <div className="flex items-baseline justify-between gap-3">
-                              <span className="text-[12px] font-medium text-slate-800 tabular-nums dark:text-slate-100">{fmtPKR(r.collected)} / {fmtPKR(r.target)}</span>
-                              <span className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{r.overall == null ? '—' : `${Math.round(r.overall)}%`}</span>
-                            </div>
-                            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'var(--viz-track)' }}><div className="h-full rounded-full" style={{ width: `${r.overall ?? 0}%`, background: revColor(r.overall) }} /></div>
-                          </div>
+                      <td className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[12px] text-slate-700 dark:border-slate-700 dark:text-slate-300">
+                        {r.charges.join(', ').replace(' (test)', '')}
+                        {r.chargeType !== 'regular' && <span className="ml-1.5 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">{r.chargeType === 'additional' ? 'Addl. charge' : 'Look after'}</span>}
+                      </td>
+                      {perf ? (
+                        tmode ? (
+                          <Quad values={ts ? [String(ts.targets), String(ts.met), String(ts.targets - ts.met), null] : ['—', '—', '—', null]} pct={ts ? ts.pct : null} />
                         ) : (
+                          <Quad values={[fmtPKR(r.target), fmtPKR(r.collected), fmtPKR(Math.max(0, r.target - r.collected)), null]} pct={r.overall} strong={1} />
+                        )
+                      ) : (
+                        <td className="border-b border-r-2 border-b-slate-300 border-r-slate-500 px-3 py-2 text-center dark:border-slate-700">
                           <div className="flex items-center justify-center gap-2">
                             <span className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{r.overall == null ? '—' : Math.round(r.overall)}</span>
                             <BandChip band={r.band} />
                           </div>
-                        )}
-                      </td>
-                      {columns.map((c) => <HeadCell key={c.code} cell={r.heads[c.code]} money={c.money} name={c.name} focus={c.code === focus} />)}
+                        </td>
+                      )}
+                      {columns.map((c) => <HeadCells key={c.code} cell={r.heads[c.code]} money={c.money} focus={c.code === focus && !on} />)}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -180,23 +210,45 @@ export default function Staff() {
   );
 }
 
-function HeadCell({ cell, money, name, focus }: { cell?: Cell; money?: boolean; name: string; focus?: boolean }) {
-  const hl = focus ? 'bg-brand-50/60 dark:bg-brand-500/10' : '';
-  if (!cell) return <td className={`border-b border-r border-slate-200 px-2 py-2 text-center text-xs text-slate-300 dark:border-slate-700 ${hl}`}>—</td>;
-  const v = cell.pct;
-  const detail = money ? `${fmtPKR(cell.done)} / ${fmtPKR(cell.of)}` : `${cell.done.toLocaleString()} / ${cell.of.toLocaleString()}`;
+/** Sub-column labels for a head group. */
+function subLabels(code: string, money: boolean) {
+  if (code === 'AUDIT') return ['Paras', 'Settled', 'Pending', '% rec.'];
+  if (code === 'TASKS') return ['Due', 'On time', 'Late', '%'];
+  if (code === 'ARREARS') return ['Arrears', 'Recovered', 'Balance', '%'];
+  return money ? ['Target', 'Recovered', 'Balance', '%'] : ['Total', 'Disposed', 'Pending', '%'];
+}
+
+const subTd = (i: number, extra = '') =>
+  `whitespace-nowrap border-b border-b-slate-300 px-2.5 py-2 text-right tabular-nums dark:border-slate-700 ${i === 3 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700'} ${extra}`;
+
+/** % with a small status dot (text stays in ink). */
+const Pct = ({ v }: { v: number | null | undefined }) =>
+  v == null ? <span className="text-slate-300">—</span> : (
+    <span className="font-bold text-slate-900 dark:text-white">{Math.round(v)}%</span>
+  );
+
+/** Four cells: three figures and the %. */
+function Quad({ values, pct, strong }: { values: (string | null)[]; pct: number | null | undefined; strong?: number }) {
   return (
-    <td className={`whitespace-nowrap border-b border-r border-slate-200 px-2.5 py-1.5 dark:border-slate-700 ${hl}`} title={`${name}: ${detail}`}>
-      {/* Figures on top (achieved / target · %), bar underneath */}
-      <div className="min-w-[7.5rem]">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[12px] font-medium text-slate-800 tabular-nums dark:text-slate-100">{detail}</span>
-          <span className="text-[13px] font-bold text-slate-900 tabular-nums dark:text-white">{v == null ? '—' : `${Math.round(v)}%`}</span>
-        </div>
-        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'var(--viz-track)' }}>
-          <div className="h-full rounded-full" style={{ width: `${Math.min(100, v ?? 0)}%`, background: revColor(v) }} />
-        </div>
-      </div>
-    </td>
+    <>
+      {values.slice(0, 3).map((v, i) => (
+        <td key={i} className={subTd(i, i === strong ? 'font-semibold text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300')}>{v}</td>
+      ))}
+      <td className={subTd(3)}><Pct v={pct} /></td>
+    </>
+  );
+}
+
+function HeadCells({ cell, money, focus }: { cell?: Cell; money?: boolean; focus?: boolean }) {
+  const hl = focus ? 'bg-brand-50/60 dark:bg-brand-500/10' : '';
+  if (!cell) return <>{[0, 1, 2, 3].map((i) => <td key={i} className={subTd(i, `text-center text-slate-300 ${hl}`)}>—</td>)}</>;
+  const f = (v: number) => (money ? fmtPKR(v) : v.toLocaleString());
+  return (
+    <>
+      <td className={subTd(0, `text-slate-700 dark:text-slate-300 ${hl}`)}>{f(cell.of)}</td>
+      <td className={subTd(1, `font-semibold text-slate-900 dark:text-white ${hl}`)}>{f(cell.done)}</td>
+      <td className={subTd(2, `text-slate-700 dark:text-slate-300 ${hl}`)}>{f(Math.max(0, cell.of - cell.done))}</td>
+      <td className={subTd(3, hl)}><Pct v={cell.pct} /></td>
+    </>
   );
 }

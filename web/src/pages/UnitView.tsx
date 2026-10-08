@@ -6,6 +6,9 @@ import { PageHeader } from '../components/AppShell';
 import { BandChip, Bullet, CaseBars, CollectionTrend, MetricCard, RankBars, Ring, ScoreGauge, type TrendData } from '../components/charts';
 import { BlockBars, FyPicker } from '../components/rev';
 import { achievement, useViewMode } from '../lib/mode';
+import { TargetCard, useAssigned } from '../components/targets';
+import { TargetSummary } from './Assigned';
+import { useMe } from '../lib/auth';
 import { Badge, Card, Empty, ErrorState, Loading, Segmented, UnitCaption } from '../components/ui';
 import { get } from '../lib/api';
 import { MILLIONS, UNIT_LABEL, fmtPKR, fmtPct, useFy, type Block, type RevBand, type UnitRef } from '../lib/rev';
@@ -24,7 +27,7 @@ export interface UnitData {
   revenue: { code: string; name: string; group: string; crop: string | null; target: number; collected: number; pct: number | null; arrearDemand: number; arrearCollected: number; arrearPct: number | null; pendingVerification: number }[];
   cases: { code: string; name: string; level: string; opening: number; received: number; disposed: number; pending: number; pct: number | null }[];
   arrears: Record<'total' | 'rabi' | 'kharif' | 'other', { demand: number; collected: number }>;
-  totals: { target: number; collected: number; pending: number };
+  totals: { target: number; collected: number; pending: number; untargeted: number; headsWithTarget: number };
   audit: { amt: number; rec: number; n: number; settled: number };
   tasks: { due: number; onTime: number; open: number; overdue: number };
   children: (UnitRef & { score: number | null; band: RevBand; rank: number | null; target: number; collected: number; blocks: Record<Block, number | null> })[];
@@ -75,7 +78,8 @@ export function UnitBody({ data }: { data: UnitData }) {
   const gap = collectedPct == null ? null : collectedPct - data.elapsed;
   const cases = data.cases.reduce((a, c) => ({ load: a.load + c.opening + c.received, disp: a.disp + c.disposed }), { load: 0, disp: 0 });
   const [mode] = useViewMode();
-  const perf = mode === 'performance';
+  const perf = mode !== 'kpi';
+  const tmode = mode === 'targets';
   // Plain achievement per area (Performance mode) — not weighted, not capped by scoring rules
   const achieved: Record<Block, number | null> = {
     revenue: collectedPct,
@@ -112,15 +116,21 @@ export function UnitBody({ data }: { data: UnitData }) {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           title="Revenue — current year" achieved={data.totals.collected} total={data.totals.target} fmt={fmtPKR} pace={data.elapsed}
-          extras={data.totals.pending > 0 ? [{ label: 'Unverified', value: fmtPKR(data.totals.pending), tone: 'warn' }] : []} unit={MILLIONS}
+          extras={[
+            ...(data.totals.pending > 0 ? [{ label: 'Unverified', value: fmtPKR(data.totals.pending), tone: 'warn' as const }] : []),
+            ...(data.totals.untargeted > 0 ? [{ label: 'Recovered without target (not counted)', value: fmtPKR(data.totals.untargeted), tone: 'muted' as const }] : []),
+          ]} unit={MILLIONS}
         />
         <MetricCard title="Arrears — previous years" achieved={data.arrears.total.collected} total={data.arrears.total.demand} fmt={fmtPKR} labels={{ total: 'Arrears' }} unit={MILLIONS} />
         <MetricCard title="Case registers" achieved={cases.disp} total={cases.load} fmt={(v) => v.toLocaleString()} labels={{ total: 'Total', achieved: 'Disposed', balance: 'Pending' }} unit="(Cases)" />
         <MetricCard
           title="Audit paras" achieved={data.audit.rec} total={data.audit.amt} fmt={fmtPKR} labels={{ total: 'Amount' }}
+          action={<Link to="/audit-paras" className="text-[12px] font-medium text-brand-600 hover:underline">Details</Link>}
           extras={data.audit.n ? [{ label: 'Paras settled', value: `${data.audit.settled} / ${data.audit.n}` }] : []} unit={data.audit.n ? MILLIONS : '(No paras)'}
         />
       </div>
+
+      {tmode && <AreaTargets unitId={data.unit._id} />}
 
       {/* ---------- Trend ---------- */}
       <ChartCard title="Revenue collection" subtitle="Verified collections against the year's target">
@@ -209,7 +219,7 @@ function Heads({ data }: { data: UnitData }) {
 function Ranking({ data }: { data: UnitData }) {
   const navigate = useNavigate();
   const [mode] = useViewMode();
-  const perf = mode === 'performance';
+  const perf = mode !== 'kpi';
   const value = (c: UnitData['children'][number]) => (perf ? achievement(c.collected, c.target) : c.score);
   const ordered = [...data.children].sort((a, b) => (value(b) ?? -1) - (value(a) ?? -1));
   const holderOf = (unitId: string) => data.childHolders.filter((h) => h.unitId === unitId && !['wasilbaqi', 'sci'].includes(h.post));
@@ -317,5 +327,22 @@ function Officers({ data }: { data: UnitData }) {
         </div>
       ))}
     </Card>
+  );
+}
+
+/** Targets mode: assigned short-term targets running in this area. */
+function AreaTargets({ unitId }: { unitId: string }) {
+  const { user } = useMe();
+  const { data, isLoading } = useAssigned('unit', unitId, 'all');
+  if (isLoading) return <Loading />;
+  if (!data?.length) return <Card><Empty title="No assigned targets in this area" body="Supervisory officers can assign weekly, 15-day or monthly targets from “Assigned targets”." /></Card>;
+  return (
+    <ChartCard title="Assigned targets" subtitle="Short-term targets set by supervisory officers in this area">
+      <TargetSummary items={data} />
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {data.slice(0, 12).map((t) => <TargetCard key={t._id} t={t} viewer={user.id} compact />)}
+      </div>
+      {data.length > 12 && <p className="mt-2 text-center text-xs text-slate-500">Showing 12 of {data.length} · see League tables in Targets mode for the full ranking</p>}
+    </ChartCard>
   );
 }

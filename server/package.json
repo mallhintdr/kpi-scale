@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "seed:assigned": "tsx src/seed-assigned.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

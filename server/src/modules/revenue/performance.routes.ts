@@ -154,9 +154,9 @@ router.get('/units/:id', validate({ params: z.object({ id: objectId }), query: f
 interface OfficerCharge { userId: string; post: Post; unitId: string; anc: string[] }
 
 /** Facts for one officer: the units they hold (+ their own RO registers). */
-function officerFacts(facts: FactSet, charges: OfficerCharge[], post: Post) {
+function officerFacts(facts: FactSet, charges: OfficerCharge[], post: Post, includeRo = true) {
   const userId = charges[0].userId;
-  const isRo = post === 'tehsildar' || post === 'naib_tehsildar';
+  const isRo = (post === 'tehsildar' || post === 'naib_tehsildar') && includeRo;
   // RO score uses directly-held qanungois (+ own registers); tehsil-level charge is scored as the tehsil.
   const unitIds = charges.filter((c) => !(isRo && c.post === 'tehsildar' && facts.units.get(c.unitId)?.type === 'tehsil')).map((c) => c.unitId);
   const f = rollup(facts.rows, (r) => (r.roUserId ? isRo && r.roUserId === userId : unitIds.some((u) => r.anc.includes(u))));
@@ -166,8 +166,8 @@ function officerFacts(facts: FactSet, charges: OfficerCharge[], post: Post) {
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
 /** Score one officer from the charges they hold, using an already-loaded fact set. */
-function officerScore(facts: FactSet, resolve: Awaited<ReturnType<typeof configResolver>>, charges: OfficerCharge[], post: Post) {
-  const { f, unitIds } = officerFacts(facts, charges, post);
+function officerScore(facts: FactSet, resolve: Awaited<ReturnType<typeof configResolver>>, charges: OfficerCharge[], post: Post, includeRo = true) {
+  const { f, unitIds } = officerFacts(facts, charges, post, includeRo);
   const s = scoreFacts(f, POST_LEVEL[post], resolve(charges[0].anc));
   const b = breakdown(f);
   // Compact per-head figures for the staff matrix
@@ -204,17 +204,32 @@ router.get(
     }
     const users = new Map((await User.find({ _id: { $in: [...byUser.keys()] } }).select('name designation bps phone').lean()).map((u) => [String(u._id), u]));
     const unitName = (id: string) => facts.units.get(id)?.name;
+    const typeOf = (id: string) => facts.units.get(id)?.type;
+    const chargeType = new Map(rows.map((r) => [`${r.userId}|${r.unitId}`, r.chargeType]));
+    const isRoPost = post === 'tehsildar' || post === 'naib_tehsildar';
+    // One row per charge: an officer with an additional charge is listed (and scored) once per unit held.
     const items = [...byUser.entries()]
-      .map(([uid, charges]) => {
-        // Where the officer sits: the charge unit names plus its tehsil/district for context
-        const first = facts.units.get(charges[0].unitId);
-        const context = first?.anc.slice(1, -1).map((a) => unitName(String(a))).filter(Boolean).slice(-2).join(' › ');
-        return {
-          user: users.get(uid),
-          charges: charges.map((c) => unitName(c.unitId)),
-          context,
-          ...officerScore(facts, resolve, charges, post),
-        };
+      .flatMap(([uid, charges]) => {
+        // A Tehsildar's tehsil-level charge is scored as the tehsil, not as a revenue officer: skip that row
+        // when they also hold qanungois directly.
+        const own = isRoPost && charges.some((c) => typeOf(c.unitId) === 'qanungoi') ? charges.filter((c) => typeOf(c.unitId) !== 'tehsil') : charges;
+        return own.map((c, i) => {
+          const u = facts.units.get(c.unitId);
+          const context = u?.anc.slice(1, -1).map((a) => unitName(String(a))).filter(Boolean).slice(-2).join(' › ');
+          const ofType = (t: string) => u?.anc.map((x) => facts.units.get(String(x))).find((x) => x?.type === t)?.name;
+          return {
+            user: users.get(uid),
+            unitId: c.unitId,
+            charges: [unitName(c.unitId)],
+            chargeType: chargeType.get(`${uid}|${c.unitId}`) ?? 'regular',
+            chargeCount: own.length,
+            district: ofType('district'),
+            tehsil: ofType('tehsil'),
+            context,
+            // RO registers belong to the person, not a qanungoi: counted on their first row only
+            ...officerScore(facts, resolve, [c], post, i === 0),
+          };
+        });
       })
       .filter((x) => x.user)
       .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))

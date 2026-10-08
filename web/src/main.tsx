@@ -17,6 +17,7 @@ const Staff = lazy(() => import('./pages/Staff'));
 const Officer = lazy(() => import('./pages/Officer'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Compare = lazy(() => import('./pages/Compare'));
+const Assigned = lazy(() => import('./pages/Assigned'));
 const Entry = lazy(() => import('./pages/Entry'));
 const Verify = lazy(() => import('./pages/Verify'));
 const Targets = lazy(() => import('./pages/Targets'));
@@ -73,6 +74,7 @@ function App() {
           <Route path="officers/:id" element={<Officer />} />
           <Route path="reports" element={<Reports />} />
           <Route path="compare" element={<Compare />} />
+          <Route path="assigned" element={<Assigned />} />
           <Route path="entry" element={<Entry />} />
           <Route path="verify" element={<Verify />} />
           <Route path="targets" element={<Targets />} />

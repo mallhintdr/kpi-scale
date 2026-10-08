@@ -15,6 +15,7 @@ import notificationRoutes from './modules/notifications/notifications.routes.js'
 import entryRoutes from './modules/revenue/entry.routes.js';
 import performanceRoutes from './modules/revenue/performance.routes.js';
 import registerRoutes from './modules/revenue/registers.routes.js';
+import assignedRoutes from './modules/revenue/assigned.routes.js';
 import userRoutes from './modules/users/users.routes.js';
 
 export function createApp() {
@@ -42,7 +43,7 @@ export function createApp() {
   api.use(authenticate);
   api.use('/users', userRoutes);
   api.use('/notifications', notificationRoutes);
-  api.use('/rev', performanceRoutes, entryRoutes, registerRoutes);
+  api.use('/rev', performanceRoutes, entryRoutes, registerRoutes, assignedRoutes);
 
   app.use('/api', api);
   app.use(notFoundHandler);

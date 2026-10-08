@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 import {
-  Bell, BarChart3, CheckSquare, ClipboardEdit, Home, LayoutGrid, ListChecks, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
-  FileSpreadsheet, GitCompareArrows, ShieldCheck, SlidersHorizontal, Table2, Target, UserCog,
+  Bell, BarChart3, CheckSquare, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
+  Crosshair, FileSpreadsheet, GitCompareArrows, ShieldCheck, SlidersHorizontal, Table2, Target, UserCog,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -24,14 +24,14 @@ export interface NavItem {
 export const NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/explore', label: 'Performance', icon: BarChart3 },
+  { to: '/assigned', label: 'Assigned targets', icon: Crosshair },
   { to: '/staff', label: 'Staff performance', icon: Table2 },
   { to: '/league', label: 'League tables', icon: Medal },
   { to: '/compare', label: 'Compare areas', icon: GitCompareArrows, show: (c) => c.canCompare },
   { to: '/reports', label: 'Report builder', icon: FileSpreadsheet },
   { to: '/entry', label: 'Enter figures', icon: ClipboardEdit, show: (c) => c.canEnter },
-  { to: '/verify', label: 'Verify', icon: ShieldCheck, show: (c) => c.isWasilBaqi && !c.isAdmin },
+  { to: '/verify', label: 'Verify', icon: ShieldCheck, show: (c) => (c.isWasilBaqi || c.isSci) && !c.isAdmin },
   { to: '/targets', label: 'Targets & demand', icon: Target, show: (c) => c.isWasilBaqi && !c.isAdmin },
-  { to: '/audit-paras', label: 'Audit paras', icon: ListChecks },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/notifications', label: 'Alerts', icon: Bell },
   { to: '/admin/people', label: 'People', icon: UserCog, show: (c) => c.isAdmin, group: 'admin' },
@@ -215,11 +215,11 @@ function SideLink({ item, badge = 0, collapsed }: { item: NavItem; badge?: numbe
 /** Performance (default) vs KPI evaluation, shown in the green header band. */
 function ModeSwitch() {
   const [mode, setMode] = useViewMode();
-  const opt = (m: 'performance' | 'kpi', long: string, short: string) => (
+  const opt = (m: 'performance' | 'targets' | 'kpi', long: string, short: string) => (
     <button
       onClick={() => setMode(m)}
       aria-pressed={mode === m}
-      title={m === 'performance' ? 'Achievement against targets' : 'Weighted KPI scores, bands and rankings'}
+      title={m === 'performance' ? 'Achievement against annual demand' : m === 'targets' ? 'Assigned short-term targets: target vs achievement' : 'Weighted KPI scores, bands and rankings'}
       className={clsx('rounded-md px-2 py-1 text-[11px] font-semibold transition sm:px-2.5 sm:text-xs', mode === m ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-100 hover:text-white')}
     >
       <span className="hidden sm:inline">{long}</span>
@@ -229,6 +229,7 @@ function ModeSwitch() {
   return (
     <div className="flex shrink-0 rounded-lg bg-white/15 p-0.5" role="group" aria-label="View mode">
       {opt('performance', 'Performance', 'Perf')}
+      {opt('targets', 'Targets', 'Tgt')}
       {opt('kpi', 'KPI evaluation', 'KPI')}
     </div>
   );

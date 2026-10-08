@@ -8,17 +8,18 @@ import { FyPicker, UnitField } from '../components/rev';
 import { Button, Card, Empty, ErrorState, Field, Loading, Select } from '../components/ui';
 import { get } from '../lib/api';
 import { achievement, useViewMode } from '../lib/mode';
-import { fmtPKR, revColor, useCaps, useFy, useMeta, type Post, type UnitRef } from '../lib/rev';
+import { fmtPKR, useCaps, useFy, useMeta, type Post, type UnitRef } from '../lib/rev';
 import { POSTS_BY_UNIT } from './League';
 
 interface Cell { pct: number | null; done: number; of: number }
 interface Row {
   user: { _id: string; name: string; designation?: string; bps?: number; phone?: string };
+  unitId: string; chargeType: string; district?: string; tehsil?: string;
   charges: string[]; context: string; score: number | null; target: number; collected: number; heads: Record<string, Cell>;
 }
 
 type Measure = 'target' | 'achieved' | 'balance' | 'pct';
-type Detail = 'rank' | 'designation' | 'bps' | 'charge' | 'area' | 'phone' | 'overall';
+type Detail = 'rank' | 'designation' | 'bps' | 'phone' | 'overall';
 
 const MEASURES: { key: Measure; label: string }[] = [
   { key: 'target', label: 'Target' },
@@ -31,8 +32,6 @@ const DETAILS: { key: Detail; label: string }[] = [
   { key: 'overall', label: 'Overall (achievement % or KPI score)' },
   { key: 'designation', label: 'Designation' },
   { key: 'bps', label: 'BPS' },
-  { key: 'charge', label: 'Charge (circle / qanungoi)' },
-  { key: 'area', label: 'Tehsil / district' },
   { key: 'phone', label: 'Phone' },
 ];
 const EXTRA_HEADS = [
@@ -72,7 +71,7 @@ export default function Reports() {
   const { data: meta } = useMeta();
   const [fy] = useFy();
   const [mode] = useViewMode();
-  const perf = mode === 'performance';
+  const perf = mode !== 'kpi';
 
   const [unit, setUnit] = useState<UnitRef | null>(null);
   const [post, setPost] = useState<Post>('patwari');
@@ -91,7 +90,7 @@ export default function Reports() {
 
   const [heads, setHeads] = useState<Set<string>>(new Set(['WR_RABI', 'WR_KHARIF', 'AIT_LAND']));
   const [measures, setMeasures] = useState<Set<Measure>>(new Set(['target', 'achieved', 'balance', 'pct']));
-  const [details, setDetails] = useState<Set<Detail>>(new Set(['rank', 'overall', 'charge', 'area']));
+  const [details, setDetails] = useState<Set<Detail>>(new Set(['rank', 'overall']));
   const [sortBy, setSortBy] = useState('overall');
   const [generated, setGenerated] = useState<{ unitId: string; post: Post; fy: string } | null>(null);
 
@@ -128,19 +127,22 @@ export default function Reports() {
       case 'overall': return r.overall == null ? '' : perf ? `${Math.round(r.overall)}%` : Math.round(r.overall);
       case 'designation': return r.user.designation ?? '';
       case 'bps': return r.user.bps ?? '';
-      case 'charge': return r.charges.join(', ');
-      case 'area': return r.context;
       case 'phone': return r.user.phone ?? '';
     }
   };
   const chosenDetails = DETAILS.filter((d) => details.has(d.key));
+  // District / Tehsil columns only when the list spans more than one
+  const multiDistrict = new Set(rows.map((r) => r.district)).size > 1;
+  const multiTehsil = new Set(rows.map((r) => r.tehsil)).size > 1;
+  const areaOf = (r: (typeof rows)[number]) => r.charges.join(', ').replace(/ \(test\)/g, '') + (r.chargeType && r.chargeType !== 'regular' ? (r.chargeType === 'additional' ? ' (Addl. charge)' : ' (Look after)') : '');
+  const [selected, setSelected] = useState<string | null>(null);
   const anyMoney = chosenHeads.some((h) => h.money);
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Name', ...chosenDetails.map((d) => (d.key === 'overall' ? (perf ? 'Revenue achievement %' : 'KPI score') : d.label)),
+    const header = ['S.No', ...(multiDistrict ? ['District'] : []), ...(multiTehsil ? ['Tehsil'] : []), 'Name', 'Area', ...chosenDetails.map((d) => (d.key === 'overall' ? (perf ? 'Revenue achievement %' : 'KPI score') : d.label)),
       ...chosenHeads.flatMap((h) => chosenMeasures.map((m) => `${h.name} — ${m.label}${h.money && m.key !== 'pct' ? ' (Rs M)' : ''}`))];
-    const lines = rows.map((r) => [r.user.name, ...chosenDetails.map((d) => detailValue(r, d.key)), ...chosenHeads.flatMap((h) => chosenMeasures.map((m) => value(r.heads[h.code], m.key, h.money).replace(/,/g, '')))].map(esc).join(','));
+    const lines = rows.map((r, i) => [i + 1, ...(multiDistrict ? [r.district] : []), ...(multiTehsil ? [r.tehsil] : []), r.user.name, areaOf(r), ...chosenDetails.map((d) => detailValue(r, d.key)), ...chosenHeads.flatMap((h) => chosenMeasures.map((m) => value(r.heads[h.code], m.key, h.money).replace(/,/g, '')))].map(esc).join(','));
     const url = URL.createObjectURL(new Blob([[header.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv' }));
     Object.assign(document.createElement('a'), { href: url, download: `report-${data?.postLabel ?? post}-${unit?.name}-${fy}.csv` }).click();
     URL.revokeObjectURL(url);
@@ -212,64 +214,83 @@ export default function Reports() {
           <Card className="overflow-hidden print:rounded-none print:shadow-none print:ring-0">
             <div className="max-h-[70vh] overflow-auto print:max-h-none print:overflow-visible">
               <table className="w-max min-w-full border-separate border-spacing-0 text-[13px] print:text-[10px]">
-                <thead className="sticky top-0 z-20 bg-brand-700 text-[11px] font-semibold text-white print:static">
+                <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white print:static">
                   <tr>
-                    <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/20 bg-brand-700 px-1 py-2 text-center print:static">#</th>
-                    <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/20 bg-brand-700 px-3 py-2 text-left print:static">Employee</th>
+                    <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2 text-center print:static">#</th>
+                    {multiDistrict && <th rowSpan={2} className="border-b border-r border-white/60 px-2.5 py-2">District</th>}
+                    {multiTehsil && <th rowSpan={2} className="border-b border-r border-white/60 px-2.5 py-2">Tehsil</th>}
+                    <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2 print:static">Name</th>
+                    <th rowSpan={2} className="border-b border-r border-white/60 px-2.5 py-2">Area</th>
                     {chosenDetails.map((d) => (
-                      <th key={d.key} rowSpan={2} className="border-b border-r border-white/20 px-2.5 py-2 text-left">
+                      <th key={d.key} rowSpan={2} className="border-b border-r border-white/60 px-2.5 py-2">
                         {d.key === 'overall' ? (perf ? 'Achieved' : 'KPI score') : d.label.replace(' (circle / qanungoi)', '').replace(' (achievement % or KPI score)', '')}
                       </th>
                     ))}
                     {chosenHeads.map((h) => (
-                      <th key={h.code} colSpan={chosenMeasures.length} className="border-b border-r border-white/20 px-2 py-1.5 text-center">
-                        {h.name}{h.money && <span className="block text-[9px] font-normal text-brand-100">(Rs M)</span>}
+                      <th key={h.code} colSpan={chosenMeasures.length} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-2 py-1.5 text-center">
+                        {h.name}{h.money && <span className="block text-[10.5px] font-normal text-brand-100">(Rs M)</span>}
                       </th>
                     ))}
                   </tr>
                   <tr>
                     {chosenHeads.flatMap((h) => chosenMeasures.map((m, i) => (
-                      <th key={h.code + m.key} className={clsx('border-b border-white/20 bg-brand-600 px-2 py-1 text-right text-[10px] font-medium uppercase tracking-wide text-brand-50', i === chosenMeasures.length - 1 && 'border-r')}>
+                      <th key={h.code + m.key} className={clsx('border-b border-white/30 bg-brand-600 px-2 py-1 text-center text-[11.5px] font-medium uppercase tracking-wide text-brand-50', i === chosenMeasures.length - 1 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25')}>
                         {m.key === 'achieved' ? (h.group === 'Cases' ? 'Disposed' : h.code === 'AUDIT' ? 'Settled' : h.code === 'TASKS' ? 'On time' : 'Recovered') : m.key === 'pct' ? '%' : m.label}
                       </th>
                     )))}
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, idx) => (
-                    <tr key={r.user._id} className={idx % 2 ? 'bg-slate-50/50 dark:bg-slate-800/30' : ''}>
-                      <td className="sticky left-0 z-10 w-10 min-w-10 border-b border-r border-slate-200 bg-white px-1 py-1.5 text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700 dark:bg-slate-900 print:static">{idx + 1}</td>
-                      <td className="sticky left-10 z-10 border-b border-r border-slate-200 bg-white px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900 print:static">
-                        <Link to={`/officers/${r.user._id}`} className="font-medium text-slate-900 hover:text-brand-700 hover:underline dark:text-white">{r.user.name}</Link>
+                  {rows.map((r, idx) => {
+                    const key = `${r.user._id}-${r.unitId}`;
+                    const on = selected === key;
+                    const stickyBg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-white dark:bg-slate-900';
+                    return (
+                    <tr key={key} onClick={() => setSelected(on ? null : key)} aria-selected={on}
+                      className={clsx('cursor-pointer', on ? 'bg-amber-100 outline outline-2 -outline-offset-2 outline-amber-400 dark:bg-amber-500/25' : idx % 2 ? 'bg-slate-50/50 hover:bg-slate-100 dark:bg-slate-800/30' : 'hover:bg-slate-50')}>
+                      <td className={clsx('sticky left-0 z-10 w-10 min-w-10 border-b border-r border-b-slate-200 border-r-slate-500 px-1 py-1.5 text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700 print:static', stickyBg)}>{idx + 1}</td>
+                      {multiDistrict && <td className="whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-500 px-2.5 py-1.5 dark:border-slate-700">{r.district}</td>}
+                      {multiTehsil && <td className="whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-500 px-2.5 py-1.5 dark:border-slate-700">{r.tehsil}</td>}
+                      <td className={clsx('sticky left-10 z-10 border-b border-r border-b-slate-200 border-r-slate-500 px-3 py-1.5 dark:border-slate-700 print:static', stickyBg)}>
+                        <Link to={`/officers/${r.user._id}`} onClick={(e) => e.stopPropagation()} title={`Open ${r.user.name}'s profile`}
+                          className={clsx('whitespace-nowrap font-medium text-slate-900 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline', on && 'underline')}>
+                          {r.user.name}
+                        </Link>
                       </td>
+                      <td className="whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-500 px-2.5 py-1.5 text-slate-700 dark:border-slate-700 dark:text-slate-300">{areaOf(r)}</td>
                       {chosenDetails.map((d) => (
-                        <td key={d.key} className="whitespace-nowrap border-b border-slate-100 px-2.5 py-1.5 text-slate-700 tabular-nums dark:border-slate-800 dark:text-slate-300">{detailValue(r, d.key)}</td>
+                        <td key={d.key} className="whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-500 px-2.5 py-1.5 text-slate-700 tabular-nums dark:border-slate-800 dark:text-slate-300">{d.key === 'overall' && perf && r.overall != null ? <span className="font-bold text-slate-900 dark:text-white">{Math.round(r.overall)}%</span> : detailValue(r, d.key)}</td>
                       ))}
                       {chosenHeads.flatMap((h) => chosenMeasures.map((m, i) => {
                         const c = r.heads[h.code];
                         return (
-                          <td key={h.code + m.key} className={clsx('whitespace-nowrap border-b border-slate-100 px-2 py-1.5 text-right tabular-nums dark:border-slate-800', i === 0 && 'border-l', m.key === 'pct' ? 'font-semibold text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300')}>
-                            {m.key === 'pct' && c?.pct != null && <span className="mr-1 inline-block size-2 rounded-full align-middle print:hidden" style={{ background: revColor(c.pct) }} />}
-                            {value(c, m.key, h.money) || <span className="text-slate-300">—</span>}
+                          <td key={h.code + m.key} className={clsx('whitespace-nowrap border-b border-b-slate-200 px-2 py-1.5 text-right tabular-nums dark:border-b-slate-800', i === chosenMeasures.length - 1 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700', m.key === 'pct' ? 'font-semibold text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300')}>
+                            {m.key === 'pct'
+                              ? (c?.pct != null ? `${Math.round(c.pct)}%` : <span className="text-slate-300">—</span>)
+                              : (value(c, m.key, h.money) || <span className="text-slate-300">—</span>)}
                           </td>
                         );
                       }))}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
                 {/* Totals for amount/count columns */}
                 <tfoot className="bg-slate-50 font-semibold dark:bg-slate-800">
                   <tr>
                     <td className="sticky left-0 w-10 min-w-10 border-t-2 border-r border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 print:static" />
+                    {multiDistrict && <td className="border-t-2 border-r border-t-slate-300 border-r-slate-500" />}
+                    {multiTehsil && <td className="border-t-2 border-r border-t-slate-300 border-r-slate-500" />}
                     <td className="sticky left-10 border-t-2 border-r border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800 print:static">Total · {rows.length}</td>
-                    {chosenDetails.map((d) => <td key={d.key} className="border-t-2 border-slate-200 dark:border-slate-700" />)}
+                    <td className="border-t-2 border-r border-t-slate-300 border-r-slate-500" />
+                    {chosenDetails.map((d) => <td key={d.key} className="border-t-2 border-r border-t-slate-300 border-r-slate-500 dark:border-slate-700" />)}
                     {chosenHeads.flatMap((h) => {
                       const of = rows.reduce((s, r) => s + (r.heads[h.code]?.of ?? 0), 0);
                       const done = rows.reduce((s, r) => s + (r.heads[h.code]?.done ?? 0), 0);
                       const tot: Cell = { of, done, pct: achievement(done, of) };
                       return chosenMeasures.map((m, i) => (
-                        <td key={h.code + m.key} className={clsx('whitespace-nowrap border-t-2 border-slate-200 px-2 py-2 text-right tabular-nums dark:border-slate-700', i === 0 && 'border-l')}>
-                          {h.code === 'AUDIT' && m.key === 'pct' ? '' : value(tot, m.key, h.money)}
+                        <td key={h.code + m.key} className={clsx('whitespace-nowrap border-t-2 border-t-slate-300 px-2 py-2 text-right tabular-nums dark:border-t-slate-700', i === chosenMeasures.length - 1 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700')}>
+                          {h.code === 'AUDIT' && m.key === 'pct' ? '' : m.key === 'pct' && tot.pct != null ? `${Math.round(tot.pct)}%` : value(tot, m.key, h.money)}
                         </td>
                       ));
                     })}

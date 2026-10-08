@@ -205,8 +205,10 @@ export function scoreFacts(f: Facts, level: Level, cfg: EffectiveConfig): Score 
   const revenue = rw ? rs / rw : null;
 
   // Arrears: aggregated across all heads
+  // Only heads that actually carry arrears demand count; recoveries in a head without demand
+  // must not inflate the percentage.
   let ad = 0, arr = 0;
-  for (const v of Object.values(f.rev)) { ad += v.ad; arr += v.arr; }
+  for (const v of Object.values(f.rev)) if (v.ad > 0) { ad += v.ad; arr += v.arr; }
   const arrears = pct(arr, ad);
 
   // Case registers: disposal rate, weighted per head
@@ -268,12 +270,23 @@ export function breakdown(f: Facts) {
   });
   const sum = (sel: (r: (typeof revenue)[number]) => number, filter: (r: (typeof revenue)[number]) => boolean = () => true) =>
     revenue.filter(filter).reduce((s, r) => s + sel(r), 0);
+  // Achievement only counts against heads that HAVE a target/demand. Money recovered in a head
+  // with no target is reported separately ("untargeted") and never raises the % achieved.
+  const hasArr = (r: (typeof revenue)[number]) => r.arrearDemand > 0;
   const arrears = {
-    total: { demand: sum((r) => r.arrearDemand), collected: sum((r) => r.arrearCollected) },
-    rabi: { demand: sum((r) => r.arrearDemand, (r) => r.crop === 'rabi'), collected: sum((r) => r.arrearCollected, (r) => r.crop === 'rabi') },
-    kharif: { demand: sum((r) => r.arrearDemand, (r) => r.crop === 'kharif'), collected: sum((r) => r.arrearCollected, (r) => r.crop === 'kharif') },
-    other: { demand: sum((r) => r.arrearDemand, (r) => !r.crop), collected: sum((r) => r.arrearCollected, (r) => !r.crop) },
+    total: { demand: sum((r) => r.arrearDemand), collected: sum((r) => r.arrearCollected, hasArr) },
+    rabi: { demand: sum((r) => r.arrearDemand, (r) => r.crop === 'rabi'), collected: sum((r) => r.arrearCollected, (r) => r.crop === 'rabi' && hasArr(r)) },
+    kharif: { demand: sum((r) => r.arrearDemand, (r) => r.crop === 'kharif'), collected: sum((r) => r.arrearCollected, (r) => r.crop === 'kharif' && hasArr(r)) },
+    other: { demand: sum((r) => r.arrearDemand, (r) => !r.crop), collected: sum((r) => r.arrearCollected, (r) => !r.crop && hasArr(r)) },
+    untargeted: sum((r) => r.arrearCollected, (r) => !hasArr(r)),
   };
-  const totals = { target: sum((r) => r.target), collected: sum((r) => r.collected), pending: sum((r) => r.pendingVerification) };
+  const hasTarget = (r: (typeof revenue)[number]) => r.target > 0;
+  const totals = {
+    target: sum((r) => r.target),
+    collected: sum((r) => r.collected, hasTarget),
+    untargeted: sum((r) => r.collected, (r) => !hasTarget(r)),
+    headsWithTarget: revenue.filter(hasTarget).length,
+    pending: sum((r) => r.pendingVerification, hasTarget),
+  };
   return { revenue, cases, arrears, totals, audit: f.audit, tasks: f.tasks };
 }

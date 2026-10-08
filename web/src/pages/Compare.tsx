@@ -48,6 +48,7 @@ export default function Compare() {
   const toggle = (code: string) =>
     setPicked((p) => (p.includes(code) ? p.filter((c) => c !== code) : p.length >= MAX ? p : [...p, code]));
   const [sortBy, setSortBy] = useState('REVENUE');
+  const [picked2, setPicked2] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['rev', 'compare', area?._id, level, fy],
@@ -156,36 +157,49 @@ export default function Compare() {
             <Card className="mt-3 overflow-hidden">
               <div className="max-h-[60vh] overflow-auto">
                 <table className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
-                  <thead className="sticky top-0 z-20 bg-brand-700 text-[11px] font-semibold text-white">
+                  <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white">
                     <tr>
-                      <th className="sticky left-0 z-30 w-10 min-w-10 border-r border-white/20 bg-brand-700 px-1 py-2.5 text-center">#</th>
-                      <th className="sticky left-10 z-30 border-r border-white/20 bg-brand-700 px-3 py-2.5 text-left">{levels.find((l) => l.value === level)?.label.slice(0, -1)}</th>
+                      <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2.5">#</th>
+                      <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2.5">{levels.find((l) => l.value === level)?.label.slice(0, -1)}</th>
                       {chosen.map((p, i) => (
-                        <th key={p.code} className="border-r border-white/20 px-3 py-2.5 text-right">
+                        <th key={p.code} colSpan={p.code === 'SCORE' ? 1 : 4} rowSpan={p.code === 'SCORE' ? 2 : 1} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-3 py-2">
                           <span className="mr-1 inline-block size-2 rounded-sm align-middle" style={{ background: COLORS[i] }} />{p.name}
                         </th>
                       ))}
                     </tr>
+                    <tr className="bg-brand-600 text-[11.5px] font-medium text-brand-50">
+                      {chosen.filter((p) => p.code !== 'SCORE').flatMap((p) => (p.money ? ['Target', 'Recovered', 'Balance', '%'] : ['Total', 'Achieved', 'Balance', '%']).map((l, i) => (
+                        <th key={p.code + l} className={clsx('border-b border-white/30 px-2.5 py-1.5', i === 3 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25')}>{l}</th>
+                      )))}
+                    </tr>
                   </thead>
                   <tbody>
-                    {items.map((u, idx) => (
-                      <tr key={u._id}>
-                        <td className="sticky left-0 z-10 w-10 min-w-10 border-b border-r border-slate-200 bg-white text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700 dark:bg-slate-900">{idx + 1}</td>
-                        <td className="sticky left-10 z-10 border-b border-r border-slate-200 bg-white px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900">
-                          <Link to={`/units/${u._id}`} className="font-medium text-slate-900 hover:text-brand-700 hover:underline dark:text-white">{u.name}</Link>
+                    {items.map((u, idx) => {
+                      const on = picked2 === u._id;
+                      const bg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-white dark:bg-slate-900';
+                      return (
+                      <tr key={u._id} onClick={() => setPicked2(on ? null : u._id)} className={clsx('cursor-pointer', on ? 'bg-amber-100 outline outline-2 -outline-offset-2 outline-amber-400 dark:bg-amber-500/25' : 'hover:bg-slate-50')}>
+                        <td className={clsx('sticky left-0 z-10 w-10 min-w-10 border-b border-r border-b-slate-200 border-r-slate-400 text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700', bg)}>{idx + 1}</td>
+                        <td className={clsx('sticky left-10 z-10 border-b border-r border-b-slate-200 border-r-slate-400 px-3 py-1.5 dark:border-slate-700', bg)}>
+                          <Link to={`/units/${u._id}`} onClick={(e) => e.stopPropagation()} title={`Open ${u.name}`} className={clsx('font-medium text-slate-900 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline', on && 'underline')}>{u.name}</Link>
                           {u.parent && <div className="text-[11px] text-slate-500">{u.parent}</div>}
                         </td>
                         {chosen.map((p) => {
                           const c = u.heads[p.code];
-                          return (
-                            <td key={p.code} className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-1.5 text-right tabular-nums dark:border-slate-700">
-                              <b className="text-slate-900 dark:text-white">{c?.pct == null ? '—' : `${Math.round(c.pct)}%`}</b>
-                              {c && p.code !== 'SCORE' && <div className="text-[11px] text-slate-500">{p.money ? `${fmtPKR(c.done)} / ${fmtPKR(c.of)}` : `${c.done.toLocaleString()} / ${c.of.toLocaleString()}`}</div>}
-                            </td>
-                          );
+                          const sub = (i: number) => clsx('whitespace-nowrap border-b border-b-slate-200 px-2.5 py-1.5 text-right tabular-nums dark:border-slate-700', i === 3 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700');
+                          const pct = c?.pct == null ? <span className="text-slate-300">—</span> : <span className="font-bold text-slate-900 dark:text-white">{Math.round(c.pct)}{p.code === 'SCORE' ? '' : '%'}</span>;
+                          if (p.code === 'SCORE') return <td key={p.code} className={sub(3)}>{pct}</td>;
+                          const f = (v: number) => (p.money ? fmtPKR(v) : v.toLocaleString());
+                          return [
+                            <td key={p.code + 't'} className={clsx(sub(0), 'text-slate-700 dark:text-slate-300')}>{c ? f(c.of) : '—'}</td>,
+                            <td key={p.code + 'a'} className={clsx(sub(1), 'font-semibold text-slate-900 dark:text-white')}>{c ? f(c.done) : '—'}</td>,
+                            <td key={p.code + 'b'} className={clsx(sub(2), 'text-slate-700 dark:text-slate-300')}>{c ? f(Math.max(0, c.of - c.done)) : '—'}</td>,
+                            <td key={p.code + 'p'} className={sub(3)}>{pct}</td>,
+                          ];
                         })}
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

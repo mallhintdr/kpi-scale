@@ -207,6 +207,81 @@ taskSchema.index({ tenantId: 1, assignedBy: 1, createdAt: -1 });
 taskSchema.index({ tenantId: 1, anc: 1, dueDate: 1 });
 export const Task = mongoose.model('Task', taskSchema);
 
+/* ---------------- Assigned targets: short-term drives set by a supervisory officer ---------------- */
+const assignedTargetSchema = new Schema(
+  {
+    ...tenantField,
+    head: { type: String, required: true },
+    assigneeId: ref('User', true),
+    unitId: ref('Unit', true), // the assignee's charge unit
+    anc: [{ type: Schema.Types.ObjectId }],
+    assignedBy: ref('User', true),
+    period: { type: String, enum: ['week', 'fortnight', 'month'], required: true },
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
+    targetValue: { type: Number, required: true, min: 1 }, // Rs for revenue heads, count for case heads
+    achieved: { type: Number, default: 0, min: 0 },
+    progress: [
+      new Schema(
+        {
+          date: { type: Date, required: true },
+          value: { type: Number, required: true, min: 0 },
+          note: String,
+          by: ref('User', true),
+          // Progress counts only once verified by Wasil Baqi (revenue heads) or SCI (case heads)
+          status: { type: String, enum: ['submitted', 'verified', 'rejected'], default: 'submitted' },
+          verifiedBy: ref('User'),
+          verifiedAt: Date,
+        },
+        { _id: true, timestamps: { createdAt: true, updatedAt: false } },
+      ),
+    ],
+    achievedPending: { type: Number, default: 0 }, // submitted, not yet verified
+    note: { type: String, maxlength: 500 },
+    status: { type: String, enum: ['active', 'cancelled', 'stopped'], default: 'active' },
+    stoppedAt: Date, // drive stopped early: share judged pro rata up to this date
+    /** Set when this target is one circle's share of an area drive. */
+    driveId: { type: Schema.Types.ObjectId, ref: 'TargetDrive', default: null },
+    remainingAtAssign: { type: Number }, // the circle's remaining balance used for its share
+  },
+  opts,
+);
+assignedTargetSchema.plugin(tenantPlugin);
+assignedTargetSchema.index({ tenantId: 1, assigneeId: 1, endDate: -1 });
+assignedTargetSchema.index({ tenantId: 1, assignedBy: 1, createdAt: -1 });
+assignedTargetSchema.index({ tenantId: 1, anc: 1, startDate: 1 });
+export const AssignedTarget = mongoose.model('AssignedTarget', assignedTargetSchema);
+
+/* ---------------- Area drive: one target for an area, distributed to its circles by remaining balance ---------------- */
+const targetDriveSchema = new Schema(
+  {
+    ...tenantField,
+    head: { type: String, required: true },
+    unitId: ref('Unit', true), // qanungoi / tehsil / district / division the drive is set for
+    anc: [{ type: Schema.Types.ObjectId }],
+    assignedBy: ref('User', true),
+    period: { type: String, enum: ['week', 'fortnight', 'month'], required: true },
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
+    basis: { type: String, enum: ['percent', 'amount'], required: true },
+    value: { type: Number, required: true, min: 0 }, // % of remaining, or total amount
+    includeArrears: { type: Boolean, default: true },
+    remainingTotal: { type: Number, required: true }, // remaining balance across staffed circles at assignment
+    targetTotal: { type: Number, required: true }, // sum of the distributed shares
+    shares: { type: Number, default: 0 },
+    vacantCircles: { type: Number, default: 0 }, // circles skipped because no Patwari holds them
+    note: { type: String, maxlength: 500 },
+    status: { type: String, enum: ['active', 'cancelled', 'stopped'], default: 'active' },
+    stoppedAt: Date,
+    stoppedBy: ref('User'),
+  },
+  opts,
+);
+targetDriveSchema.plugin(tenantPlugin);
+targetDriveSchema.index({ tenantId: 1, assignedBy: 1, createdAt: -1 });
+targetDriveSchema.index({ tenantId: 1, anc: 1, startDate: -1 });
+export const TargetDrive = mongoose.model('TargetDrive', targetDriveSchema);
+
 /* ---------------- Scoring configuration (organisation default, or per division / district / tehsil) ---------------- */
 const blockShape = Object.fromEntries(BLOCKS.map((b) => [b, { type: Number, min: 0, max: 100 }]));
 const scoreConfigSchema = new Schema(
