@@ -391,6 +391,36 @@ notificationSchema.index({ tenantId: 1, userId: 1, readAt: 1, createdAt: -1 });
 notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 180 });
 export const Notification = mongoose.model('Notification', notificationSchema);
 
+/* ---------------- Pre-computed period statistics (rebuilt by the "rollup" job) ----------------
+ * One document per unit × period. Every unit holds the totals of its whole subtree, so any view of
+ * any area for any period is a single indexed read.
+ *   period  w = week · f = 15 days (1st–15th, 16th–end) · m = month · q = quarter · h = half year · y = year
+ *   heads   per KPI: cur / arr achieved (target KPIs), rec / disp (workload KPIs), pend = awaiting verification
+ *           year documents also carry the annual t (target), ad (arrears demand) and open (opening pending)
+ * Month and longer periods use the month the figures belong to; week and 15-day periods use the date
+ * figures were verified, plus verified progress against assigned targets.
+ */
+const rollupSchema = new Schema(
+  {
+    ...tenantField,
+    unitId: ref('Unit', true),
+    fy: { type: String, required: true },
+    period: { type: String, enum: ['w', 'f', 'm', 'q', 'h', 'y'], required: true },
+    key: { type: String, required: true },
+    start: { type: Date, required: true },
+    end: { type: Date, required: true },
+    heads: { type: Schema.Types.Mixed, default: {} },
+    tasks: { due: Number, onTime: Number },
+    progress: { type: Number, default: 0 }, // verified assigned-target progress (w / f)
+    builtAt: { type: Date, required: true },
+  },
+  { minimize: false },
+);
+rollupSchema.plugin(tenantPlugin);
+rollupSchema.index({ tenantId: 1, unitId: 1, period: 1, key: 1 }, { unique: true });
+rollupSchema.index({ tenantId: 1, fy: 1, period: 1, key: 1 });
+export const Rollup = mongoose.model('Rollup', rollupSchema);
+
 /* ---------------- Audit log ---------------- */
 const auditSchema = new Schema(
   {

@@ -122,12 +122,17 @@ router.post(
     const candidates = await runUnscoped(() =>
       User.find({ email, status: 'active' }).select('+passwordHash').limit(20).populate('tenantId', 'name slug status settings isPlatform industry branding'),
     );
-    const matches = [];
+    let matches = [];
     for (const u of candidates) {
       const t = u.tenantId as any;
       if (t?.status !== 'active') continue;
-      if (tenantSlug && t.slug !== tenantSlug) continue;
       if (await bcrypt.compare(pw, u.passwordHash)) matches.push(u);
+    }
+    // The organisation from the sign-in link is a preference, not a filter: a super-admin, or someone
+    // whose browser remembers another organisation, can still sign in to the account the password matches.
+    if (tenantSlug) {
+      const preferred = matches.filter((u) => (u.tenantId as any).slug === tenantSlug);
+      if (preferred.length) matches = preferred;
     }
     if (!matches.length) {
       if (!candidates.length) await bcrypt.compare(pw, '$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinva'); // timing equaliser

@@ -11,6 +11,7 @@ import { closeRedis } from './lib/redis.js';
 import './lib/notify.js';
 import './modules/org/imports.js';
 import './modules/revenue/warm.js';
+import './modules/revenue/rollup.js';
 
 async function main() {
   if (!env.REDIS_URL) throw new Error('REDIS_URL is required for a standalone worker');

@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import {
-  Bell, BarChart3, CheckSquare, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
+  Award, Bell, BarChart3, CalendarRange, CheckSquare, Gauge, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
   Crosshair, FileSpreadsheet, GitCompareArrows, Network, ShieldCheck, SlidersHorizontal, Table2, Target, Upload, UserCog, Workflow,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
@@ -28,6 +28,7 @@ export const NAV: NavItem[] = [
   { to: '/assigned', label: 'Assigned targets', icon: Crosshair },
   { to: '/staff', label: 'Staff performance', icon: Table2 },
   { to: '/league', label: 'League tables', icon: Medal },
+  { to: '/trends', label: 'Trends', icon: CalendarRange },
   { to: '/compare', label: 'Compare areas', icon: GitCompareArrows, show: (c) => c.canCompare },
   { to: '/reports', label: 'Report builder', icon: FileSpreadsheet },
   { to: '/entry', label: 'Enter figures', icon: ClipboardEdit, show: (c) => c.canEnter },
@@ -125,6 +126,10 @@ export function AppShell() {
             ))}
           {items.filter((i) => i.group === 'admin').map((i) => <SideLink key={i.to} item={i} collapsed={collapsed} />)}
         </nav>
+        <div className={clsx('border-t border-white/10 py-2', collapsed ? 'px-1.5' : 'px-2')}>
+          {!collapsed && <div className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gold-400">View</div>}
+          <ModeSwitch variant="side" collapsed={collapsed} />
+        </div>
 
       </aside>
 
@@ -140,7 +145,6 @@ export function AppShell() {
             </div>
 
             {/* Top-right actions */}
-            <ModeSwitch />
             <Link to="/notifications" aria-label={`Notifications${unread ? ` (${unread} unread)` : ''}`} title="Notifications" className="relative grid size-10 place-items-center rounded-lg hover:bg-white/15">
               <Bell className="size-[22px]" />
               {unread > 0 && (
@@ -161,7 +165,7 @@ export function AppShell() {
             </IconButton>
           </div>
         </div>
-        <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 pb-24 sm:px-4 lg:pb-5">
+        <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 pb-36 sm:px-4 lg:pb-5">
           {meta.isLoading ? (
             <div className="py-16 text-center"><Spinner /></div>
           ) : meta.error ? (
@@ -182,6 +186,7 @@ export function AppShell() {
 
       {/* Mobile bottom tab bar */}
       <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-lg lg:hidden print:hidden dark:border-slate-800 dark:bg-slate-900/95">
+        <div className="mx-auto max-w-lg px-2 pt-1.5"><ModeSwitch variant="bar" /></div>
         <div className="mx-auto grid max-w-lg grid-cols-5">
           {tabs.map((t) => {
             const active = isActive(t.to);
@@ -232,24 +237,38 @@ function SideLink({ item, badge = 0, collapsed }: { item: NavItem; badge?: numbe
 }
 
 /** Performance (default) vs KPI evaluation, shown in the green header band. */
-function ModeSwitch() {
+const MODES = [
+  { m: 'performance', label: 'Performance', icon: Gauge, hint: 'Achievement against annual targets' },
+  { m: 'targets', label: 'Targets', icon: Crosshair, hint: 'Assigned short-term targets: target vs achievement' },
+  { m: 'kpi', label: 'KPI evaluation', icon: Award, hint: 'Weighted KPI scores, bands and rankings' },
+] as const;
+
+/** View mode: at the bottom of the side menu (desktop) or above the bottom tab bar (phones). */
+function ModeSwitch({ variant, collapsed }: { variant: 'side' | 'bar'; collapsed?: boolean }) {
   const [mode, setMode] = useViewMode();
-  const opt = (m: 'performance' | 'targets' | 'kpi', long: string, short: string) => (
-    <button
-      onClick={() => setMode(m)}
-      aria-pressed={mode === m}
-      title={m === 'performance' ? 'Achievement against annual demand' : m === 'targets' ? 'Assigned short-term targets: target vs achievement' : 'Weighted KPI scores, bands and rankings'}
-      className={clsx('rounded-md px-2 py-1 text-[11px] font-semibold transition sm:px-2.5 sm:text-xs', mode === m ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-100 hover:text-white')}
-    >
-      <span className="hidden sm:inline">{long}</span>
-      <span className="sm:hidden">{short}</span>
-    </button>
-  );
+  if (variant === 'side') {
+    return (
+      <div className="space-y-px" role="group" aria-label="View mode">
+        {MODES.map(({ m, label, icon: Icon, hint }) => (
+          <button key={m} onClick={() => setMode(m)} aria-pressed={mode === m} title={collapsed ? `${label} — ${hint}` : hint}
+            className={clsx('flex h-8 w-full items-center gap-2.5 rounded-md text-[13px] font-medium transition', collapsed ? 'justify-center' : 'px-2.5',
+              mode === m ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-100 hover:bg-white/10 hover:text-white')}>
+            <Icon className="size-4 shrink-0" />
+            {!collapsed && <span className="truncate">{label}</span>}
+          </button>
+        ))}
+      </div>
+    );
+  }
   return (
-    <div className="flex shrink-0 rounded-lg bg-white/15 p-0.5" role="group" aria-label="View mode">
-      {opt('performance', 'Performance', 'Perf')}
-      {opt('targets', 'Targets', 'Tgt')}
-      {opt('kpi', 'KPI evaluation', 'KPI')}
+    <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800" role="group" aria-label="View mode">
+      {MODES.map(({ m, label, icon: Icon, hint }) => (
+        <button key={m} onClick={() => setMode(m)} aria-pressed={mode === m} title={hint}
+          className={clsx('flex h-7 items-center justify-center gap-1.5 rounded-md text-[11.5px] font-semibold transition',
+            mode === m ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300')}>
+          <Icon className="size-3.5" />{m === 'kpi' ? 'KPI' : label}
+        </button>
+      ))}
     </div>
   );
 }

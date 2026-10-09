@@ -28,7 +28,8 @@ export function defineJob(name: string, handler: Handler) {
 const run = (name: string, data: JobData) => {
   const h = handlers.get(name);
   if (!h) throw new Error(`No handler for job "${name}"`);
-  return runAsTenant(data.tenantId, () => h(data));
+  // Platform-wide jobs (no tenant) handle their own scoping
+  return data.tenantId ? runAsTenant(data.tenantId, () => h(data)) : h(data);
 };
 
 /**
@@ -50,9 +51,39 @@ export async function enqueue(name: string, data: JobData, opts: Pick<JobsOption
   });
 }
 
+const schedules: { name: string; pattern: string }[] = [];
+/** Run a job on a daily cron pattern "m h * * *" (registered when a worker starts). */
+export function schedule(name: string, pattern: string) {
+  schedules.push({ name, pattern });
+}
+
+function startInlineSchedules() {
+  let lastRun = '';
+  setInterval(() => {
+    const now = new Date();
+    for (const s of schedules) {
+      const [m, h] = s.pattern.split(' ').map(Number);
+      const tag = `${s.name}${now.toDateString()}`;
+      if (now.getHours() === h && now.getMinutes() >= m && !lastRun.includes(tag)) {
+        lastRun += tag;
+        const hdl = handlers.get(s.name);
+        hdl?.({ tenantId: '' }).catch((err) => logger.error({ err, job: s.name }, 'scheduled job failed'));
+      }
+    }
+  }, 60_000).unref();
+}
+
 /** Start processing jobs in this process. */
 export function startWorker(concurrency = Number(process.env.WORKER_CONCURRENCY ?? 8)) {
-  if (!env.REDIS_URL || worker) return;
+  if (!env.REDIS_URL) {
+    startInlineSchedules();
+    return;
+  }
+  if (worker) return;
+  queue ??= new Queue(QUEUE, { connection: bullConnection() });
+  for (const s of schedules) {
+    queue.upsertJobScheduler(`cron-${s.name}`, { pattern: s.pattern }, { name: s.name, data: { tenantId: '' } }).catch((err) => logger.warn({ err }, 'scheduler registration failed'));
+  }
   worker = new Worker(QUEUE, async (job) => run(job.name, job.data as JobData), { connection: bullConnection(), concurrency });
   worker.on('failed', (job, err) => logger.error({ err, job: job?.name, id: job?.id }, 'job failed'));
   logger.info({ concurrency }, 'Job worker started');

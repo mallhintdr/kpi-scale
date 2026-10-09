@@ -185,7 +185,17 @@ async function main() {
     const targets: any[] = [];
     const entries: any[] = [];
     const flush = async (force = false) => {
-      if (entries.length >= 20_000 || (force && entries.length)) await RevEntry.insertMany(entries.splice(0), { ordered: false });
+      if (entries.length >= 20_000 || (force && entries.length)) {
+        // Verified figures are verified a few days after their month closes (never in the future);
+        // derived from position, not the PRNG, so the seeded figures themselves stay identical
+        const now = Date.now();
+        entries.forEach((e: any, i: number) => {
+          if (e.status !== 'verified' || e.verifiedAt) return;
+          const [y, mo] = e.month.split('-').map(Number);
+          e.verifiedAt = new Date(Math.min(now, new Date(y, mo, 2 + (i % 10), 10 + (i % 7)).getTime()));
+        });
+        await RevEntry.insertMany(entries.splice(0), { ordered: false });
+      }
       if (targets.length >= 20_000 || (force && targets.length)) await RevTarget.insertMany(targets.splice(0), { ordered: false });
     };
     const patwariOf = new Map(charges.filter((c) => c.post === 'patwari').map((c) => [String(c.unitId), c.userId]));
