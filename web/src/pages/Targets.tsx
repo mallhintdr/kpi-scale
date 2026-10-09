@@ -5,7 +5,7 @@ import { PageHeader } from '../components/AppShell';
 import { FyPicker } from '../components/rev';
 import { Button, Card, Empty, ErrorState, Field, Loading, Select, useToast } from '../components/ui';
 import { get, put } from '../lib/api';
-import { MILLIONS, fmtPKR, useCaps, useFy, useMeta, type HeadDef } from '../lib/rev';
+import { fmtPKR, MILLIONS, symCaption, UNIT_LABEL, useCaps, useFy, useMeta, type HeadDef } from '../lib/rev';
 
 interface Row { unitId: string; roUserId: string | null; label: string; sub?: string; target: number; arrearDemand: number; opening: number }
 interface Grid { head: HeadDef; tehsil: { _id: string; name: string }; canEdit: boolean; rows: Row[] }
@@ -14,27 +14,31 @@ export default function Targets() {
   const caps = useCaps();
   const { data: meta } = useMeta();
   const [fy] = useFy();
-  const tehsils = caps.isAdmin ? [] : caps.charges.filter((c) => c.post === 'wasilbaqi').map((c) => c.unit);
+  const setters = new Set((meta?.posts ?? []).filter((p) => p.caps.includes('set_targets')).map((p) => p.key));
+  const tehsils = caps.isAdmin ? [] : caps.charges.filter((c) => setters.has(c.post)).map((c) => c.unit);
   const [tehsilId, setTehsilId] = useState('');
-  const [head, setHead] = useState('WR_RABI');
+  const [head, setHead] = useState('');
   useEffect(() => {
     if (!tehsilId && tehsils[0]) setTehsilId(tehsils[0]._id);
   }, [tehsils, tehsilId]);
+  useEffect(() => {
+    if (!head && meta?.heads[0]) setHead(meta.heads[0].code);
+  }, [meta, head]);
 
   return (
     <>
-      <PageHeader title="Targets & demand" subtitle="Set by Wasil Baqi Navees for each patwar circle" actions={<FyPicker />} />
-      {!tehsils.length ? <Card><Empty title="Only Wasil Baqi Navees set targets" body="Targets and demand are set at tehsil level by the Wasil Baqi Navees." /></Card> : (
+      <PageHeader title="Targets & demand" subtitle="Annual targets and opening balances for the units under you" actions={<FyPicker />} />
+      {!tehsils.length ? <Card><Empty title="Your posting does not set targets" body="Annual targets are set by the posts your organisation allows to set them." /></Card> : (
         <>
           <Card className="mb-4 grid gap-3 p-4 sm:grid-cols-2">
             {tehsils.length > 1 && (
-              <Field label="Tehsil">{(id) => <Select id={id} value={tehsilId} onChange={(e) => setTehsilId(e.target.value)}>{tehsils.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}</Select>}</Field>
+              <Field label="Area">{(id) => <Select id={id} value={tehsilId} onChange={(e) => setTehsilId(e.target.value)}>{tehsils.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}</Select>}</Field>
             )}
-            <Field label="Head">
+            <Field label="KPI">
               {(id) => (
                 <Select id={id} value={head} onChange={(e) => setHead(e.target.value)}>
-                  <optgroup label="Revenue">{meta?.heads.filter((h) => h.kind === 'revenue').map((h) => <option key={h.code} value={h.code}>{h.name}</option>)}</optgroup>
-                  <optgroup label="Case registers (opening pending)">{meta?.heads.filter((h) => h.kind === 'case').map((h) => <option key={h.code} value={h.code}>{h.name}</option>)}</optgroup>
+                  <optgroup label="Target KPIs">{meta?.heads.filter((h) => h.kind === 'revenue').map((h) => <option key={h.code} value={h.code}>{h.name}</option>)}</optgroup>
+                  <optgroup label="Workload KPIs (opening pending)">{meta?.heads.filter((h) => h.kind === 'case').map((h) => <option key={h.code} value={h.code}>{h.name}</option>)}</optgroup>
                 </Select>
               )}
             </Field>
@@ -86,10 +90,10 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
               </label>
             ) : (
               <div className="mt-1.5 grid grid-cols-2 gap-2">
-                <label className="block text-[11px] text-slate-500">Current demand (Rs)
+                <label className="block text-[11px] text-slate-500">Current target {symCaption()}
                   <input type="number" inputMode="decimal" min={0} disabled={!data.canEdit} className={`${cell} mt-0.5`} value={r.target || ''} onChange={set(i, 'target')} />
                 </label>
-                <label className="block text-[11px] text-slate-500">Arrears (Rs)
+                <label className="block text-[11px] text-slate-500">Arrears {symCaption()}
                   <input type="number" inputMode="decimal" min={0} disabled={!data.canEdit} className={`${cell} mt-0.5`} value={r.arrearDemand || ''} onChange={set(i, 'arrearDemand')} />
                 </label>
               </div>
@@ -106,11 +110,11 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
           <thead className="sticky top-0 bg-brand-700 text-center text-[14px] text-white">
             <tr className="border-b border-slate-100 dark:border-slate-800">
               <th className="w-12 border-r border-white/20 px-2 py-2.5 text-center font-medium">#</th>
-              <th className="border-r border-white/20 px-3 py-2.5 font-medium">{data.head.level === 'ro' ? 'Revenue officer' : 'Patwar circle'}</th>
+              <th className="border-r border-white/20 px-3 py-2.5 font-medium">{data.head.perHolder ? 'Officer' : UNIT_LABEL[data.head.level]}</th>
               {isCase ? <th className="px-3 py-2.5 text-right font-medium">Opening pending</th> : (
                 <>
-                  <th className="border-r border-white/20 px-3 py-2.5 text-right font-medium">Current demand (Rs)</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Arrears (Rs)</th>
+                  <th className="border-r border-white/20 px-3 py-2.5 text-right font-medium">Current target {symCaption()}</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Arrears {symCaption()}</th>
                 </>
               )}
             </tr>

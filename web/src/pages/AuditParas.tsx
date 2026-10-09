@@ -5,7 +5,7 @@ import { PageHeader } from '../components/AppShell';
 import { Bar, UnitField } from '../components/rev';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, Sheet, Textarea } from '../components/ui';
 import { get, patch, post } from '../lib/api';
-import { MILLIONS, fmtPKR, useCaps, useMeta, type UnitRef } from '../lib/rev';
+import { fmtPKR, getOrg, MILLIONS, symCaption, T, UNIT_LABEL, useCaps, useMeta, type UnitRef } from '../lib/rev';
 import { useSave } from './admin/shared';
 
 interface Para {
@@ -28,12 +28,13 @@ export default function AuditParas() {
     queryFn: () => get<ParaList>(`/rev/audit-paras?unitId=${unit!._id}${status !== 'all' ? `&status=${status}` : ''}`),
     enabled: !!unit,
   });
-  const canAdd = caps.isPatwari || caps.isWasilBaqi;
+  const canAdd = caps.registers.length > 0;
+  const reg = getOrg()?.registers[0];
   const tot = data?.summary.reduce((a, s) => ({ n: a.n + s.n, amount: a.amount + s.amount, recovered: a.recovered + s.recovered, settled: a.settled + s.settled }), { n: 0, amount: 0, recovered: 0, settled: 0 });
 
   return (
     <>
-      <PageHeader title="Audit paras" subtitle="Recorded at tehsil and patwar circle level" actions={canAdd && <Button size="sm" onClick={() => setEditing('new')}><Plus className="size-4" />Add</Button>} />
+      <PageHeader title={reg?.label ?? 'Registers'} subtitle={`Recorded at ${(reg?.levels ?? []).map((l) => UNIT_LABEL[l].toLowerCase()).join(' and ')} level`} actions={canAdd && <Button size="sm" onClick={() => setEditing('new')}><Plus className="size-4" />Add</Button>} />
       <div className="mb-3 grid gap-2 sm:grid-cols-2">
         <UnitField value={unit} onChange={setUnit} />
         <Segmented value={status} onChange={setStatus} options={[{ value: 'pending', label: 'Pending' }, { value: 'settled', label: 'Settled' }, { value: 'all', label: 'All' }]} />
@@ -44,7 +45,7 @@ export default function AuditParas() {
             <Card className="mb-3 grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-800">
               <Mini label="Paras" value={`${tot.settled}/${tot.n}`} sub="settled" />
               <Mini label="Amount" value={fmtPKR(tot.amount)} unit={MILLIONS} />
-              <Mini label="Recovered" value={fmtPKR(tot.recovered)} sub={tot.amount ? `${Math.round((tot.recovered / tot.amount) * 100)}%` : undefined} unit={MILLIONS} />
+              <Mini label={T.achieved} value={fmtPKR(tot.recovered)} sub={tot.amount ? `${Math.round((tot.recovered / tot.amount) * 100)}%` : undefined} unit={MILLIONS} />
             </Card>
           )}
           {data.summary.length > 0 && (
@@ -64,7 +65,7 @@ export default function AuditParas() {
             </>
           )}
           <SectionTitle>Paras · {data.items.length}</SectionTitle>
-          {!data.items.length ? <Card><Empty title="No audit paras" /></Card> : (
+          {!data.items.length ? <Card><Empty title={`No ${(reg?.label ?? 'items').toLowerCase()}`} /></Card> : (
             <Card className="divide-y divide-slate-100 dark:divide-slate-800">
               {data.items.map((p) => (
                 <button key={p._id} onClick={() => setEditing(p)} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800">
@@ -98,31 +99,33 @@ const Mini = ({ label, value, sub, unit }: { label: string; value: string; sub?:
 
 function ParaSheet({ para, defaultUnit, onClose }: { para: Para | null; defaultUnit: UnitRef | null; onClose: () => void }) {
   const { data: meta } = useMeta();
-  const [unit, setUnit] = useState<UnitRef | null>(para ? (para.unitId as UnitRef) : defaultUnit && ['tehsil', 'circle'].includes(defaultUnit.type) ? defaultUnit : null);
+  const reg = meta?.registers[0];
+  const regLevels = reg?.levels ?? [];
+  const [unit, setUnit] = useState<UnitRef | null>(para ? (para.unitId as UnitRef) : defaultUnit && regLevels.includes(defaultUnit.type) ? defaultUnit : null);
   const [f, setF] = useState({
-    category: para?.category ?? 'Water Rate', auditYear: para?.auditYear ?? '2024-25', paraNo: para?.paraNo ?? '', subject: para?.subject ?? '',
+    category: para?.category ?? getOrg()?.registers[0]?.categories[0] ?? '', auditYear: para?.auditYear ?? '2024-25', paraNo: para?.paraNo ?? '', subject: para?.subject ?? '',
     amount: String(para?.amount ?? ''), recovered: String(para?.recovered ?? '0'), status: para?.status ?? 'pending', remarks: para?.remarks ?? '',
   });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   const save = useSave(() => {
     const body = { ...f, amount: Number(f.amount), recovered: Number(f.recovered), subject: f.subject || undefined, remarks: f.remarks || undefined };
     return para ? patch(`/rev/audit-paras/${para._id}`, body) : post('/rev/audit-paras', { ...body, unitId: unit?._id });
-  }, [['rev']], 'Audit para saved', onClose);
+  }, [['rev']], 'Saved', onClose);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     save.mutate(undefined);
   };
   return (
-    <Sheet open onClose={onClose} title={para ? `Para ${para.paraNo}` : 'New audit para'} footer={<Button form="para-form" type="submit" block loading={save.isPending}>Save</Button>}>
+    <Sheet open onClose={onClose} title={para ? `No. ${para.paraNo}` : `New entry · ${reg?.label ?? ''}`} footer={<Button form="para-form" type="submit" block loading={save.isPending}>Save</Button>}>
       <form id="para-form" onSubmit={submit} className="space-y-4">
-        {!para && <Field label="Tehsil or patwar circle">{() => <UnitField value={unit} onChange={setUnit} accept={['tehsil', 'circle']} scope="work" />}</Field>}
+        {!para && <Field label={regLevels.map((l) => UNIT_LABEL[l]).join(' or ')}>{() => <UnitField value={unit} onChange={setUnit} accept={regLevels} scope="work" />}</Field>}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Category">{(id) => <Select id={id} value={f.category} onChange={set('category')}>{meta?.auditCategories.map((c) => <option key={c}>{c}</option>)}</Select>}</Field>
           <Field label="Audit year">{(id) => <Input id={id} required pattern="\d{4}-\d{2}" placeholder="2024-25" value={f.auditYear} onChange={set('auditYear')} disabled={!!para} />}</Field>
           <Field label="Para no.">{(id) => <Input id={id} required value={f.paraNo} onChange={set('paraNo')} disabled={!!para} />}</Field>
           <Field label="Status">{(id) => <Select id={id} value={f.status} onChange={set('status')}><option value="pending">Pending</option><option value="settled">Settled</option></Select>}</Field>
-          <Field label="Amount (Rs)">{(id) => <Input id={id} type="number" inputMode="decimal" min={0} required value={f.amount} onChange={set('amount')} />}</Field>
-          <Field label="Recovered (Rs)">{(id) => <Input id={id} type="number" inputMode="decimal" min={0} value={f.recovered} onChange={set('recovered')} />}</Field>
+          <Field label={`${reg?.amountLabel ?? 'Amount'} (${getOrg()?.money.symbol ?? ''})`}>{(id) => <Input id={id} type="number" inputMode="decimal" min={0} required value={f.amount} onChange={set('amount')} />}</Field>
+          <Field label={`${T.achieved} ${symCaption()}`}>{(id) => <Input id={id} type="number" inputMode="decimal" min={0} value={f.recovered} onChange={set('recovered')} />}</Field>
         </div>
         <Field label="Subject">{(id) => <Input id={id} value={f.subject} onChange={set('subject')} />}</Field>
         <Field label="Remarks">{(id) => <Textarea id={id} rows={2} value={f.remarks} onChange={set('remarks')} />}</Field>

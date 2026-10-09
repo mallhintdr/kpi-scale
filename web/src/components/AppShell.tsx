@@ -1,16 +1,17 @@
 import clsx from 'clsx';
 import {
   Bell, BarChart3, CheckSquare, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
-  Crosshair, FileSpreadsheet, GitCompareArrows, ShieldCheck, SlidersHorizontal, Table2, Target, UserCog,
+  Crosshair, FileSpreadsheet, GitCompareArrows, Network, ShieldCheck, SlidersHorizontal, Table2, Target, Upload, UserCog, Workflow,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { get } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { useCaps } from '../lib/rev';
+import { useCaps, useMeta } from '../lib/rev';
 import { useViewMode } from '../lib/mode';
-import { Avatar, GovLogo, IconButton } from './ui';
+import { ApiError } from '../lib/api';
+import { Avatar, Card, Empty, GovLogo, IconButton, Spinner } from './ui';
 
 type Caps = ReturnType<typeof useCaps>;
 export interface NavItem {
@@ -30,13 +31,16 @@ export const NAV: NavItem[] = [
   { to: '/compare', label: 'Compare areas', icon: GitCompareArrows, show: (c) => c.canCompare },
   { to: '/reports', label: 'Report builder', icon: FileSpreadsheet },
   { to: '/entry', label: 'Enter figures', icon: ClipboardEdit, show: (c) => c.canEnter },
-  { to: '/verify', label: 'Verify', icon: ShieldCheck, show: (c) => (c.isWasilBaqi || c.isSci) && !c.isAdmin },
-  { to: '/targets', label: 'Targets & demand', icon: Target, show: (c) => c.isWasilBaqi && !c.isAdmin },
+  { to: '/verify', label: 'Verify', icon: ShieldCheck, show: (c) => c.canVerify && !c.isAdmin },
+  { to: '/targets', label: 'Annual targets', icon: Target, show: (c) => c.canSetTargets && !c.isAdmin },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/notifications', label: 'Alerts', icon: Bell },
+  { to: '/admin/org', label: 'Organisation setup', icon: Workflow, show: (c) => c.isAdmin, group: 'admin' },
+  { to: '/admin/units', label: 'Hierarchy', icon: Network, show: (c) => c.isAdmin, group: 'admin' },
   { to: '/admin/people', label: 'People', icon: UserCog, show: (c) => c.isAdmin, group: 'admin' },
   { to: '/admin/postings', label: 'Postings', icon: MapPinned, show: (c) => c.isAdmin, group: 'admin' },
   { to: '/admin/scoring', label: 'Scoring weights', icon: SlidersHorizontal, show: (c) => c.isAdmin, group: 'admin' },
+  { to: '/admin/import', label: 'Bulk import', icon: Upload, show: (c) => c.isAdmin, group: 'admin' },
 ];
 export const visibleNav = (c: Caps) => NAV.filter((n) => !n.show || n.show(c));
 
@@ -52,6 +56,10 @@ export function AppShell() {
   const { pathname } = useLocation();
   const { data: unread = 0 } = useUnread();
   const items = visibleNav(caps);
+  const meta = useMeta();
+  const t = session!.tenant;
+  const orgLine = t.branding?.tagline ?? t.name;
+  const orgShort = t.branding?.shortName ?? t.name;
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -86,11 +94,11 @@ export function AppShell() {
       {/* Desktop sidebar: collapses to an icon rail */}
       <aside className={clsx('sticky top-0 hidden h-dvh shrink-0 flex-col bg-brand-800 text-white transition-[width] duration-200 lg:flex print:!hidden', collapsed ? 'w-[60px]' : 'w-52')}>
         <div className={clsx('flex border-b border-white/10', collapsed ? 'flex-col items-center gap-0.5 py-1.5' : 'h-[59px] items-center gap-2 pl-2.5 pr-1.5')}>
-          <Link to="/" title="Government of the Punjab" className="flex min-w-0 flex-1 items-center gap-2.5">
+          <Link to="/" title={t.name} className="flex min-w-0 flex-1 items-center gap-2.5">
             <GovLogo className="size-[42px] shrink-0" />
             {!collapsed && (
               <div className="min-w-0 leading-tight">
-                <div className="text-[11px] font-bold uppercase leading-tight tracking-wide">Government<br />of the Punjab</div>
+                <div className="line-clamp-2 text-[11px] font-bold uppercase leading-tight tracking-wide">{orgLine}</div>
               </div>
             )}
           </Link>
@@ -126,7 +134,7 @@ export function AppShell() {
           <div className="flex h-14 items-center gap-2 px-3 lg:px-4">
             <GovLogo className="size-9 shrink-0 lg:hidden" />
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-gold-400 sm:text-[11px] lg:hidden">Govt. of the Punjab</div>
+              <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-gold-400 sm:text-[11px] lg:hidden">{orgShort}</div>
               <div className="truncate text-[14px] font-semibold leading-tight sm:text-base"><span className="sm:hidden">Dashboard</span><span className="hidden sm:inline">Employee Performance Dashboard</span></div>
               <div className="hidden truncate text-xs text-brand-100 sm:block">{session!.tenant.name}</div>
             </div>
@@ -154,10 +162,21 @@ export function AppShell() {
           </div>
         </div>
         <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 pb-24 sm:px-4 lg:pb-5">
-          <Outlet />
+          {meta.isLoading ? (
+            <div className="py-16 text-center"><Spinner /></div>
+          ) : meta.error ? (
+            <Card className="mt-6">
+              <Empty
+                title={meta.error instanceof ApiError && meta.error.status === 409 ? 'Organisation not set up yet' : 'Could not load your organisation'}
+                body={(meta.error as Error).message}
+              />
+            </Card>
+          ) : (
+            <Outlet />
+          )}
         </main>
         <footer className="mx-auto hidden w-full max-w-[1600px] print:!hidden border-t border-slate-200 px-4 py-2.5 text-[11px] text-slate-500 lg:block dark:border-slate-800">
-          © {new Date().getFullYear()} Government of the Punjab · Employee Performance Dashboard
+          © {new Date().getFullYear()} {orgLine} · Employee Performance Dashboard
         </footer>
       </div>
 

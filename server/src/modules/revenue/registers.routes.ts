@@ -3,47 +3,59 @@ import { Types } from 'mongoose';
 import { z } from 'zod';
 import { badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { audit, notify } from '../../lib/notify.js';
-import { requireRole } from '../../middleware/auth.js';
+import { requireRole, type AuthUser } from '../../middleware/auth.js';
 import { objectId, q, validate } from '../../middleware/validate.js';
 import { AuditPara, Charge, ScoreConfig, Task, Unit, User } from '../../models/index.js';
-import { activeFilter, assertCanRead, assertCanSee, isWasilBaqiFor, myCharges, scopeRoots } from './access.js';
-import { AUDIT_CATEGORIES, BLOCKS, LEVELS, POSTS, POST_LABEL, POST_UNIT, SINGLE_HOLDER, type Post } from './catalog.js';
+import type { BP } from '../org/blueprint.js';
+import { bpOf } from '../org/service.js';
+import { activeFilter, assertCanRead, assertCanSee, hasCap, holdsOn, myCharges, scopeRoots } from './access.js';
 import { configResolver } from './scoring.js';
 
 const router = Router();
 
 /* ================================================================== *
- *  Audit paras — entered by the Patwari (circle) or Wasil Baqi (tehsil)
+ *  Registers (e.g. audit paras) — itemised, defined in the blueprint
  * ================================================================== */
+const registerOf = (bp: BP, key?: string) => {
+  const r = key ? bp.register.get(key) : bp.registers[0];
+  if (!r) throw badRequest('Unknown register');
+  return r;
+};
+
 router.get(
   '/audit-paras',
-  validate({ query: z.object({ unitId: objectId, status: z.enum(['pending', 'settled']).optional(), category: z.enum(AUDIT_CATEGORIES).optional() }) }),
+  validate({ query: z.object({ unitId: objectId, register: z.string().max(40).optional(), status: z.enum(['pending', 'settled']).optional(), category: z.string().max(80).optional() }) }),
   async (req, res) => {
+    const bp = bpOf(req);
     const { unitId, status, category } = q<any>(req);
+    const reg = registerOf(bp, q<any>(req).register);
     const unit = await assertCanRead(req.user!, unitId);
-    const filter: Record<string, unknown> = { anc: unit._id };
+    const base = { anc: unit._id, register: reg.key };
+    const filter: Record<string, unknown> = { ...base };
     if (status) filter.status = status;
     if (category) filter.category = category;
     const items = await AuditPara.find(filter).populate('unitId', 'name type').sort({ status: 1, auditYear: -1, paraNo: 1 }).limit(500).lean();
     const summary = await AuditPara.aggregate([
-      { $match: { anc: unit._id } },
+      { $match: base },
       { $group: { _id: '$category', n: { $sum: 1 }, amount: { $sum: '$amount' }, recovered: { $sum: '$recovered' }, settled: { $sum: { $cond: [{ $eq: ['$status', 'settled'] }, 1, 0] } } } },
       { $sort: { _id: 1 } },
     ]);
-    res.json({ unit: { _id: unit._id, name: unit.name, type: unit.type }, items, summary });
+    res.json({ register: reg, unit: { _id: unit._id, name: unit.name, type: unit.type }, items, summary });
   },
 );
 
-/** Patwari of the circle, or Wasil Baqi of the tehsil, may maintain paras. */
-async function canMaintainParas(me: any, unit: { _id: Types.ObjectId; anc: Types.ObjectId[]; type: string }) {
-  if (await isWasilBaqiFor(me, unit)) return true;
-  return unit.type === 'circle' && !!(await Charge.exists({ userId: me.id, post: 'patwari', unitId: unit._id, ...activeFilter() }));
-}
+/** Holders of the register's enter posts on (or above) the unit may maintain its items. */
+const canMaintain = (me: AuthUser, bp: BP, regKey: string, unit: { anc: Types.ObjectId[]; type: string }) => {
+  const reg = bp.register.get(regKey);
+  if (!reg || !reg.levels.includes(unit.type)) return Promise.resolve(false);
+  return holdsOn(me, reg.enterPosts, unit);
+};
 
 const paraBody = z.object({
   unitId: objectId,
-  category: z.enum(AUDIT_CATEGORIES),
-  auditYear: z.string().regex(/^\d{4}-\d{2}$/),
+  register: z.string().max(40).optional(),
+  category: z.string().trim().min(1).max(80),
+  auditYear: z.string().regex(/^\d{4}(-\d{2})?$/),
   paraNo: z.string().trim().min(1).max(30),
   subject: z.string().trim().max(300).optional(),
   amount: z.number().min(0).max(1e12),
@@ -53,49 +65,49 @@ const paraBody = z.object({
 });
 
 router.post('/audit-paras', validate({ body: paraBody }), async (req, res) => {
-  const unit = await assertCanSee(req.user!, req.body.unitId);
-  if (!['tehsil', 'circle'].includes(unit.type)) throw badRequest('Audit paras are recorded against a tehsil or a patwar circle');
-  if (!(await canMaintainParas(req.user!, unit))) throw forbidden('Only the Patwari of this circle or the Wasil Baqi Navees can record audit paras');
-  if (req.body.recovered > req.body.amount) throw badRequest('Recovered cannot exceed the para amount');
-  const para = await AuditPara.create({ ...req.body, anc: unit.anc, enteredBy: req.user!.id, settledAt: req.body.status === 'settled' ? new Date() : undefined });
-  await audit('auditPara.create', 'AuditPara', para._id);
+  const bp = bpOf(req);
+  const reg = registerOf(bp, req.body.register);
+  const unit = await assertCanSee(req.user!, req.body.unitId, bp);
+  if (!reg.levels.includes(unit.type)) throw badRequest(`${reg.label} are recorded against ${reg.levels.map((l) => bp.level.get(l)?.label).join(' or ')}`);
+  if (!reg.categories.includes(req.body.category)) throw badRequest('Unknown category');
+  if (!(await canMaintain(req.user!, bp, reg.key, unit))) throw forbidden(`You cannot record ${reg.label.toLowerCase()} here`);
+  if (req.body.recovered > req.body.amount) throw badRequest('Recovered cannot exceed the amount');
+  const para = await AuditPara.create({ ...req.body, register: reg.key, anc: unit.anc, enteredBy: req.user!.id, settledAt: req.body.status === 'settled' ? new Date() : undefined });
+  await audit('register.create', 'AuditPara', para._id, { register: reg.key });
   res.status(201).json(para);
 });
 
-router.patch(
-  '/audit-paras/:id',
-  validate({ params: z.object({ id: objectId }), body: paraBody.omit({ unitId: true }).partial() }),
-  async (req, res) => {
-    const para = await AuditPara.findById(req.params.id);
-    if (!para) throw notFound('Audit para');
-    const unit = await Unit.findById(para.unitId).lean();
-    if (!unit || !(await canMaintainParas(req.user!, unit))) throw forbidden();
-    const wasSettled = para.status === 'settled';
-    Object.assign(para, req.body);
-    if (para.recovered > para.amount) throw badRequest('Recovered cannot exceed the para amount');
-    if (!wasSettled && para.status === 'settled') para.settledAt = new Date();
-    await para.save();
-    await audit('auditPara.update', 'AuditPara', para._id, { fields: Object.keys(req.body) });
-    res.json(para);
-  },
-);
+router.patch('/audit-paras/:id', validate({ params: z.object({ id: objectId }), body: paraBody.omit({ unitId: true, register: true }).partial() }), async (req, res) => {
+  const bp = bpOf(req);
+  const para = await AuditPara.findById(req.params.id);
+  if (!para) throw notFound('Item');
+  const unit = await Unit.findById(para.unitId).lean();
+  if (!unit || !(await canMaintain(req.user!, bp, para.register, unit))) throw forbidden();
+  const wasSettled = para.status === 'settled';
+  Object.assign(para, req.body);
+  if (para.recovered > para.amount) throw badRequest('Recovered cannot exceed the amount');
+  if (!wasSettled && para.status === 'settled') para.settledAt = new Date();
+  await para.save();
+  await audit('register.update', 'AuditPara', para._id, { fields: Object.keys(req.body) });
+  res.json(para);
+});
 
 router.delete('/audit-paras/:id', validate({ params: z.object({ id: objectId }) }), async (req, res) => {
+  const bp = bpOf(req);
   const para = await AuditPara.findById(req.params.id);
-  if (!para) throw notFound('Audit para');
-  if (!(await isWasilBaqiFor(req.user!, { anc: para.anc as Types.ObjectId[] }))) throw forbidden('Only Wasil Baqi Navees can delete audit paras');
+  if (!para) throw notFound('Item');
+  if (!(await hasCap(req.user!, bp, 'manage_registers', { anc: para.anc as Types.ObjectId[] }))) throw forbidden('You cannot delete register items');
   await para.deleteOne();
-  await audit('auditPara.delete', 'AuditPara', para._id);
+  await audit('register.delete', 'AuditPara', para._id);
   res.status(204).end();
 });
 
 /* ================================================================== *
  *  Tasks — any officer can assign to anyone inside their jurisdiction
  * ================================================================== */
-
-/** Officers (any post) whose charge lies inside the caller's jurisdiction, excluding the caller. */
 router.get('/tasks/assignees', validate({ query: z.object({ search: z.string().max(60).optional() }) }), async (req, res) => {
-  const roots = await scopeRoots(req.user!);
+  const bp = bpOf(req);
+  const roots = await scopeRoots(req.user!, bp);
   if (!roots.length) return res.json([]);
   const units = await Unit.find({ anc: { $in: roots } }).select('_id name type').lean();
   const unitName = new Map(units.map((u) => [String(u._id), u]));
@@ -106,7 +118,7 @@ router.get('/tasks/assignees', validate({ query: z.object({ search: z.string().m
   const search = q<any>(req).search?.toLowerCase();
   const out = charges
     .filter((c) => c.userId && (!search || (c.userId as any).name.toLowerCase().includes(search) || unitName.get(String(c.unitId))?.name.toLowerCase().includes(search)))
-    .map((c) => ({ userId: (c.userId as any)._id, name: (c.userId as any).name, post: c.post, postLabel: POST_LABEL[c.post as Post], unitId: c.unitId, unitName: unitName.get(String(c.unitId))?.name }));
+    .map((c) => ({ userId: (c.userId as any)._id, name: (c.userId as any).name, post: c.post, postLabel: bp.postLabel(c.post), unitId: c.unitId, unitName: unitName.get(String(c.unitId))?.name }));
   res.json(out.slice(0, 200));
 });
 
@@ -131,13 +143,13 @@ router.post(
       title: z.string().trim().min(3).max(200),
       details: z.string().trim().max(2000).optional(),
       assigneeId: objectId,
-      unitId: objectId, // the assignee's charge unit
+      unitId: objectId,
       dueDate: z.coerce.date(),
       priority: z.enum(['normal', 'high', 'urgent']).default('normal'),
     }),
   }),
   async (req, res) => {
-    const unit = await assertCanSee(req.user!, req.body.unitId);
+    const unit = await assertCanSee(req.user!, req.body.unitId, bpOf(req));
     if (req.body.assigneeId === req.user!.id) throw badRequest('You cannot assign a task to yourself');
     const holds = await Charge.exists({ userId: req.body.assigneeId, unitId: unit._id, ...activeFilter() });
     if (!holds) throw badRequest('That officer does not hold charge of this unit');
@@ -147,22 +159,18 @@ router.post(
   },
 );
 
-router.post(
-  '/tasks/:id/complete',
-  validate({ params: z.object({ id: objectId }), body: z.object({ note: z.string().trim().max(1000).optional() }) }),
-  async (req, res) => {
-    const task = await Task.findById(req.params.id);
-    if (!task) throw notFound('Task');
-    if (String(task.assigneeId) !== req.user!.id) throw forbidden('Only the assignee can complete this task');
-    if (task.status === 'done') throw badRequest('Already completed');
-    task.status = 'done';
-    task.completedAt = new Date();
-    task.completionNote = req.body.note;
-    await task.save();
-    await notify(task.assignedBy, { type: 'task.done', title: `Task completed: ${task.title}`, link: '/tasks?box=assigned' });
-    res.json(task);
-  },
-);
+router.post('/tasks/:id/complete', validate({ params: z.object({ id: objectId }), body: z.object({ note: z.string().trim().max(1000).optional() }) }), async (req, res) => {
+  const task = await Task.findById(req.params.id);
+  if (!task) throw notFound('Task');
+  if (String(task.assigneeId) !== req.user!.id) throw forbidden('Only the assignee can complete this task');
+  if (task.status === 'done') throw badRequest('Already completed');
+  task.status = 'done';
+  task.completedAt = new Date();
+  task.completionNote = req.body.note;
+  await task.save();
+  await notify(task.assignedBy, { type: 'task.done', title: `Task completed: ${task.title}`, link: '/tasks?box=assigned' });
+  res.json(task);
+});
 
 router.delete('/tasks/:id', validate({ params: z.object({ id: objectId }) }), async (req, res) => {
   const task = await Task.findById(req.params.id);
@@ -173,45 +181,51 @@ router.delete('/tasks/:id', validate({ params: z.object({ id: objectId }) }), as
 });
 
 /* ================================================================== *
- *  Scoring configuration — admins, per organisation / division / district / tehsil
+ *  Scoring overrides — admins, for the organisation or any area
  * ================================================================== */
 router.get('/score-config', validate({ query: z.object({ scopeUnitId: objectId.optional() }) }), async (req, res) => {
+  const bp = bpOf(req);
   const { scopeUnitId } = q<any>(req);
   let anc: string[] = [];
-  if (scopeUnitId) {
-    const unit = await assertCanSee(req.user!, scopeUnitId);
-    if (!['division', 'district', 'tehsil'].includes(unit.type)) throw badRequest('Scoring can be configured for a division, district or tehsil');
-    anc = unit.anc.map(String);
-  }
-  const resolve = await configResolver();
+  if (scopeUnitId) anc = (await assertCanSee(req.user!, scopeUnitId, bp)).anc.map(String);
+  const resolve = await configResolver(bp);
   const own = await ScoreConfig.findOne({ scopeUnitId: scopeUnitId ?? null }).lean();
-  const effective = resolve(anc);
-  const inherited = resolve(anc.slice(0, -1));
-  res.json({ effective, inherited: scopeUnitId ? inherited : null, hasOverride: !!own, levels: LEVELS, blocks: BLOCKS });
+  res.json({
+    effective: resolve(anc),
+    inherited: scopeUnitId ? resolve(anc.slice(0, -1)) : null,
+    hasOverride: !!own,
+    profiles: bp.raw.profiles.map((p) => ({ key: p.key, label: p.label })),
+    blocks: bp.blocks,
+    // legacy names
+    levels: bp.raw.profiles.map((p) => p.key),
+  });
 });
 
-const blockSchema = z.object(Object.fromEntries(BLOCKS.map((b) => [b, z.number().min(0).max(100)])) as Record<(typeof BLOCKS)[number], z.ZodNumber>);
 router.put(
   '/score-config',
   requireRole('admin'),
   validate({
     body: z.object({
       scopeUnitId: objectId.nullish(),
-      blocks: z.object(Object.fromEntries(LEVELS.map((l) => [l, blockSchema])) as Record<(typeof LEVELS)[number], typeof blockSchema>),
-      heads: z.record(z.string(), z.number().min(0).max(100)),
+      blocks: z.record(z.string(), z.record(z.string(), z.number().min(0).max(100))),
+      heads: z.record(z.string(), z.number().min(0).max(1000)),
     }),
   }),
   async (req, res) => {
+    const bp = bpOf(req);
     const scopeUnitId = req.body.scopeUnitId ?? null;
-    if (scopeUnitId) await assertCanSee(req.user!, scopeUnitId);
-    for (const [lvl, w] of Object.entries(req.body.blocks) as [string, Record<string, number>][]) {
+    if (scopeUnitId) await assertCanSee(req.user!, scopeUnitId, bp);
+    for (const [p, w] of Object.entries(req.body.blocks) as [string, Record<string, number>][]) {
+      if (!bp.profiles.has(p)) throw badRequest(`Unknown profile "${p}"`);
+      for (const k of Object.keys(w)) if (!bp.block.has(k)) throw badRequest(`Unknown block "${k}"`);
       const total = Object.values(w).reduce((s, v) => s + v, 0);
-      if (Math.round(total) !== 100) throw badRequest(`Block weights for ${lvl} must add up to 100 (currently ${total})`);
+      if (Math.round(total) !== 100) throw badRequest(`Weights for ${bp.profiles.get(p)!.label} must add up to 100 (currently ${total})`);
     }
+    for (const k of Object.keys(req.body.heads)) if (!bp.metric.has(k)) throw badRequest(`Unknown KPI "${k}"`);
     const cfg = await ScoreConfig.findOneAndUpdate(
       { scopeUnitId },
       { $set: { blocks: req.body.blocks, heads: req.body.heads, updatedBy: req.user!.id }, $setOnInsert: { scopeUnitId } },
-      { upsert: true, new: true, runValidators: true },
+      { upsert: true, new: true },
     );
     await audit('scoreConfig.update', 'ScoreConfig', cfg._id, { scopeUnitId });
     res.json(cfg);
@@ -227,14 +241,27 @@ router.delete('/score-config', requireRole('admin'), validate({ query: z.object(
  *  Postings (charges) — admins
  * ================================================================== */
 router.get('/charges', validate({ query: z.object({ unitId: objectId }) }), async (req, res) => {
-  const unit = await assertCanSee(req.user!, q<any>(req).unitId);
+  const bp = bpOf(req);
+  const unit = await assertCanSee(req.user!, q<any>(req).unitId, bp);
   const items = await Charge.find({ unitId: unit._id }).populate('userId', 'name designation bps').sort({ to: 1, from: -1 }).lean();
-  res.json(items.map((c) => ({ ...c, postLabel: POST_LABEL[c.post as Post], active: !c.to || c.to > new Date() })));
+  res.json(items.map((c) => ({ ...c, postLabel: bp.postLabel(c.post), active: !c.to || c.to > new Date() })));
 });
 
 router.get('/my-charges', async (req, res) => {
   res.json(await myCharges(req.user!.id));
 });
+
+/** Validates a new posting against the blueprint (levels, single holder, exclusive posts). */
+export async function checkPosting(bp: BP, input: { userId: string; unitId: string; post: string }, unit: { _id: Types.ObjectId; type: string }) {
+  const def = bp.post.get(input.post);
+  if (!def) throw badRequest(`Unknown post "${input.post}"`);
+  if (!def.levels.includes(unit.type)) throw badRequest(`${def.label} is posted to a ${def.levels.map((l) => bp.level.get(l)?.label ?? l).join(' or ')}`);
+  const conflicting = [...(def.single ? [def.key] : []), ...def.exclusiveWith];
+  if (conflicting.length) {
+    const existing = await Charge.findOne({ unitId: unit._id, post: { $in: conflicting }, ...activeFilter() }).lean();
+    if (existing) throw badRequest(`This ${bp.level.get(unit.type)?.label ?? unit.type} already has a ${bp.postLabel(existing.post)}; end that charge first`);
+  }
+}
 
 router.post(
   '/charges',
@@ -243,25 +270,17 @@ router.post(
     body: z.object({
       userId: objectId,
       unitId: objectId,
-      post: z.enum(POSTS),
+      post: z.string().max(40),
       chargeType: z.enum(['regular', 'additional', 'look_after']).default('regular'),
       from: z.coerce.date().default(() => new Date()),
     }),
   }),
   async (req, res) => {
+    const bp = bpOf(req);
     const { userId, unitId, post, chargeType, from } = req.body;
-    const unit = await assertCanSee(req.user!, unitId);
-    const allowed = post === 'tehsildar' ? ['tehsil', 'qanungoi'] : [POST_UNIT[post as Post]];
-    if (!allowed.includes(unit.type)) throw badRequest(`${POST_LABEL[post as Post]} is posted to a ${allowed.join(' or ')}`);
+    const unit = await assertCanSee(req.user!, unitId, bp);
     if (!(await User.exists({ _id: userId, status: 'active' }))) throw notFound('User');
-    if (post === 'naib_tehsildar' || (post === 'tehsildar' && unit.type === 'qanungoi')) {
-      // A qanungoi has exactly one revenue officer
-      const ro = await Charge.exists({ unitId, post: { $in: ['tehsildar', 'naib_tehsildar'] }, ...activeFilter() });
-      if (ro) throw badRequest('This qanungoi already has a revenue officer; end that charge first');
-    } else if (SINGLE_HOLDER.includes(post)) {
-      const existing = await Charge.exists({ unitId, post, ...activeFilter() });
-      if (existing) throw badRequest(`This ${unit.type} already has a ${POST_LABEL[post as Post]}; end that charge first`);
-    }
+    await checkPosting(bp, { userId, unitId, post }, unit);
     const charge = await Charge.create({ userId, unitId, post, chargeType, from });
     await audit('charge.create', 'Charge', charge._id, { userId, unitId, post });
     res.status(201).json(charge);

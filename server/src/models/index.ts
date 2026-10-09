@@ -1,6 +1,6 @@
 import mongoose, { Schema, type InferSchemaType, type Types } from 'mongoose';
+import { dataVersionPlugin } from '../lib/dataVersion.js';
 import { tenantPlugin } from '../lib/tenantPlugin.js';
-import { AUDIT_CATEGORIES, BLOCKS, LEVELS, POSTS, UNIT_TYPES } from '../modules/revenue/catalog.js';
 
 const opts = { timestamps: true } as const;
 const tenantField = { tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, immutable: true } } as const;
@@ -13,6 +13,19 @@ const tenantSchema = new Schema(
     slug: { type: String, required: true, unique: true, lowercase: true, trim: true },
     status: { type: String, enum: ['active', 'suspended'], default: 'active' },
     plan: { type: String, enum: ['free', 'pro', 'enterprise'], default: 'free' },
+    /** The platform's own tenant holds the super-admins; it has no blueprint. */
+    isPlatform: { type: Boolean, default: false },
+    industry: { type: String, trim: true, maxlength: 60 },
+    contact: { name: String, email: String, phone: String },
+    branding: {
+      shortName: { type: String, maxlength: 40 },
+      tagline: { type: String, maxlength: 120 },
+      logoUrl: { type: String, maxlength: 500 },
+    },
+    limits: {
+      maxUsers: { type: Number, default: 5000 },
+      maxUnits: { type: Number, default: 50000 },
+    },
     settings: {
       timezone: { type: String, default: 'Asia/Karachi' },
       currency: { type: String, default: 'PKR' },
@@ -25,7 +38,8 @@ export const Tenant = mongoose.model('Tenant', tenantSchema);
 
 /* ---------------- User ---------------- */
 // App-level role. Operational authority comes from postings (Charge), not from this role.
-export const ROLES = ['owner', 'admin', 'manager', 'employee'] as const;
+// 'superadmin' exists only in the platform tenant: it creates organisations and their first admin.
+export const ROLES = ['superadmin', 'owner', 'admin', 'manager', 'employee'] as const;
 export type Role = (typeof ROLES)[number];
 
 const userSchema = new Schema(
@@ -69,11 +83,62 @@ sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 sessionSchema.index({ userId: 1 });
 export const Session = mongoose.model('Session', sessionSchema);
 
-/* ---------------- Territory: Division › District › Tehsil › Qanungoi › Patwar Circle › Mouza ---------------- */
+/* ---------------- Org Blueprint: hierarchy, posts, KPIs, scoring (one live version per organisation) ---------------- */
+const blueprintSchema = new Schema(
+  {
+    ...tenantField,
+    version: { type: Number, required: true, default: 1 },
+    template: String,
+    doc: { type: Schema.Types.Mixed, required: true },
+    updatedBy: ref('User'),
+  },
+  { ...opts, minimize: false },
+);
+blueprintSchema.plugin(tenantPlugin);
+blueprintSchema.index({ tenantId: 1 }, { unique: true });
+export const Blueprint = mongoose.model('Blueprint', blueprintSchema);
+
+/** Every saved version, so a KPI change can be reviewed or rolled back. */
+const blueprintHistorySchema = new Schema(
+  {
+    ...tenantField,
+    version: { type: Number, required: true },
+    doc: { type: Schema.Types.Mixed, required: true },
+    note: { type: String, maxlength: 300 },
+    updatedBy: ref('User'),
+  },
+  { timestamps: { createdAt: true, updatedAt: false }, minimize: false },
+);
+blueprintHistorySchema.plugin(tenantPlugin);
+blueprintHistorySchema.index({ tenantId: 1, version: -1 });
+export const BlueprintHistory = mongoose.model('BlueprintHistory', blueprintHistorySchema);
+
+/* ---------------- Import runs (bulk units / users / postings from CSV) ---------------- */
+const importRunSchema = new Schema(
+  {
+    ...tenantField,
+    kind: { type: String, enum: ['units', 'users', 'charges'], required: true },
+    dryRun: { type: Boolean, default: false },
+    status: { type: String, enum: ['queued', 'running', 'done', 'failed'], default: 'queued' },
+    total: { type: Number, default: 0 },
+    created: { type: Number, default: 0 },
+    updated: { type: Number, default: 0 },
+    errors: [{ row: Number, message: String, _id: false }],
+    createdBy: ref('User'),
+    finishedAt: Date,
+  },
+  { ...opts, suppressReservedKeysWarning: true },
+);
+importRunSchema.plugin(tenantPlugin);
+importRunSchema.index({ tenantId: 1, createdAt: -1 });
+export const ImportRun = mongoose.model('ImportRun', importRunSchema);
+
+/* ---------------- Territory: the organisation's hierarchy (levels come from its blueprint) ---------------- */
 const unitSchema = new Schema(
   {
     ...tenantField,
-    type: { type: String, enum: UNIT_TYPES, required: true },
+    /** Level key from the blueprint (e.g. 'district', 'branch'). */
+    type: { type: String, required: true, trim: true, maxlength: 40 },
     name: { type: String, required: true, trim: true, maxlength: 120 },
     code: { type: String, trim: true, maxlength: 40 },
     parentId: ref('Unit'),
@@ -84,7 +149,9 @@ const unitSchema = new Schema(
   opts,
 );
 unitSchema.plugin(tenantPlugin);
+unitSchema.plugin(dataVersionPlugin);
 unitSchema.index({ tenantId: 1, parentId: 1, name: 1 });
+unitSchema.index({ tenantId: 1, type: 1, code: 1 });
 unitSchema.index({ tenantId: 1, anc: 1, type: 1 });
 export const Unit = mongoose.model('Unit', unitSchema);
 
@@ -94,8 +161,8 @@ const chargeSchema = new Schema(
     ...tenantField,
     userId: ref('User', true),
     unitId: ref('Unit', true),
-    post: { type: String, enum: POSTS, required: true },
-    /** A Tehsildar's directly-held qanungois are recorded as post 'tehsildar' on a qanungoi unit. */
+    /** Post key from the blueprint. A post may be held at several levels (e.g. Tehsildar on a tehsil and on qanungois). */
+    post: { type: String, required: true, trim: true, maxlength: 40 },
     chargeType: { type: String, enum: ['regular', 'additional', 'look_after'], default: 'regular' },
     from: { type: Date, required: true },
     to: { type: Date, default: null },
@@ -103,6 +170,7 @@ const chargeSchema = new Schema(
   opts,
 );
 chargeSchema.plugin(tenantPlugin);
+chargeSchema.plugin(dataVersionPlugin);
 chargeSchema.index({ tenantId: 1, userId: 1, to: 1 });
 chargeSchema.index({ tenantId: 1, unitId: 1, post: 1, to: 1 });
 export const Charge = mongoose.model('Charge', chargeSchema);
@@ -124,6 +192,7 @@ const targetSchema = new Schema(
   opts,
 );
 targetSchema.plugin(tenantPlugin);
+targetSchema.plugin(dataVersionPlugin);
 targetSchema.index({ tenantId: 1, fy: 1, head: 1, unitId: 1, roUserId: 1 }, { unique: true });
 targetSchema.index({ tenantId: 1, fy: 1, anc: 1 });
 export const RevTarget = mongoose.model('RevTarget', targetSchema);
@@ -154,18 +223,21 @@ const entrySchema = new Schema(
   opts,
 );
 entrySchema.plugin(tenantPlugin);
+entrySchema.plugin(dataVersionPlugin);
 entrySchema.index({ tenantId: 1, fy: 1, head: 1, unitId: 1, roUserId: 1, month: 1 }, { unique: true });
 entrySchema.index({ tenantId: 1, fy: 1, anc: 1, status: 1 });
 entrySchema.index({ tenantId: 1, status: 1, anc: 1 });
 export const RevEntry = mongoose.model('RevEntry', entrySchema);
 
-/* ---------------- Audit paras (entered manually; independent of arrears) ---------------- */
+/* ---------------- Register items, e.g. audit paras (entered manually; independent of arrears) ---------------- */
 const auditParaSchema = new Schema(
   {
     ...tenantField,
-    unitId: ref('Unit', true), // tehsil or patwar circle
+    /** Register key from the blueprint ('audit' for audit paras). */
+    register: { type: String, required: true, default: 'audit', maxlength: 40 },
+    unitId: ref('Unit', true),
     anc: [{ type: Schema.Types.ObjectId }],
-    category: { type: String, enum: AUDIT_CATEGORIES, required: true },
+    category: { type: String, required: true, maxlength: 80 },
     auditYear: { type: String, required: true }, // e.g. 2023-24
     paraNo: { type: String, required: true, maxlength: 30 },
     subject: { type: String, maxlength: 300 },
@@ -179,8 +251,9 @@ const auditParaSchema = new Schema(
   opts,
 );
 auditParaSchema.plugin(tenantPlugin);
+auditParaSchema.plugin(dataVersionPlugin);
 auditParaSchema.index({ tenantId: 1, anc: 1, status: 1 });
-auditParaSchema.index({ tenantId: 1, unitId: 1, auditYear: 1, paraNo: 1 }, { unique: true });
+auditParaSchema.index({ tenantId: 1, register: 1, unitId: 1, auditYear: 1, paraNo: 1 }, { unique: true });
 export const AuditPara = mongoose.model('AuditPara', auditParaSchema);
 
 /* ---------------- Tasks ---------------- */
@@ -202,6 +275,7 @@ const taskSchema = new Schema(
   opts,
 );
 taskSchema.plugin(tenantPlugin);
+taskSchema.plugin(dataVersionPlugin);
 taskSchema.index({ tenantId: 1, assigneeId: 1, status: 1, dueDate: 1 });
 taskSchema.index({ tenantId: 1, assignedBy: 1, createdAt: -1 });
 taskSchema.index({ tenantId: 1, anc: 1, dueDate: 1 });
@@ -282,19 +356,20 @@ targetDriveSchema.index({ tenantId: 1, assignedBy: 1, createdAt: -1 });
 targetDriveSchema.index({ tenantId: 1, anc: 1, startDate: -1 });
 export const TargetDrive = mongoose.model('TargetDrive', targetDriveSchema);
 
-/* ---------------- Scoring configuration (organisation default, or per division / district / tehsil) ---------------- */
-const blockShape = Object.fromEntries(BLOCKS.map((b) => [b, { type: Number, min: 0, max: 100 }]));
+/* ---------------- Scoring overrides (organisation default, or per area) — weights per profile and block ---------------- */
 const scoreConfigSchema = new Schema(
   {
     ...tenantField,
     scopeUnitId: { type: Schema.Types.ObjectId, ref: 'Unit', default: null },
-    blocks: new Schema(Object.fromEntries(LEVELS.map((l) => [l, new Schema(blockShape, { _id: false })])), { _id: false }),
+    /** { [profileKey]: { [blockKey]: weight } } — keys come from the blueprint. */
+    blocks: { type: Schema.Types.Mixed, default: {} },
     heads: { type: Map, of: Number },
     updatedBy: ref('User'),
   },
   opts,
 );
 scoreConfigSchema.plugin(tenantPlugin);
+scoreConfigSchema.plugin(dataVersionPlugin);
 scoreConfigSchema.index({ tenantId: 1, scopeUnitId: 1 }, { unique: true });
 export const ScoreConfig = mongoose.model('ScoreConfig', scoreConfigSchema);
 

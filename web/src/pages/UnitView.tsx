@@ -11,7 +11,7 @@ import { TargetSummary } from './Assigned';
 import { useMe } from '../lib/auth';
 import { Badge, Card, Empty, ErrorState, Loading, Segmented, UnitCaption } from '../components/ui';
 import { get } from '../lib/api';
-import { MILLIONS, UNIT_LABEL, fmtPKR, fmtPct, useFy, type Block, type RevBand, type UnitRef } from '../lib/rev';
+import { fmtPct, fmtPKR, fmtValue, getOrg, MILLIONS, staffedLevel, T, tagLabel, UNIT_LABEL, useFy, type Block, type RevBand, type UnitRef } from '../lib/rev';
 
 export interface UnitData {
   fy: string;
@@ -24,11 +24,12 @@ export interface UnitData {
   blocks: Record<Block, number | null>;
   weights: Record<Block, number>;
   configSource: string | null;
-  revenue: { code: string; name: string; group: string; crop: string | null; target: number; collected: number; pct: number | null; arrearDemand: number; arrearCollected: number; arrearPct: number | null; pendingVerification: number }[];
-  cases: { code: string; name: string; level: string; opening: number; received: number; disposed: number; pending: number; pct: number | null }[];
+  revenue: { code: string; name: string; group: string; crop: string | null; tag: string | null; unit: 'money' | 'count' | 'number'; block: string; target: number; collected: number; pct: number | null; arrearDemand: number; arrearCollected: number; arrearPct: number | null; pendingVerification: number }[];
+  cases: { code: string; name: string; block: string; unit?: string; level: string; opening: number; received: number; disposed: number; pending: number; pct: number | null }[];
   arrears: Record<'total' | 'rabi' | 'kharif' | 'other', { demand: number; collected: number }>;
   totals: { target: number; collected: number; pending: number; untargeted: number; headsWithTarget: number };
   audit: { amt: number; rec: number; n: number; settled: number };
+  registers?: { key: string; label: string; block: string; amt: number; rec: number; n: number; settled: number }[];
   tasks: { due: number; onTime: number; open: number; overdue: number };
   children: (UnitRef & { score: number | null; band: RevBand; rank: number | null; target: number; collected: number; blocks: Record<Block, number | null> })[];
   holders: Holder[];
@@ -81,13 +82,26 @@ export function UnitBody({ data }: { data: UnitData }) {
   const perf = mode !== 'kpi';
   const tmode = mode === 'targets';
   // Plain achievement per area (Performance mode) — not weighted, not capped by scoring rules
-  const achieved: Record<Block, number | null> = {
-    revenue: collectedPct,
-    arrears: achievement(data.arrears.total.collected, data.arrears.total.demand),
-    cases: achievement(cases.disp, cases.load),
-    audit: data.audit.n ? achievement(data.audit.rec, data.audit.amt) : null,
-    tasks: achievement(data.tasks.onTime, data.tasks.due),
-  };
+  // Performance mode: plain achievement per scoring block (no weights)
+  const achieved: Record<Block, number | null> = Object.fromEntries((getOrg()?.blocks ?? []).map((b) => {
+    if (b.kind === 'target') {
+      const rows = data.revenue.filter((r) => r.block === b.key && r.target > 0);
+      if (!rows.length) return [b.key, null];
+      // Same-unit money KPIs add up; otherwise average each KPI's achievement
+      if (rows.every((r) => r.unit === 'money')) return [b.key, achievement(rows.reduce((x, r) => x + r.collected, 0), rows.reduce((x, r) => x + r.target, 0))];
+      return [b.key, rows.reduce((x, r) => x + (achievement(r.collected, r.target) ?? 0), 0) / rows.length];
+    }
+    if (b.kind === 'arrears') return [b.key, achievement(data.arrears.total.collected, data.arrears.total.demand)];
+    if (b.kind === 'flow') {
+      const rows = data.cases.filter((c) => c.block === b.key);
+      return [b.key, achievement(rows.reduce((x, c) => x + c.disposed, 0), rows.reduce((x, c) => x + c.opening + c.received, 0))];
+    }
+    if (b.kind === 'register') {
+      const regs = (data.registers ?? []).filter((r) => r.block === b.key && r.n > 0);
+      return [b.key, regs.length ? achievement(regs.reduce((x, r) => x + r.rec, 0), regs.reduce((x, r) => x + r.amt, 0)) : null];
+    }
+    return [b.key, achievement(data.tasks.onTime, data.tasks.due)];
+  }));
 
   return (
     <div className="space-y-3">
@@ -115,25 +129,25 @@ export function UnitBody({ data }: { data: UnitData }) {
       {/* ---------- Headline tiles ---------- */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          title="Revenue — current year" achieved={data.totals.collected} total={data.totals.target} fmt={fmtPKR} pace={data.elapsed}
+          title={`${T.money} — current year`} achieved={data.totals.collected} total={data.totals.target} fmt={fmtPKR} pace={data.elapsed}
           extras={[
             ...(data.totals.pending > 0 ? [{ label: 'Unverified', value: fmtPKR(data.totals.pending), tone: 'warn' as const }] : []),
-            ...(data.totals.untargeted > 0 ? [{ label: 'Recovered without target (not counted)', value: fmtPKR(data.totals.untargeted), tone: 'muted' as const }] : []),
+            ...(data.totals.untargeted > 0 ? [{ label: `${T.achieved} without target (not counted)`, value: fmtPKR(data.totals.untargeted), tone: 'muted' as const }] : []),
           ]} unit={MILLIONS}
         />
-        <MetricCard title="Arrears — previous years" achieved={data.arrears.total.collected} total={data.arrears.total.demand} fmt={fmtPKR} labels={{ total: 'Arrears' }} unit={MILLIONS} />
-        <MetricCard title="Case registers" achieved={cases.disp} total={cases.load} fmt={(v) => v.toLocaleString()} labels={{ total: 'Total', achieved: 'Disposed', balance: 'Pending' }} unit="(Cases)" />
+        <MetricCard title="Arrears — earlier years" achieved={data.arrears.total.collected} total={data.arrears.total.demand} fmt={fmtPKR} labels={{ total: 'Arrears' }} unit={MILLIONS} />
+        <MetricCard title={T.flowGroup} achieved={cases.disp} total={cases.load} fmt={(v) => v.toLocaleString()} labels={{ total: 'Total', achieved: T.disposed, balance: T.pending }} unit={`(${T.items[0].toUpperCase()}${T.items.slice(1)})`} />
         <MetricCard
-          title="Audit paras" achieved={data.audit.rec} total={data.audit.amt} fmt={fmtPKR} labels={{ total: 'Amount' }}
+          title={getOrg()?.registers.map((x) => x.label).join(' / ') || 'Registers'} achieved={data.audit.rec} total={data.audit.amt} fmt={fmtPKR} labels={{ total: 'Amount' }}
           action={<Link to="/audit-paras" className="text-[12px] font-medium text-brand-600 hover:underline">Details</Link>}
-          extras={data.audit.n ? [{ label: 'Paras settled', value: `${data.audit.settled} / ${data.audit.n}` }] : []} unit={data.audit.n ? MILLIONS : '(No paras)'}
+          extras={data.audit.n ? [{ label: 'Items settled', value: `${data.audit.settled} / ${data.audit.n}` }] : []} unit={data.audit.n ? MILLIONS : '(None recorded)'}
         />
       </div>
 
       {tmode && <AreaTargets unitId={data.unit._id} />}
 
       {/* ---------- Trend ---------- */}
-      <ChartCard title="Revenue collection" subtitle="Verified collections against the year's target">
+      <ChartCard title={`${T.money} trend`} subtitle="Verified achievement against the year's target">
         <CollectionTrend trend={data.trend} target={data.totals.target} />
       </ChartCard>
 
@@ -178,7 +192,7 @@ function Heads({ data }: { data: UnitData }) {
   return (
     <div className="grid gap-3 xl:grid-cols-2">
       <ChartCard
-        title="Revenue recovery by head"
+        title={`${T.money} by KPI`}
         subtitle="Current-year demand · bar = collected, tick = where an even pace would be today"
       >
         {!rows.length ? <Empty title="No demand set for this year" /> : (
@@ -190,13 +204,13 @@ function Heads({ data }: { data: UnitData }) {
                   {rows.filter((r) => r.group === g).map((r) => (
                     <div key={r.code}>
                       <div className="mb-1 flex items-baseline justify-between gap-2 text-sm">
-                        <span className="truncate text-slate-700 dark:text-slate-200">{r.crop ? r.crop[0].toUpperCase() + r.crop.slice(1) : r.name}</span>
+                        <span className="truncate text-slate-700 dark:text-slate-200">{r.tag && rows.filter((x) => x.group === g).length > 1 ? tagLabel(r.tag) : r.name}</span>
                         <span className="shrink-0 text-xs text-slate-500">
                           <b className="text-sm text-slate-900 tabular-nums dark:text-white">{fmtPct(r.pct == null ? null : Math.round(r.pct))}</b>
-                          <span className="ml-1.5 tabular-nums">{fmtPKR(r.collected)} / {fmtPKR(r.target)}</span>
+                          <span className="ml-1.5 tabular-nums">{fmtValue(r.collected, r.unit)} / {fmtValue(r.target, r.unit)}</span>
                         </span>
                       </div>
-                      <Bullet value={r.pct} pace={r.crop ? null : data.elapsed} height={10} />
+                      <Bullet value={r.pct} pace={r.tag ? null : data.elapsed} height={10} />
                     </div>
                   ))}
                 </div>
@@ -225,7 +239,7 @@ function Ranking({ data }: { data: UnitData }) {
   const holderOf = (unitId: string) => data.childHolders.filter((h) => h.unitId === unitId && !['wasilbaqi', 'sci'].includes(h.post));
   return (
     <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
-      <ChartCard title={`${data.children[0] ? UNIT_LABEL[data.children[0].type] : 'Unit'} ${perf ? 'achievement %' : 'scores'}`} subtitle={perf ? 'Revenue recovered against target · click a bar to drill down' : 'Weighted KPI score · click a bar to drill down'}>
+      <ChartCard title={`${data.children[0] ? UNIT_LABEL[data.children[0].type] : 'Unit'} ${perf ? 'achievement %' : 'scores'}`} subtitle={perf ? `${T.money} ${T.achieved.toLowerCase()} against target` + ' · click a bar to drill down' : 'Weighted KPI score · click a bar to drill down'}>
         <RankBars
           items={ordered.map((c) => ({ id: c._id, name: c.name, score: value(c), sub: c.target ? `${fmtPKR(c.collected)} / ${fmtPKR(c.target)} ${MILLIONS}` : undefined }))}
           onPick={(id) => navigate(`/units/${id}`)}
@@ -247,7 +261,7 @@ function Ranking({ data }: { data: UnitData }) {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{c.name}</div>
                 <div className="truncate text-[11px] text-slate-500">
-                  {h.length ? h.map((x) => x.user.name).join(', ') : c.type === 'circle' ? <span className="text-amber-600">Vacant</span> : '—'}
+                  {h.length ? h.map((x) => x.user.name).join(', ') : staffedLevel(c.type) ? <span className="text-amber-600">Vacant</span> : '—'}
                 </div>
               </div>
               {perf ? <span className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{v == null ? '—' : `${Math.round(v)}%`}</span> : <BandChip band={c.band} />}
@@ -288,7 +302,7 @@ function Arrears({ data }: { data: UnitData }) {
           );
         })}
       </div>
-      <ChartCard title="Arrears by head" subtitle="Uncollected demand from previous years">
+      <ChartCard title="Arrears by KPI" subtitle="Uncollected demand from earlier years">
         <div className="space-y-3">
           {rows.map((r) => (
             <div key={r.code}>

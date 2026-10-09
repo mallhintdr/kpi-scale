@@ -1,0 +1,52 @@
+# Production-style stack: MongoDB, Redis, API replicas, job workers and the web app.
+#   docker compose up -d --build
+#   docker compose up -d --scale api=4 --scale worker=2
+# Secrets come from server/.env.production (copy server/.env.example).
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes: [mongo:/data/db]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: [redis:/data]
+
+  migrate:
+    build: ./server
+    env_file: ./server/.env.production
+    environment: { MONGO_URI: mongodb://mongo:27017/kpi_dashboard, REDIS_URL: redis://redis:6379 }
+    command: ["node", "dist/migrate.js"]
+    depends_on: [mongo, redis]
+    restart: "no"
+
+  api:
+    build: ./server
+    env_file: ./server/.env.production
+    environment: { MONGO_URI: mongodb://mongo:27017/kpi_dashboard, REDIS_URL: redis://redis:6379, RUN_WORKER: "false" }
+    depends_on:
+      mongo: { condition: service_started }
+      redis: { condition: service_started }
+      migrate: { condition: service_completed_successfully }
+    deploy: { replicas: 2 }
+    restart: unless-stopped
+
+  worker:
+    build: ./server
+    env_file: ./server/.env.production
+    environment: { MONGO_URI: mongodb://mongo:27017/kpi_dashboard, REDIS_URL: redis://redis:6379 }
+    command: ["node", "dist/worker.js"]
+    depends_on: [mongo, redis]
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    ports: ["8080:80"]
+    depends_on: [api]
+    restart: unless-stopped
+
+volumes:
+  mongo: {}
+  redis: {}

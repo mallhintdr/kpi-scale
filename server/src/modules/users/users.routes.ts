@@ -5,11 +5,13 @@ import { audit, notify } from '../../lib/notify.js';
 import { requireRole } from '../../middleware/auth.js';
 import { idParam, pagination, q, validate } from '../../middleware/validate.js';
 import { Charge, ROLES, Session, User } from '../../models/index.js';
+import { getBlueprint } from '../org/service.js';
 import { activeFilter } from '../revenue/access.js';
-import { POST_LABEL, type Post } from '../revenue/catalog.js';
 import { hashPassword, password } from '../auth/auth.routes.js';
 
 const router = Router();
+/** Roles an organisation admin may give; 'superadmin' exists only in the platform tenant. */
+const ORG_ROLES = ROLES.filter((r) => r !== 'superadmin') as unknown as ['owner', 'admin', 'manager', 'employee'];
 const SAFE = 'name email role status designation employeeCode bps phone lastLoginAt createdAt';
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -17,7 +19,7 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 router.get(
   '/',
   requireRole('admin'),
-  validate({ query: pagination.extend({ role: z.enum(ROLES).optional(), status: z.enum(['active', 'invited', 'disabled']).optional() }) }),
+  validate({ query: pagination.extend({ role: z.enum(ORG_ROLES).optional(), status: z.enum(['active', 'invited', 'disabled']).optional() }) }),
   async (req, res) => {
     const { page, limit, search, role, status } = q<any>(req);
     const filter: Record<string, unknown> = {};
@@ -31,11 +33,12 @@ router.get(
       User.find(filter).select(SAFE).sort({ name: 1 }).skip((page - 1) * limit).limit(limit).lean(),
       User.countDocuments(filter),
     ]);
+    const bp = await getBlueprint(req.user!.tenantId);
     const charges = await Charge.find({ userId: { $in: items.map((u) => u._id) }, ...activeFilter() }).populate('unitId', 'name type').lean();
     const byUser = new Map<string, { post: string; postLabel: string; unit: string }[]>();
     for (const c of charges) {
       const list = byUser.get(String(c.userId)) ?? [];
-      list.push({ post: c.post, postLabel: POST_LABEL[c.post as Post], unit: (c.unitId as any)?.name });
+      list.push({ post: c.post, postLabel: bp?.postLabel(c.post) ?? c.post, unit: (c.unitId as any)?.name });
       byUser.set(String(c.userId), list);
     }
     res.json({ items: items.map((u) => ({ ...u, charges: byUser.get(String(u._id)) ?? [] })), total, page, limit });
@@ -51,7 +54,7 @@ router.get('/:id', requireRole('admin'), validate({ params: idParam }), async (r
 const userBody = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.string().trim().toLowerCase().email(),
-  role: z.enum(ROLES).default('employee'),
+  role: z.enum(ORG_ROLES).default('employee'),
   designation: z.string().trim().max(100).optional(),
   employeeCode: z.string().trim().max(40).optional(),
   bps: z.number().int().min(1).max(22).nullish(),

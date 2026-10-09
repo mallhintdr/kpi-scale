@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import { useAuth } from '../lib/auth';
 import { X, Loader2, Inbox, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import {
   createContext, forwardRef, useCallback, useContext, useEffect, useId, useState,
@@ -116,20 +117,21 @@ export const FormError = ({ error }: { error?: unknown }) =>
     </div>
   ) : null;
 
-/* ---------- Government logo ----------
- * White, transparent version for use on the green sidebar/header/login.
- * Generated from public/punjab-logo-original.png; falls back to the placeholder emblem. */
-export const GovLogo = ({ className }: { className?: string }) => (
+/* ---------- Organisation logo ----------
+ * Each organisation sets its own logo (light version for the green bars); the platform uses its icon. */
+export const OrgLogo = ({ src, className }: { src?: string; className?: string }) => (
   <img
-    src="/punjab-logo-white.png"
-    alt="Government of the Punjab"
+    src={src || '/icon.svg'}
+    alt=""
     className={clsx('object-contain', className)}
     onError={(e) => {
       const img = e.currentTarget;
-      if (!img.src.endsWith('/emblem.svg')) img.src = '/emblem.svg';
+      if (!img.src.endsWith('/icon.svg')) img.src = '/icon.svg';
     }}
   />
 );
+/** Logo of the signed-in organisation. */
+export const GovLogo = ({ className }: { className?: string }) => <OrgLogo src={useAuth().session?.tenant.branding?.logoUrl} className={className} />;
 
 /** Single unit caption, bottom-centre of a card or chart, e.g. "(Rs in Millions)". */
 export const UnitCaption = ({ children, className }: { children: ReactNode; className?: string }) => (

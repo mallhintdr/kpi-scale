@@ -9,7 +9,7 @@ import { BandChip } from '../components/charts';
 import { FyPicker, UnitField } from '../components/rev';
 import { Card, Empty, ErrorState, Field, Input, Loading, Select } from '../components/ui';
 import { get } from '../lib/api';
-import { fmtPKR, useCaps, useFy, useMeta, type Block, type Post, type RevBand, type UnitRef } from '../lib/rev';
+import { fmtPKR, getOrg, groupLevels, MILLIONS, parentLevels, T, UNIT_LABEL, useCaps, useFy, useMeta, type Block, type Post, type RevBand, type UnitRef } from '../lib/rev';
 import { POSTS_BY_UNIT } from './League';
 
 interface Cell { pct: number | null; done: number; of: number }
@@ -17,12 +17,12 @@ interface StaffRow {
   user: { _id: string; name: string; designation?: string; bps?: number; phone?: string };
   charges: string[]; context: string; score: number | null; band: RevBand; blocks: Record<Block, number | null>;
   rank: number | null; target: number; collected: number; heads: Record<string, Cell>;
-  unitId: string; chargeType: string; chargeCount: number; district?: string; tehsil?: string;
+  unitId: string; chargeType: string; chargeCount: number; areas?: Record<string, string>;
 }
 
 const EXTRA: { code: string; name: string; money?: boolean }[] = [
   { code: 'ARREARS', name: 'Arrears (all heads)', money: true },
-  { code: 'AUDIT', name: 'Audit paras' },
+  { code: 'AUDIT', name: getOrg()?.registers.map((r) => r.label).join(' / ') || 'Registers' },
   { code: 'TASKS', name: 'Tasks on time' },
 ];
 
@@ -53,7 +53,7 @@ export default function Staff() {
   // Columns: every head that has data for at least one officer in this list
   const columns = useMemo(() => {
     const present = new Set((data?.items ?? []).flatMap((r) => Object.keys(r.heads)));
-    const heads = (meta?.heads ?? []).filter((h) => present.has(h.code)).map((h) => ({ code: h.code, name: h.name, group: h.kind === 'revenue' ? 'Revenue' : 'Cases', money: h.kind === 'revenue' }));
+    const heads = (meta?.heads ?? []).filter((h) => present.has(h.code)).map((h) => ({ code: h.code, name: h.name, group: h.kind === 'revenue' ? 'Revenue' : 'Cases', money: h.unit === 'money' }));
     return [...heads, ...EXTRA.filter((e) => present.has(e.code)).map((e) => ({ ...e, group: 'Other', money: !!e.money }))];
   }, [data, meta]);
   const [mode] = useViewMode();
@@ -75,15 +75,15 @@ export default function Staff() {
     .sort((a, b) => (focus ? (b.heads[focus]?.pct ?? -1) - (a.heads[focus]?.pct ?? -1) : 0));
   const focusName = focus && columns.find((c) => c.code === focus)?.name;
   // Show District / Tehsil columns only when the list spans more than one of them
-  const multiDistrict = new Set(rows.map((r) => r.district)).size > 1;
-  const multiTehsil = new Set(rows.map((r) => r.tehsil)).size > 1;
+  // Hierarchy columns (e.g. District, Tehsil) appear only when the list spans more than one of them
+  const groupCols = groupLevels().filter((l) => new Set(rows.map((r) => r.areas?.[l])).size > 1);
   // Clicked row stays highlighted so the officer's figures can be read across the whole table
   const [selected, setSelected] = useState<string | null>(null);
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['S.No', ...(multiDistrict ? ['District'] : []), ...(multiTehsil ? ['Tehsil'] : []), 'Name', 'Area', 'BPS', perf ? 'Revenue achievement %' : 'KPI score', ...columns.flatMap((c) => [`${c.name} %`, `${c.name} done`, `${c.name} of`])];
-    const lines = rows.map((r) => [r.rank, ...(multiDistrict ? [r.district] : []), ...(multiTehsil ? [r.tehsil] : []), r.user.name, r.charges.join(' + '), r.user.bps, r.overall == null ? '' : Math.round(r.overall * 10) / 10, ...columns.flatMap((c) => [r.heads[c.code]?.pct, r.heads[c.code]?.done, r.heads[c.code]?.of])].map(esc).join(','));
+    const header = ['S.No', ...groupCols.map((l) => UNIT_LABEL[l]), 'Name', 'Area', 'BPS', perf ? `${T.money} achievement %` : 'KPI score', ...columns.flatMap((c) => [`${c.name} %`, `${c.name} done`, `${c.name} of`])];
+    const lines = rows.map((r) => [r.rank, ...groupCols.map((l) => r.areas?.[l] ?? ''), r.user.name, r.charges.join(' + '), r.user.bps, r.overall == null ? '' : Math.round(r.overall * 10) / 10, ...columns.flatMap((c) => [r.heads[c.code]?.pct, r.heads[c.code]?.done, r.heads[c.code]?.of])].map(esc).join(','));
     const url = URL.createObjectURL(new Blob([[header.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv' }));
     Object.assign(document.createElement('a'), { href: url, download: `staff-${post}-${unit?.name}-${fy}.csv` }).click();
     URL.revokeObjectURL(url);
@@ -91,15 +91,15 @@ export default function Staff() {
 
   return (
     <>
-      <PageHeader title="Staff performance" subtitle="Every subordinate, every head" actions={<FyPicker />} />
+      <PageHeader title="Staff performance" subtitle="Every subordinate, every KPI" actions={<FyPicker />} />
       <Card className="mb-4 grid gap-3 p-4 md:grid-cols-[1fr_1fr_1fr_auto] md:items-end">
-        <Field label="Area">{() => <UnitField value={unit} onChange={setUnit} accept={['division', 'district', 'tehsil', 'qanungoi']} />}</Field>
+        <Field label="Area">{() => <UnitField value={unit} onChange={setUnit} accept={parentLevels()} />}</Field>
         <Field label="Staff">{(id) => <Select id={id} value={post} onChange={(e) => setPost(e.target.value as Post)}>{options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}</Select>}</Field>
         <Field label="Search">
           {(id) => (
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-              <Input id={id} type="search" placeholder="Name or circle" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+              <Input id={id} type="search" placeholder="Name or unit" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
           )}
         </Field>
@@ -108,13 +108,13 @@ export default function Staff() {
         </button>
       </Card>
 
-      {!options.length ? <Card><Empty title="Choose a division, district, tehsil or qanungoi" /></Card> : isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !rows.length ? (
+      {!options.length ? <Card><Empty title="Choose an area" /></Card> : isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !rows.length ? (
         <Card><Empty title="No staff found" /></Card>
       ) : (
         <>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
             <span>
-              {rows.length} {data?.postLabel ?? 'officers'} · revenue figures (Rs in Millions) · tap a row to highlight it · tap a name for the profile
+              {rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS} · tap a row to highlight it · tap a name for the profile
               {focusName && (
                 <> · sorted by <b className="text-slate-700 dark:text-slate-200">{focusName}</b>{' '}
                   <button className="font-medium text-brand-600 hover:underline" onClick={() => setParams({}, { replace: true })}>clear</button>
@@ -129,12 +129,11 @@ export default function Staff() {
                 <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white">
                   <tr>
                     <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2.5">#</th>
-                    {multiDistrict && <th rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">District</th>}
-                    {multiTehsil && <th rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">Tehsil</th>}
+                    {groupCols.map((l) => <th key={l} rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">{UNIT_LABEL[l]}</th>)}
                     <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2.5">Name</th>
                     <th rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">Area</th>
                     {perf ? (
-                      <th colSpan={4} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-3 py-2">{tmode ? 'Assigned targets' : 'Revenue (all heads)'}</th>
+                      <th colSpan={4} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-3 py-2">{tmode ? 'Assigned targets' : `${T.money} (all KPIs)`}</th>
                     ) : (
                       <th rowSpan={2} className="border-b border-r-2 border-white/60 border-r-white/80 px-3 py-2.5">KPI score</th>
                     )}
@@ -152,7 +151,7 @@ export default function Staff() {
                     ))}
                   </tr>
                   <tr className="bg-brand-600 text-[11.5px] font-medium text-brand-50">
-                    {perf && (tmode ? ['Assigned', 'Met', 'Not met', '%'] : ['Target', 'Recovered', 'Balance', '%']).map((l, i) => (
+                    {perf && (tmode ? ['Assigned', 'Met', 'Not met', '%'] : ['Target', T.achieved, 'Balance', '%']).map((l, i) => (
                       <th key={`o${l}`} className={`border-b border-white/30 px-2.5 py-1.5 ${i === 3 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25'}`}>{l}</th>
                     ))}
                     {columns.flatMap((c) => subLabels(c.code, c.money).map((l, i) => (
@@ -170,8 +169,7 @@ export default function Staff() {
                     <tr key={key} onClick={() => setSelected(on ? null : key)} aria-selected={on}
                       className={`group cursor-pointer ${on ? 'bg-amber-100 outline outline-2 -outline-offset-2 outline-amber-400 dark:bg-amber-500/25' : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
                       <td className={`sticky left-0 z-10 w-10 min-w-10 border-b border-r border-b-slate-300 border-r-slate-400 px-1 py-2 text-center text-xs font-bold text-slate-500 tabular-nums dark:border-slate-700 ${stickyBg}`}>{r.rank ?? '–'}</td>
-                      {multiDistrict && <td className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[13px] dark:border-slate-700">{r.district}</td>}
-                      {multiTehsil && <td className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[13px] dark:border-slate-700">{r.tehsil}</td>}
+                      {groupCols.map((l) => <td key={l} className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[13px] dark:border-slate-700">{r.areas?.[l]}</td>)}
                       <td className={`sticky left-10 z-10 border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 dark:border-slate-700 ${stickyBg}`}>
                         <Link to={`/officers/${r.user._id}?fy=${fy}`} onClick={(e) => e.stopPropagation()} title={`Open ${r.user.name}'s profile`}
                           className={`block max-w-[7.5rem] truncate font-medium text-slate-900 sm:max-w-48 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline ${on ? 'underline' : ''}`}>
@@ -214,8 +212,8 @@ export default function Staff() {
 function subLabels(code: string, money: boolean) {
   if (code === 'AUDIT') return ['Paras', 'Settled', 'Pending', '% rec.'];
   if (code === 'TASKS') return ['Due', 'On time', 'Late', '%'];
-  if (code === 'ARREARS') return ['Arrears', 'Recovered', 'Balance', '%'];
-  return money ? ['Target', 'Recovered', 'Balance', '%'] : ['Total', 'Disposed', 'Pending', '%'];
+  if (code === 'ARREARS') return ['Arrears', T.achieved, 'Balance', '%'];
+  return money ? ['Target', T.achieved, 'Balance', '%'] : ['Total', T.disposed, T.pending, '%'];
 }
 
 const subTd = (i: number, extra = '') =>

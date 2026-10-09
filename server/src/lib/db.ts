@@ -7,7 +7,7 @@ mongoose.set('strictQuery', true);
 mongoose.set('autoIndex', !env.isProd);
 
 export async function connectDb() {
-  await mongoose.connect(env.MONGO_URI, { maxPoolSize: 50, serverSelectionTimeoutMS: 10_000 });
+  await mongoose.connect(env.MONGO_URI, { maxPoolSize: env.MONGO_POOL, serverSelectionTimeoutMS: 10_000 });
   logger.info('MongoDB connected');
 }
 

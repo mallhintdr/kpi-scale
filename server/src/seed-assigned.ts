@@ -2,12 +2,13 @@
  * Adds sample assigned targets (weekly / 15-day / monthly drives) to the existing pilot data.
  * Safe to re-run: removes previously seeded drives first. Usage: npm run seed:assigned
  */
+import { closeRedis } from './lib/redis.js';
 import { Types } from 'mongoose';
 import { connectDb, disconnectDb } from './lib/db.js';
 import { logger } from './lib/logger.js';
 import { runAsTenant } from './lib/tenantContext.js';
 import { AssignedTarget, Charge, Tenant, Unit } from './models/index.js';
-import { CASE_HEADS, REVENUE_HEADS } from './modules/revenue/catalog.js';
+import { CASE_HEADS, REVENUE_HEADS } from './seedCatalog.js';
 
 let s = 777;
 const rnd = () => {
@@ -77,11 +78,13 @@ async function main() {
     await AssignedTarget.insertMany(docs, { ordered: false });
     logger.info(`Seeded ${docs.length} assigned targets`);
   });
+  await closeRedis();
   await disconnectDb();
 }
 
 main().catch(async (err) => {
   logger.error({ err }, 'seed:assigned failed');
+  await closeRedis();
   await disconnectDb();
   process.exit(1);
 });

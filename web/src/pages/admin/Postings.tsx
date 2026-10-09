@@ -6,15 +6,13 @@ import { UnitField } from '../../components/rev';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Select, Sheet } from '../../components/ui';
 import { get, post } from '../../lib/api';
 import { fmtDate } from '../../lib/format';
-import { UNIT_LABEL, useCaps, useMeta, type Post, type UnitRef } from '../../lib/rev';
+import { UNIT_LABEL, getOrg, useCaps, useMeta, type Post, type UnitRef } from '../../lib/rev';
 import type { UserRow } from '../../lib/types';
 import { useSave } from './shared';
 
 interface ChargeRow { _id: string; post: Post; postLabel: string; chargeType: string; from: string; to?: string; active: boolean; userId: { _id: string; name: string; designation?: string; bps?: number } }
 
-const POSTS_FOR: Record<string, Post[]> = {
-  division: ['commissioner'], district: ['dc', 'adc_rev'], tehsil: ['ac', 'tehsildar', 'wasilbaqi', 'sci'], qanungoi: ['girdawar', 'naib_tehsildar', 'tehsildar'], circle: ['patwari'], mouza: [],
-};
+const postsFor = (level: string): Post[] => (getOrg()?.posts ?? []).filter((p) => p.levels.includes(level)).map((p) => p.key);
 
 export default function Postings() {
   const caps = useCaps();
@@ -30,7 +28,7 @@ export default function Postings() {
 
   return (
     <>
-      <PageHeader title="Postings" subtitle="Who holds charge of each unit" actions={unit && POSTS_FOR[unit.type]?.length > 0 && <Button size="sm" onClick={() => setAdding(true)}><Plus className="size-4" />Post officer</Button>} />
+      <PageHeader title="Postings" subtitle="Who holds charge of each unit" actions={unit && postsFor(unit.type).length > 0 && <Button size="sm" onClick={() => setAdding(true)}><Plus className="size-4" />Post officer</Button>} />
       <div className="mb-4"><UnitField value={unit} onChange={setUnit} scope="work" /></div>
       {isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : (
         <>
@@ -70,7 +68,7 @@ export default function Postings() {
 
 function PostSheet({ unit, onClose }: { unit: UnitRef; onClose: () => void }) {
   const { data: meta } = useMeta();
-  const posts = POSTS_FOR[unit.type] ?? [];
+  const posts = postsFor(unit.type);
   const [postCode, setPost] = useState<Post>(posts[0]);
   const [chargeType, setChargeType] = useState('regular');
   const [search, setSearch] = useState('');
@@ -78,7 +76,7 @@ function PostSheet({ unit, onClose }: { unit: UnitRef; onClose: () => void }) {
   const [who, setWho] = useState<UserRow | null>(null);
   const users = useQuery({ queryKey: ['users', 'post-search', term], queryFn: () => get<{ items: UserRow[] }>(`/users?search=${encodeURIComponent(term)}&limit=20&status=active`), enabled: term.length > 1 });
   const save = useSave(() => post('/rev/charges', { userId: who!._id, unitId: unit._id, post: postCode, chargeType }), [['rev']], 'Officer posted', onClose);
-  const label = (p: Post) => meta?.posts.find((x) => x.code === p)?.label ?? p;
+  const label = (p: Post) => meta?.posts.find((x) => x.key === p)?.label ?? p;
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(undefined); };
   return (
     <Sheet open onClose={onClose} title={`Post to ${unit.name}`} footer={<Button form="post-form" type="submit" block disabled={!who} loading={save.isPending}>Post officer</Button>}>

@@ -9,21 +9,28 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "seed": "tsx src/seed.ts",
-    "seed:assigned": "tsx src/seed-assigned.ts"
+    "seed:assigned": "tsx src/seed-assigned.ts",
+    "worker": "tsx src/worker.ts",
+    "worker:prod": "node dist/worker.js",
+    "migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
+    "bullmq": "^6.3.12",
     "compression": "^1.8.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "csv-parse": "^7.0.3",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.1.0",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.0",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
+    "rate-limit-redis": "^4.3.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {

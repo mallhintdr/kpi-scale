@@ -1,37 +1,53 @@
 import { Types } from 'mongoose';
+import { cached, dataVersion } from '../../lib/cache.js';
+import { getContext } from '../../lib/tenantContext.js';
 import { AuditPara, RevEntry, RevTarget, ScoreConfig, Task, Unit } from '../../models/index.js';
-import {
-  BLOCKS, CASE_HEADS, DEFAULT_BLOCK_WEIGHTS, DEFAULT_HEAD_WEIGHTS, REVENUE_HEADS, fyStartYear,
-  type Block, type BlockWeights, type Level,
-} from './catalog.js';
+import type { BP } from '../org/blueprint.js';
 
 /* ------------------------------------------------------------------ *
- *  Facts: raw sums per "fact key" (a circle, a tehsil, or an RO@tehsil)
+ *  Facts: raw sums per "fact key" (a unit, or a person@unit for per-holder KPIs)
  * ------------------------------------------------------------------ */
 export interface RevFact { t: number; cur: number; ad: number; arr: number; pending: number }
 export interface CaseFact { open: number; rec: number; disp: number }
+export interface RegFact { amt: number; rec: number; n: number; settled: number }
 export interface Facts {
+  /** Target KPIs (revenue-style): target, verified achievement, arrears. */
   rev: Record<string, RevFact>;
+  /** Flow KPIs (case-style): opening + received vs disposed. */
   cases: Record<string, CaseFact>;
-  audit: { amt: number; rec: number; n: number; settled: number };
+  /** Itemised registers (audit paras …), per register key. */
+  reg: Record<string, RegFact>;
   tasks: { due: number; onTime: number; open: number; overdue: number };
 }
-const emptyFacts = (): Facts => ({ rev: {}, cases: {}, audit: { amt: 0, rec: 0, n: 0, settled: 0 }, tasks: { due: 0, onTime: 0, open: 0, overdue: 0 } });
+const emptyFacts = (): Facts => ({ rev: {}, cases: {}, reg: {}, tasks: { due: 0, onTime: 0, open: 0, overdue: 0 } });
+const emptyReg = (): RegFact => ({ amt: 0, rec: 0, n: 0, settled: 0 });
 
-interface FactRow { unitId: string; roUserId: string | null; anc: string[]; f: Facts }
-
+export interface FactRow { unitId: string; roUserId: string | null; anc: string[]; f: Facts }
+export interface FactUnit { _id: string; type: string; name: string; anc: string[]; parentId?: string }
 export interface FactSet {
   rows: FactRow[];
-  units: Map<string, { _id: Types.ObjectId; type: string; name: string; anc: Types.ObjectId[]; parentId?: Types.ObjectId }>;
+  units: Map<string, FactUnit>;
 }
 
 const key = (u: unknown, ro: unknown) => `${u}|${ro ?? ''}`;
 
-/** Load every fact under `rootId` for a fiscal year in five aggregations. */
-export async function loadFacts(rootId: Types.ObjectId | string, fy: string): Promise<FactSet> {
+/**
+ * Every fact under `rootId` for a fiscal year (five aggregations), cached per organisation data
+ * version: repeated views of the same area cost one Redis read until something changes.
+ */
+export async function loadFacts(rootId: Types.ObjectId | string, fy: string, bp: BP): Promise<FactSet> {
+  const tenantId = String(getContext()?.tenantId ?? '');
+  const dv = await dataVersion(tenantId);
+  return cached(`facts:${tenantId}:${rootId}:${fy}:${dv}:${bp.version}`, 900, () => computeFacts(rootId, fy, bp), {
+    encode: (fs) => ({ rows: fs.rows, units: [...fs.units.values()] }),
+    decode: (x) => ({ rows: x.rows, units: new Map((x.units as FactUnit[]).map((u) => [u._id, u])) }),
+  });
+}
+
+async function computeFacts(rootId: Types.ObjectId | string, fy: string, bp: BP): Promise<FactSet> {
   const root = new Types.ObjectId(String(rootId));
-  const fyStart = new Date(fyStartYear(fy), 6, 1);
-  const fyEnd = new Date(fyStartYear(fy) + 1, 6, 1);
+  const fyStart = bp.fy.start(fy);
+  const fyEnd = bp.fy.end(fy);
   const now = new Date();
 
   const [units, targets, entries, paras, tasks] = await Promise.all([
@@ -50,7 +66,7 @@ export async function loadFacts(rootId: Types.ObjectId | string, fy: string): Pr
       { $match: { anc: root } },
       {
         $group: {
-          _id: '$unitId', amt: { $sum: '$amount' }, rec: { $sum: '$recovered' }, n: { $sum: 1 },
+          _id: { u: '$unitId', r: { $ifNull: ['$register', 'audit'] } }, amt: { $sum: '$amount' }, rec: { $sum: '$recovered' }, n: { $sum: 1 },
           settled: { $sum: { $cond: [{ $eq: ['$status', 'settled'] }, 1, 0] } },
         },
       },
@@ -69,7 +85,9 @@ export async function loadFacts(rootId: Types.ObjectId | string, fy: string): Pr
     ]),
   ]);
 
-  const unitMap = new Map(units.map((u) => [String(u._id), u as any]));
+  const unitMap = new Map<string, FactUnit>(
+    units.map((u) => [String(u._id), { _id: String(u._id), type: u.type, name: u.name, anc: u.anc.map(String), parentId: u.parentId ? String(u.parentId) : undefined }]),
+  );
   const rows = new Map<string, FactRow>();
   const row = (u: unknown, ro: unknown): FactRow | null => {
     const k = key(u, ro);
@@ -77,16 +95,18 @@ export async function loadFacts(rootId: Types.ObjectId | string, fy: string): Pr
     if (!r) {
       const unit = unitMap.get(String(u));
       if (!unit) return null;
-      r = { unitId: String(u), roUserId: ro ? String(ro) : null, anc: unit.anc.map(String), f: emptyFacts() };
+      r = { unitId: String(u), roUserId: ro ? String(ro) : null, anc: unit.anc, f: emptyFacts() };
       rows.set(k, r);
     }
     return r;
   };
 
   for (const t of targets) {
+    const kind = bp.kindOf(t.head);
+    if (!kind) continue; // KPI removed from the blueprint
     const r = row(t.unitId, t.roUserId);
     if (!r) continue;
-    if (REVENUE_HEADS.some((h) => h.code === t.head)) {
+    if (kind === 'target') {
       const rf = (r.f.rev[t.head] ??= { t: 0, cur: 0, ad: 0, arr: 0, pending: 0 });
       rf.t += t.target ?? 0;
       rf.ad += t.arrearDemand ?? 0;
@@ -96,15 +116,17 @@ export async function loadFacts(rootId: Types.ObjectId | string, fy: string): Pr
     }
   }
   for (const e of entries) {
+    const h = e._id.h as string;
+    const kind = bp.kindOf(h);
+    if (!kind) continue;
     const r = row(e._id.u, e._id.ro);
     if (!r) continue;
-    const h = e._id.h as string;
-    if (REVENUE_HEADS.some((x) => x.code === h)) {
+    if (kind === 'target') {
       const rf = (r.f.rev[h] ??= { t: 0, cur: 0, ad: 0, arr: 0, pending: 0 });
       if (e._id.v) {
         rf.cur += e.cur;
         rf.arr += e.arr;
-      } else rf.pending += e.cur + e.arr; // only verified money counts towards the score
+      } else rf.pending += e.cur + e.arr; // only verified figures count towards the score
     } else {
       const cf = (r.f.cases[h] ??= { open: 0, rec: 0, disp: 0 });
       cf.rec += e.rec;
@@ -112,8 +134,8 @@ export async function loadFacts(rootId: Types.ObjectId | string, fy: string): Pr
     }
   }
   for (const p of paras) {
-    const r = row(p._id, null);
-    if (r) r.f.audit = { amt: p.amt, rec: p.rec, n: p.n, settled: p.settled };
+    const r = row(p._id.u, null);
+    if (r) r.f.reg[p._id.r] = { amt: p.amt, rec: p.rec, n: p.n, settled: p.settled };
   }
   for (const t of tasks) {
     const r = row(t._id, null);
@@ -135,38 +157,49 @@ export function rollup(rows: FactRow[], pick: (r: FactRow) => boolean): Facts {
       const o = (out.cases[h] ??= { open: 0, rec: 0, disp: 0 });
       o.open += v.open; o.rec += v.rec; o.disp += v.disp;
     }
-    out.audit.amt += r.f.audit.amt; out.audit.rec += r.f.audit.rec; out.audit.n += r.f.audit.n; out.audit.settled += r.f.audit.settled;
+    for (const [k, v] of Object.entries(r.f.reg)) {
+      const o = (out.reg[k] ??= emptyReg());
+      o.amt += v.amt; o.rec += v.rec; o.n += v.n; o.settled += v.settled;
+    }
     out.tasks.due += r.f.tasks.due; out.tasks.onTime += r.f.tasks.onTime; out.tasks.open += r.f.tasks.open; out.tasks.overdue += r.f.tasks.overdue;
   }
   return out;
 }
 
-/** Rows inside a unit's subtree. RO-register rows are included only where `includeRo` allows. */
+/** Rows inside a unit's subtree. Per-holder rows are included only where `includeRo` allows. */
 export const inUnit = (unitId: string, includeRo: (ro: string) => boolean = () => true) => (r: FactRow) =>
   r.anc.includes(unitId) && (!r.roUserId || includeRo(r.roUserId));
 
 /* ------------------------------------------------------------------ *
- *  Configuration
+ *  Configuration: blueprint weights, overridden per area by ScoreConfig
  * ------------------------------------------------------------------ */
-export interface EffectiveConfig { blocks: Record<Level, BlockWeights>; heads: Record<string, number>; sourceUnitId: string | null }
-
+export type Weights = Record<string, number>;
+export interface EffectiveConfig { profiles: Record<string, Weights>; heads: Record<string, number>; sourceUnitId: string | null }
 export interface ConfigResolver { (anc: string[]): EffectiveConfig }
 
-/** Loads all scoring configs once; resolves the nearest one along a unit's ancestor chain. */
-export async function configResolver(): Promise<ConfigResolver> {
+export async function configResolver(bp: BP): Promise<ConfigResolver> {
   const all = await ScoreConfig.find().lean();
   const byScope = new Map(all.map((c) => [c.scopeUnitId ? String(c.scopeUnitId) : 'default', c]));
+  const blockKeys = bp.blocks.map((b) => b.key);
   const merge = (base: EffectiveConfig, c: any, src: string | null): EffectiveConfig => {
-    const blocks = structuredClone(base.blocks);
-    for (const lvl of Object.keys(blocks) as Level[]) {
-      const b = c?.blocks?.[lvl];
-      if (b) for (const k of BLOCKS) if (typeof b[k] === 'number') blocks[lvl][k] = b[k];
+    const profiles = structuredClone(base.profiles);
+    for (const p of Object.keys(profiles)) {
+      const b = c?.blocks?.[p];
+      if (b) for (const k of blockKeys) if (typeof b[k] === 'number') profiles[p][k] = b[k];
     }
     const heads = { ...base.heads };
     if (c?.heads) for (const [k, v] of Object.entries(c.heads instanceof Map ? Object.fromEntries(c.heads) : c.heads)) heads[k] = v as number;
-    return { blocks, heads, sourceUnitId: src };
+    return { profiles, heads, sourceUnitId: src };
   };
-  const base = merge({ blocks: structuredClone(DEFAULT_BLOCK_WEIGHTS), heads: { ...DEFAULT_HEAD_WEIGHTS }, sourceUnitId: null }, byScope.get('default'), null);
+  const base = merge(
+    {
+      profiles: Object.fromEntries(bp.raw.profiles.map((p) => [p.key, Object.fromEntries(blockKeys.map((k) => [k, p.weights[k] ?? 0]))])),
+      heads: Object.fromEntries(bp.raw.metrics.map((m) => [m.code, m.weight])),
+      sourceUnitId: null,
+    },
+    byScope.get('default'),
+    null,
+  );
   return (anc: string[]) => {
     // Apply from root down so the nearest (deepest) scope wins.
     let cfg = base;
@@ -183,110 +216,144 @@ export async function configResolver(): Promise<ConfigResolver> {
  * ------------------------------------------------------------------ */
 export interface Score {
   score: number | null;
-  blocks: Record<Block, number | null>;
-  weights: BlockWeights;
+  blocks: Record<string, number | null>;
+  weights: Weights;
 }
 
 const pct = (num: number, den: number) => (den > 0 ? Math.min(100, (num / den) * 100) : null);
 const round1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
 
-export function scoreFacts(f: Facts, level: Level, cfg: EffectiveConfig): Score {
+/** Register score: half the amount recovered, half the items settled. N/A when there are none. */
+const regScore = (a: RegFact) => (a.n > 0 ? ((a.amt > 0 ? Math.min(100, (a.rec / a.amt) * 100) : 100) + (a.settled / a.n) * 100) / 2 : null);
+
+export function scoreFacts(f: Facts, profile: string, cfg: EffectiveConfig, bp: BP): Score {
   const hw = cfg.heads;
-
-  // Revenue (current-year demand, verified collections, capped at 100% per head)
-  let rs = 0, rw = 0;
-  for (const h of REVENUE_HEADS) {
-    const v = f.rev[h.code];
-    const p = v ? pct(v.cur, v.t) : null;
-    if (p == null) continue;
-    rs += p * (hw[h.code] ?? 0);
-    rw += hw[h.code] ?? 0;
+  const blocks: Record<string, number | null> = {};
+  for (const b of bp.blocks) {
+    if (b.kind === 'target') {
+      // Achievement per KPI (capped at 100%), weighted; KPIs without a target do not count.
+      let s = 0, w = 0;
+      for (const m of bp.targetMetrics) {
+        if (m.block !== b.key) continue;
+        const v = f.rev[m.code];
+        const p = v ? pct(v.cur, v.t) : null;
+        if (p == null) continue;
+        s += p * (hw[m.code] ?? 0);
+        w += hw[m.code] ?? 0;
+      }
+      blocks[b.key] = w ? s / w : null;
+    } else if (b.kind === 'arrears') {
+      // Aggregated across KPIs that carry arrears demand; recoveries without demand never inflate it.
+      let ad = 0, arr = 0;
+      for (const m of bp.targetMetrics) {
+        const v = f.rev[m.code];
+        if (m.arrears && v && v.ad > 0) { ad += v.ad; arr += v.arr; }
+      }
+      blocks[b.key] = pct(arr, ad);
+    } else if (b.kind === 'flow') {
+      let s = 0, w = 0;
+      for (const m of bp.flowMetrics) {
+        if (m.block !== b.key) continue;
+        const v = f.cases[m.code];
+        if (!v) continue;
+        const p = pct(v.disp, v.open + v.rec);
+        if (p == null) continue;
+        s += p * (hw[m.code] ?? 1);
+        w += hw[m.code] ?? 1;
+      }
+      blocks[b.key] = w ? s / w : null;
+    } else if (b.kind === 'register') {
+      const a = emptyReg();
+      for (const r of bp.registers) {
+        if (r.block !== b.key) continue;
+        const v = f.reg[r.key];
+        if (v) { a.amt += v.amt; a.rec += v.rec; a.n += v.n; a.settled += v.settled; }
+      }
+      blocks[b.key] = regScore(a);
+    } else {
+      blocks[b.key] = pct(f.tasks.onTime, f.tasks.due);
+    }
   }
-  const revenue = rw ? rs / rw : null;
-
-  // Arrears: aggregated across all heads
-  // Only heads that actually carry arrears demand count; recoveries in a head without demand
-  // must not inflate the percentage.
-  let ad = 0, arr = 0;
-  for (const v of Object.values(f.rev)) if (v.ad > 0) { ad += v.ad; arr += v.arr; }
-  const arrears = pct(arr, ad);
-
-  // Case registers: disposal rate, weighted per head
-  let cs = 0, cw = 0;
-  for (const h of CASE_HEADS) {
-    const v = f.cases[h.code];
-    if (!v) continue;
-    const p = pct(v.disp, v.open + v.rec);
-    if (p == null) continue;
-    cs += p * (hw[h.code] ?? 1);
-    cw += hw[h.code] ?? 1;
-  }
-  const cases = cw ? cs / cw : null;
-
-  // Audit paras: half amount recovered, half paras settled. N/A when the unit has none.
-  const a = f.audit;
-  const audit = a.n > 0 ? (((a.amt > 0 ? Math.min(100, (a.rec / a.amt) * 100) : 100) + (a.settled / a.n) * 100) / 2) : null;
-
-  const tasks = pct(f.tasks.onTime, f.tasks.due);
-
-  const blocks: Record<Block, number | null> = { revenue, arrears, cases, audit, tasks };
-  const weights = cfg.blocks[level];
+  const weights = cfg.profiles[profile] ?? Object.values(cfg.profiles)[0] ?? {};
   let s = 0, w = 0;
-  for (const b of BLOCKS) {
-    if (blocks[b] == null || !weights[b]) continue; // missing block → its weight is redistributed
-    s += (blocks[b] as number) * weights[b];
-    w += weights[b];
+  for (const b of bp.blocks) {
+    const v = blocks[b.key];
+    if (v == null || !weights[b.key]) continue; // missing block → its weight is redistributed
+    s += v * weights[b.key];
+    w += weights[b.key];
   }
   return {
     score: w ? round1(s / w) : null,
-    blocks: Object.fromEntries(BLOCKS.map((b) => [b, round1(blocks[b])])) as Record<Block, number | null>,
+    blocks: Object.fromEntries(bp.blocks.map((b) => [b.key, round1(blocks[b.key])])),
     weights,
   };
 }
 
-export function band(score: number | null) {
-  if (score == null) return 'n/a';
-  if (score >= 90) return 'outstanding';
-  if (score >= 75) return 'good';
-  if (score >= 60) return 'satisfactory';
-  if (score >= 40) return 'below';
-  return 'poor';
-}
-
-/** Per-head breakdown for display. Arrears are reported both per head (crop-wise) and in aggregate. */
-export function breakdown(f: Facts) {
-  const revenue = REVENUE_HEADS.map((h) => {
-    const v = f.rev[h.code] ?? { t: 0, cur: 0, ad: 0, arr: 0, pending: 0 };
+/** Per-KPI breakdown for display. Arrears are reported in aggregate and per tag (e.g. crop-wise). */
+export function breakdown(f: Facts, bp: BP) {
+  const revenue = bp.targetMetrics.map((m) => {
+    const v = f.rev[m.code] ?? { t: 0, cur: 0, ad: 0, arr: 0, pending: 0 };
     return {
-      code: h.code, name: h.name, group: h.group, crop: h.crop ?? null, enteredBy: h.enteredBy,
+      code: m.code, name: m.name, group: m.group, block: m.block, unit: m.unit, tag: m.tag ?? null, crop: m.tag ?? null, arrears: m.arrears,
       target: v.t, collected: v.cur, pct: round1(pct(v.cur, v.t)),
       arrearDemand: v.ad, arrearCollected: v.arr, arrearPct: round1(pct(v.arr, v.ad)),
       pendingVerification: v.pending,
     };
   });
-  const cases = CASE_HEADS.map((h) => {
-    const v = f.cases[h.code] ?? { open: 0, rec: 0, disp: 0 };
-    return { code: h.code, name: h.name, level: h.level, opening: v.open, received: v.rec, disposed: v.disp, pending: v.open + v.rec - v.disp, pct: round1(pct(v.disp, v.open + v.rec)) };
+  const cases = bp.flowMetrics.map((m) => {
+    const v = f.cases[m.code] ?? { open: 0, rec: 0, disp: 0 };
+    return {
+      code: m.code, name: m.name, block: m.block, unit: m.unit, perHolder: m.perHolder, level: m.level,
+      opening: v.open, received: v.rec, disposed: v.disp, pending: v.open + v.rec - v.disp, pct: round1(pct(v.disp, v.open + v.rec)),
+    };
   });
-  const sum = (sel: (r: (typeof revenue)[number]) => number, filter: (r: (typeof revenue)[number]) => boolean = () => true) =>
-    revenue.filter(filter).reduce((s, r) => s + sel(r), 0);
-  // Achievement only counts against heads that HAVE a target/demand. Money recovered in a head
-  // with no target is reported separately ("untargeted") and never raises the % achieved.
-  const hasArr = (r: (typeof revenue)[number]) => r.arrearDemand > 0;
-  const arrears = {
-    total: { demand: sum((r) => r.arrearDemand), collected: sum((r) => r.arrearCollected, hasArr) },
-    rabi: { demand: sum((r) => r.arrearDemand, (r) => r.crop === 'rabi'), collected: sum((r) => r.arrearCollected, (r) => r.crop === 'rabi' && hasArr(r)) },
-    kharif: { demand: sum((r) => r.arrearDemand, (r) => r.crop === 'kharif'), collected: sum((r) => r.arrearCollected, (r) => r.crop === 'kharif' && hasArr(r)) },
-    other: { demand: sum((r) => r.arrearDemand, (r) => !r.crop), collected: sum((r) => r.arrearCollected, (r) => !r.crop && hasArr(r)) },
-    untargeted: sum((r) => r.arrearCollected, (r) => !hasArr(r)),
+  type Row = (typeof revenue)[number];
+  const sum = (sel: (r: Row) => number, filter: (r: Row) => boolean = () => true) => revenue.filter(filter).reduce((s, r) => s + sel(r), 0);
+  // Achievement only counts against KPIs that HAVE a target/demand. Amounts achieved without a target are
+  // reported separately ("untargeted") and never raise the % achieved.
+  const arrRows = (r: Row) => r.arrears;
+  const hasArr = (r: Row) => r.arrearDemand > 0;
+  const arrearsFor = (pick: (r: Row) => boolean) => ({
+    demand: sum((r) => r.arrearDemand, (r) => arrRows(r) && pick(r)),
+    collected: sum((r) => r.arrearCollected, (r) => arrRows(r) && pick(r) && hasArr(r)),
+  });
+  const arrears: Record<string, any> = {
+    total: arrearsFor(() => true),
+    other: arrearsFor((r) => !r.tag),
+    untargeted: sum((r) => r.arrearCollected, (r) => arrRows(r) && !hasArr(r)),
   };
-  const hasTarget = (r: (typeof revenue)[number]) => r.target > 0;
+  for (const t of bp.raw.tags) arrears[t.key] = arrearsFor((r) => r.tag === t.key);
+
+  // Totals add up money KPIs only (counts and money never mix).
+  const money = (r: Row) => r.unit === 'money';
+  const hasTarget = (r: Row) => r.target > 0;
   const totals = {
-    target: sum((r) => r.target),
-    collected: sum((r) => r.collected, hasTarget),
-    untargeted: sum((r) => r.collected, (r) => !hasTarget(r)),
-    headsWithTarget: revenue.filter(hasTarget).length,
-    pending: sum((r) => r.pendingVerification, hasTarget),
+    target: sum((r) => r.target, money),
+    collected: sum((r) => r.collected, (r) => money(r) && hasTarget(r)),
+    untargeted: sum((r) => r.collected, (r) => money(r) && !hasTarget(r)),
+    headsWithTarget: revenue.filter((r) => money(r) && hasTarget(r)).length,
+    pending: sum((r) => r.pendingVerification, (r) => money(r) && hasTarget(r)),
   };
-  return { revenue, cases, arrears, totals, audit: f.audit, tasks: f.tasks };
+  const registers = bp.registers.map((r) => ({ key: r.key, label: r.label, block: r.block, ...(f.reg[r.key] ?? emptyReg()) }));
+  const audit = registers.reduce((a, r) => ({ amt: a.amt + r.amt, rec: a.rec + r.rec, n: a.n + r.n, settled: a.settled + r.settled }), emptyReg());
+  return { revenue, cases, arrears, totals, registers, audit, tasks: f.tasks };
+}
+
+/** Compact per-KPI figures used by lists, leagues, reports and comparisons. */
+export function headCells(b: ReturnType<typeof breakdown>, bp: BP) {
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const heads: Record<string, { pct: number | null; done: number; of: number }> = {};
+  for (const r of b.revenue) if (r.target > 0) heads[r.code] = { pct: r.pct, done: r.collected, of: r.target };
+  for (const c of b.cases) if (c.opening + c.received > 0) heads[c.code] = { pct: c.pct, done: c.disposed, of: c.opening + c.received };
+  const ad = b.arrears.total;
+  if (ad.demand > 0) heads.ARREARS = { pct: r1(Math.min(100, (ad.collected / ad.demand) * 100)), done: ad.collected, of: ad.demand };
+  // 'AUDIT' = all registers combined; with several registers each also gets its own REG_<key> cell
+  if (bp.registers.length > 1) {
+    for (const reg of b.registers) {
+      if (reg.n > 0) heads[`REG_${reg.key}`] = { pct: reg.amt ? r1(Math.min(100, (reg.rec / reg.amt) * 100)) : null, done: reg.settled, of: reg.n };
+    }
+  }
+  if (b.audit.n > 0) heads.AUDIT = { pct: b.audit.amt ? r1(Math.min(100, (b.audit.rec / b.audit.amt) * 100)) : null, done: b.audit.settled, of: b.audit.n };
+  if (b.tasks.due > 0) heads.TASKS = { pct: r1((b.tasks.onTime / b.tasks.due) * 100), done: b.tasks.onTime, of: b.tasks.due };
+  return heads;
 }

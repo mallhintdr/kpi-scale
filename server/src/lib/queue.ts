@@ -1,0 +1,74 @@
+/**
+ * Background jobs on BullMQ (Redis). Without REDIS_URL jobs run inline on the next tick so
+ * development and single-instance installs work unchanged.
+ *
+ * Every job carries `tenantId` and runs inside that organisation's tenant scope.
+ */
+import { Queue, Worker, type JobsOptions } from 'bullmq';
+import { env } from '../config/env.js';
+import { logger } from './logger.js';
+import { bullConnection } from './redis.js';
+import { runAsTenant } from './tenantContext.js';
+
+export interface JobData {
+  tenantId: string;
+  [k: string]: unknown;
+}
+type Handler = (data: JobData) => Promise<unknown>;
+
+const QUEUE = 'kpi';
+const handlers = new Map<string, Handler>();
+let queue: Queue | null = null;
+let worker: Worker | null = null;
+
+export function defineJob(name: string, handler: Handler) {
+  handlers.set(name, handler);
+}
+
+const run = (name: string, data: JobData) => {
+  const h = handlers.get(name);
+  if (!h) throw new Error(`No handler for job "${name}"`);
+  return runAsTenant(data.tenantId, () => h(data));
+};
+
+/**
+ * Queue a job. `jobId` de-duplicates: while a job with that id is waiting, adding another is a no-op
+ * (used to coalesce bursts, e.g. many entries saved → one cache warm-up).
+ */
+export async function enqueue(name: string, data: JobData, opts: Pick<JobsOptions, 'jobId' | 'delay' | 'priority'> = {}) {
+  if (!env.REDIS_URL) {
+    setTimeout(() => run(name, data).catch((err) => logger.error({ err, job: name }, 'inline job failed')), opts.delay ?? 0).unref?.();
+    return;
+  }
+  queue ??= new Queue(QUEUE, { connection: bullConnection() });
+  await queue.add(name, data, {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 5000 },
+    ...opts,
+  });
+}
+
+/** Start processing jobs in this process. */
+export function startWorker(concurrency = Number(process.env.WORKER_CONCURRENCY ?? 8)) {
+  if (!env.REDIS_URL || worker) return;
+  worker = new Worker(QUEUE, async (job) => run(job.name, job.data as JobData), { connection: bullConnection(), concurrency });
+  worker.on('failed', (job, err) => logger.error({ err, job: job?.name, id: job?.id }, 'job failed'));
+  logger.info({ concurrency }, 'Job worker started');
+}
+
+export async function stopQueue() {
+  await Promise.allSettled([worker?.close(), queue?.close()]);
+  worker = null;
+  queue = null;
+}
+
+/** Job status for the client (imports). */
+export async function jobStatus(id: string) {
+  if (!env.REDIS_URL) return null;
+  queue ??= new Queue(QUEUE, { connection: bullConnection() });
+  const job = await queue.getJob(id);
+  if (!job) return null;
+  return { id: job.id, name: job.name, state: await job.getState(), progress: job.progress, result: job.returnvalue, error: job.failedReason, tenantId: (job.data as JobData).tenantId };
+}

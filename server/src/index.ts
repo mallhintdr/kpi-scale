@@ -1,15 +1,22 @@
 import { env } from './config/env.js';
 import { createApp } from './app.js';
+import { bootstrapPlatform } from './lib/bootstrap.js';
 import { connectDb, disconnectDb } from './lib/db.js';
 import { logger } from './lib/logger.js';
+import { stopQueue, startWorker } from './lib/queue.js';
+import { closeRedis } from './lib/redis.js';
 
 async function main() {
   await connectDb(); // connect before accepting traffic
-  const server = createApp().listen(env.PORT, () => logger.info(`API listening on :${env.PORT}`));
+  await bootstrapPlatform();
+  if (env.RUN_WORKER) startWorker();
+  const server = createApp().listen(env.PORT, () => logger.info(`API listening on :${env.PORT}${env.REDIS_URL ? ' (Redis enabled)' : ' (no Redis: in-process cache, inline jobs)'}`));
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'Shutting down');
     server.close(async () => {
+      await stopQueue();
+      await closeRedis();
       await disconnectDb();
       process.exit(0);
     });

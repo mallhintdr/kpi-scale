@@ -11,8 +11,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon-192.png', 'icon-180.png', 'punjab-logo-white.png'],
       manifest: {
-        name: 'Punjab Employee Performance Dashboard',
-        short_name: 'PEPD',
+        name: 'Employee Performance Dashboard',
+        short_name: 'KPI Dashboard',
         description: 'KPIs, targets and performance reviews',
         theme_color: '#187a43',
         background_color: '#f6f8f5',

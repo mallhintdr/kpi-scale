@@ -8,7 +8,7 @@ import { PageHeader } from '../components/AppShell';
 import { FyPicker, RevBandBadge, UnitField } from '../components/rev';
 import { Card, Empty, ErrorState, Field, Loading, Select } from '../components/ui';
 import { get } from '../lib/api';
-import { MILLIONS, fmtPKR, useCaps, useFy, type Block, type Post, type RevBand, type UnitRef } from '../lib/rev';
+import { MILLIONS, fmtPKR, parentLevels, postsUnder, useCaps, useFy, type Block, type Post, type RevBand, type UnitRef } from '../lib/rev';
 
 interface LeagueRow {
   user: { _id: string; name: string; designation?: string; bps?: number };
@@ -17,18 +17,14 @@ interface LeagueRow {
   target: number; collected: number; rank: number | null;
 }
 
-export const POSTS_BY_UNIT: Record<string, { code: Post; label: string }[]> = {
-  division: [{ code: 'dc', label: 'Deputy Commissioners' }, { code: 'adc_rev', label: 'ADCs (Revenue)' }, { code: 'ac', label: 'Assistant Commissioners' }, { code: 'tehsildar', label: 'Tehsildars' }, { code: 'naib_tehsildar', label: 'Naib Tehsildars' }, { code: 'girdawar', label: 'Girdawars' }, { code: 'patwari', label: 'Patwaris' }],
-  district: [{ code: 'ac', label: 'Assistant Commissioners' }, { code: 'tehsildar', label: 'Tehsildars' }, { code: 'naib_tehsildar', label: 'Naib Tehsildars' }, { code: 'girdawar', label: 'Girdawars' }, { code: 'patwari', label: 'Patwaris' }],
-  tehsil: [{ code: 'tehsildar', label: 'Tehsildar' }, { code: 'naib_tehsildar', label: 'Naib Tehsildars' }, { code: 'girdawar', label: 'Girdawars' }, { code: 'patwari', label: 'Patwaris' }],
-  qanungoi: [{ code: 'patwari', label: 'Patwaris' }],
-};
+/** Scored posts below an area of this level, e.g. { code: 'patwari', label: 'Patwaris' }. */
+export const POSTS_BY_UNIT = new Proxy({} as Record<string, { code: Post; label: string }[]>, { get: (_t, level: string) => postsUnder(level) });
 
 export default function League() {
   const caps = useCaps();
   const [fy] = useFy();
   const [unit, setUnit] = useState<UnitRef | null>(null);
-  const [post, setPost] = useState<Post>('patwari');
+  const [post, setPost] = useState<Post>('');
   useEffect(() => {
     if (!unit && caps.viewRoot) setUnit(caps.viewRoot);
   }, [caps.viewRoot, unit]);
@@ -58,7 +54,7 @@ export default function League() {
     <>
       <PageHeader title="League tables" subtitle={tmode ? 'Officers ranked by achievement of assigned targets' : perf ? 'Officers ranked by achievement against target' : 'Officers ranked by weighted KPI score'} actions={<FyPicker />} />
       <Card className="mb-4 grid gap-3 p-4 sm:grid-cols-2">
-        <Field label="Within">{() => <UnitField value={unit} onChange={setUnit} accept={['division', 'district', 'tehsil', 'qanungoi']} />}</Field>
+        <Field label="Within">{() => <UnitField value={unit} onChange={setUnit} accept={parentLevels()} />}</Field>
         <Field label="Rank">{(id) => <Select id={id} value={post} onChange={(e) => setPost(e.target.value as Post)}>{options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}</Select>}</Field>
       </Card>
       {!options.length ? <Card><Empty title="Choose a division, district, tehsil or qanungoi" /></Card> : isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !data?.items.length ? (

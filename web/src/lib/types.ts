@@ -1,4 +1,4 @@
-export type Role = 'owner' | 'admin' | 'manager' | 'employee';
+export type Role = 'superadmin' | 'owner' | 'admin' | 'manager' | 'employee';
 export type Band = 'outstanding' | 'exceeds' | 'meets' | 'below' | 'poor' | 'n/a';
 export type Unit = 'number' | 'percent' | 'currency' | 'hours' | 'rating';
 
@@ -15,6 +15,10 @@ export interface Tenant {
   name: string;
   slug: string;
   settings: { timezone: string; currency: string; ratingScale: number };
+  /** The platform tenant (super-admin console), not an organisation. */
+  isPlatform?: boolean;
+  industry?: string;
+  branding?: { shortName?: string; tagline?: string; logoUrl?: string };
 }
 export interface Ref {
   _id: string;

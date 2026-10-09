@@ -2,9 +2,11 @@ import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+import { RedisStore } from 'rate-limit-redis';
 import { env } from '../../config/env.js';
+import { redis } from '../../lib/redis.js';
 import { badRequest, conflict, unauthorized } from '../../lib/errors.js';
-import { runAsTenant, runUnscoped } from '../../lib/tenantContext.js';
+import { runUnscoped } from '../../lib/tenantContext.js';
 import { authenticate } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import { Session, Tenant, User } from '../../models/index.js';
@@ -13,7 +15,22 @@ import { hashToken, newRefreshToken, signAccessToken } from './tokens.js';
 const router = Router();
 const COOKIE = 'kpi_rt';
 
-const authLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
+// Many officers share one office IP: guard each account tightly, and each IP only loosely.
+const limiterStore = (prefix: string) => {
+  const r = redis();
+  return r ? new RedisStore({ prefix, sendCommand: (...args: string[]) => r.call(args[0], ...args.slice(1)) as any }) : undefined;
+};
+const perAccount = rateLimit({
+  windowMs: 15 * 60_000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, store: limiterStore('rl:login:acct:'),
+  keyGenerator: (req) => `${String(req.body?.email ?? '').toLowerCase()}|${req.ip}`,
+  skipSuccessfulRequests: true, // only failed attempts count
+  message: { error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts for this account. Try again in 15 minutes.' } },
+});
+const perIp = rateLimit({
+  windowMs: 15 * 60_000, limit: 500, standardHeaders: 'draft-8', legacyHeaders: false, store: limiterStore('rl:login:ip:'),
+  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many sign-in attempts from this network. Try again shortly.' } },
+});
+const authLimiter = [perIp, perAccount];
 
 export const password = z
   .string()
@@ -27,7 +44,7 @@ export const hashPassword = (p: string) => bcrypt.hash(p, 12);
 const slugify = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'org';
 
-async function uniqueSlug(name: string) {
+export async function uniqueSlug(name: string) {
   const base = slugify(name);
   for (let i = 0; i < 20; i++) {
     const slug = i === 0 ? base : `${base}-${Math.random().toString(36).slice(2, 6)}`;
@@ -44,7 +61,7 @@ const publicUser = (u: any) => ({
   designation: u.designation,
   bps: u.bps ?? null,
 });
-const publicTenant = (t: any) => ({ id: String(t._id), name: t.name, slug: t.slug, settings: t.settings });
+const publicTenant = (t: any) => ({ id: String(t._id), name: t.name, slug: t.slug, settings: t.settings, isPlatform: !!t.isPlatform, industry: t.industry, branding: t.branding ?? {} });
 
 const SHORT_SESSION_MS = 12 * 3_600_000;
 
@@ -77,32 +94,19 @@ async function issueSession(req: Request, res: Response, user: any, tenant: any,
   return { accessToken, user: publicUser(user), tenant: publicTenant(tenant) };
 }
 
-/* Create a new organisation with its owner account */
-router.post(
-  '/register-org',
-  authLimiter,
-  validate({
-    body: z.object({
-      orgName: z.string().trim().min(2).max(120),
-      name: z.string().trim().min(2).max(100),
-      email: z.string().trim().toLowerCase().email(),
-      password,
-    }),
-  }),
-  async (req, res) => {
-    const { orgName, name, email, password: pw } = req.body;
-    const tenant = await Tenant.create({ name: orgName, slug: await uniqueSlug(orgName) });
-    const user = await runAsTenant(tenant._id, async () =>
-      User.create({ name, email, passwordHash: await hashPassword(pw), role: 'owner' }),
-    );
-    res.status(201).json(await issueSession(req, res, user, tenant));
-  },
-);
+// Organisations are created only by the platform super-admin (see modules/platform).
+
+/* Public branding for an organisation's sign-in page (/login?org=slug) */
+router.get('/branding/:slug', async (req, res) => {
+  const t = await runUnscoped(() => Tenant.findOne({ slug: String(req.params.slug).toLowerCase(), status: 'active', isPlatform: { $ne: true } }).select('name slug branding').lean());
+  if (!t) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Organisation not found' } });
+  res.set('Cache-Control', 'public, max-age=300').json({ name: t.name, slug: t.slug, branding: t.branding ?? {} });
+});
 
 /* Login. If the email exists in several organisations, the client must pick one. */
 router.post(
   '/login',
-  authLimiter,
+  ...authLimiter,
   validate({
     body: z.object({
       email: z.string().trim().toLowerCase().email(),
@@ -116,7 +120,7 @@ router.post(
     const invalid = () => unauthorized('Invalid email or password');
 
     const candidates = await runUnscoped(() =>
-      User.find({ email, status: 'active' }).select('+passwordHash').limit(20).populate('tenantId', 'name slug status settings'),
+      User.find({ email, status: 'active' }).select('+passwordHash').limit(20).populate('tenantId', 'name slug status settings isPlatform industry branding'),
     );
     const matches = [];
     for (const u of candidates) {

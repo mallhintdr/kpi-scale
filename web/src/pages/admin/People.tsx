@@ -103,7 +103,7 @@ function UserSheet({ user, onClose }: { user: UserRow | null; onClose: () => voi
         </div>
         <Field label="Phone">{(id) => <Input id={id} type="tel" inputMode="tel" value={f.phone} onChange={set('phone')} />}</Field>
         <Field label="BPS">{(id) => <Input id={id} type="number" inputMode="numeric" min={1} max={22} value={f.bps} onChange={set('bps')} />}</Field>
-        <p className="text-xs text-slate-500">Postings (charge of a division, district, tehsil, qanungoi or circle) are managed under Postings.</p>
+        <p className="text-xs text-slate-500">Postings (who holds charge of which unit) are managed under Postings.</p>
         <Field label="Role">
           {(id) => (
             <Select id={id} value={f.role} onChange={set('role')} disabled={isSelf}>

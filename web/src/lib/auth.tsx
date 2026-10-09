@@ -15,7 +15,7 @@ interface AuthCtx {
   can: (min: Role) => boolean;
 }
 
-const RANK: Record<Role, number> = { employee: 0, manager: 1, admin: 2, owner: 3 };
+const RANK: Record<Role, number> = { employee: 0, manager: 1, admin: 2, owner: 3, superadmin: 4 };
 const Ctx = createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {

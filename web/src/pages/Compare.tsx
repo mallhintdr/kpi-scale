@@ -8,16 +8,11 @@ import { PageHeader } from '../components/AppShell';
 import { FyPicker, UnitField } from '../components/rev';
 import { Card, Empty, ErrorState, Field, Loading, Select } from '../components/ui';
 import { get } from '../lib/api';
-import { fmtPKR, useCaps, useFy, useMeta, type UnitRef } from '../lib/rev';
+import { compareAreaLevels, compareLevelsUnder, fmtPKR, MILLIONS, T, useCaps, useFy, useMeta, type UnitRef } from '../lib/rev';
 
 interface Cell { pct: number | null; done: number; of: number }
 interface CompareData { root: UnitRef; type: string; items: { _id: string; name: string; parent?: string; heads: Record<string, Cell> }[] }
 
-const LEVELS: Record<string, { value: 'district' | 'tehsil' | 'qanungoi'; label: string }[]> = {
-  division: [{ value: 'district', label: 'Districts' }, { value: 'tehsil', label: 'Tehsils' }, { value: 'qanungoi', label: 'Qanungois' }],
-  district: [{ value: 'tehsil', label: 'Tehsils' }, { value: 'qanungoi', label: 'Qanungois' }],
-  tehsil: [{ value: 'qanungoi', label: 'Qanungois' }],
-};
 const MAX = 6; // series cap: colours stay distinguishable
 const COLORS = Array.from({ length: 8 }, (_, i) => `var(--cat-${i + 1})`);
 
@@ -29,19 +24,19 @@ export default function Compare() {
   useEffect(() => {
     if (!area && caps.browseRoots[0]) setArea(caps.browseRoots[0]);
   }, [caps.browseRoots, area]);
-  const levels = LEVELS[area?.type ?? ''] ?? [];
-  const [level, setLevel] = useState<'district' | 'tehsil' | 'qanungoi'>('district');
+  const levels = area ? compareLevelsUnder(area.type).map((l) => ({ value: l.key, label: l.plural ?? `${l.label}s` })) : [];
+  const [level, setLevel] = useState<string>('');
   useEffect(() => {
     if (levels.length && !levels.some((l) => l.value === level)) setLevel(levels[0].value);
   }, [area]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const params = useMemo(() => [
-    { code: 'REVENUE', name: 'Overall revenue', money: true },
+    { code: 'REVENUE', name: `Overall ${T.money.toLowerCase()}`, money: true },
     { code: 'SCORE', name: 'KPI score', money: false },
-    ...(meta?.heads ?? []).filter((h) => h.kind === 'revenue').map((h) => ({ code: h.code, name: h.name, money: true })),
+    ...(meta?.heads ?? []).filter((h) => h.kind === 'revenue').map((h) => ({ code: h.code, name: h.name, money: h.unit === 'money' })),
     { code: 'ARREARS', name: 'Arrears', money: true },
     ...(meta?.heads ?? []).filter((h) => h.kind === 'case').map((h) => ({ code: h.code, name: h.name, money: false })),
-    { code: 'AUDIT', name: 'Audit paras (recovery)', money: true },
+    ...(meta?.registers.length ? [{ code: 'AUDIT', name: `${meta.registers.map((r) => r.label).join(' / ')} (recovery)`, money: true }] : []),
     { code: 'TASKS', name: 'Tasks on time', money: false },
   ], [meta]);
   const [picked, setPicked] = useState<string[]>(['REVENUE', 'WR_KHARIF', 'AIT_LAND']);
@@ -66,7 +61,7 @@ export default function Compare() {
   const rowH = Math.max(22, chosen.length * 9 + 12);
 
   if (caps.loaded && !caps.canCompare) {
-    return <><PageHeader title="Compare" /><Card><Empty title="Available to Commissioner, DC and ADC (Revenue)" /></Card></>;
+    return <><PageHeader title="Compare" /><Card><Empty title="Available to senior officers" body="Your organisation decides which posts can compare areas." /></Card></>;
   }
 
   return (
@@ -95,7 +90,7 @@ export default function Compare() {
           </div>
         </Card>
         <Card className="grid content-start gap-3 p-4">
-          <Field label="Area">{() => <UnitField value={area} onChange={setArea} accept={['division', 'district', 'tehsil']} />}</Field>
+          <Field label="Area">{() => <UnitField value={area} onChange={setArea} accept={compareAreaLevels()} />}</Field>
           <Field label="Compare">{(id) => <Select id={id} value={level} onChange={(e) => setLevel(e.target.value as typeof level)}>{levels.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}</Select>}</Field>
           <Field label="Sort by">{(id) => <Select id={id} value={sortKey} onChange={(e) => setSortBy(e.target.value)}>{chosen.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}</Select>}</Field>
         </Card>
@@ -150,7 +145,7 @@ export default function Compare() {
                   ))}
                 </BarChart>
               </ResponsiveContainer>
-              <div className="text-center text-[10px] font-medium text-slate-400">% achieved against target · KPI score out of 100 · hover a row for figures (Rs in Millions)</div>
+              <div className="text-center text-[10px] font-medium text-slate-400">% achieved against target · KPI score out of 100 · hover a row for figures {MILLIONS}</div>
             </Card>
 
             {/* Same data as a table */}
@@ -168,7 +163,7 @@ export default function Compare() {
                       ))}
                     </tr>
                     <tr className="bg-brand-600 text-[11.5px] font-medium text-brand-50">
-                      {chosen.filter((p) => p.code !== 'SCORE').flatMap((p) => (p.money ? ['Target', 'Recovered', 'Balance', '%'] : ['Total', 'Achieved', 'Balance', '%']).map((l, i) => (
+                      {chosen.filter((p) => p.code !== 'SCORE').flatMap((p) => (p.money ? ['Target', T.achieved, 'Balance', '%'] : ['Total', 'Achieved', 'Balance', '%']).map((l, i) => (
                         <th key={p.code + l} className={clsx('border-b border-white/30 px-2.5 py-1.5', i === 3 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25')}>{l}</th>
                       )))}
                     </tr>

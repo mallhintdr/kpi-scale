@@ -12,8 +12,11 @@ import { runAsTenant, runUnscoped } from './lib/tenantContext.js';
 import {
   Audit, AuditPara, Charge, Notification, RevEntry, RevTarget, ScoreConfig, Session, Task, Tenant, Unit, User,
 } from './models/index.js';
-import { AUDIT_CATEGORIES, CASE_HEADS, REVENUE_HEADS, fyMonths } from './modules/revenue/catalog.js';
+import { AUDIT_CATEGORIES, CASE_HEADS, REVENUE_HEADS, fyMonths } from './seedCatalog.js';
 import { hashPassword } from './modules/auth/auth.routes.js';
+import { saveBlueprint } from './modules/org/service.js';
+import { revenueDepartment } from './modules/org/templates.js';
+import { closeRedis } from './lib/redis.js';
 
 const PASSWORD = 'Password123';
 const SLUG = 'bor-bahawalpur';
@@ -67,9 +70,11 @@ async function main() {
   // Make sure indexes exist for the new collections
   await Promise.all([Unit, Charge, RevTarget, RevEntry, AuditPara, Task, ScoreConfig, User, Notification, Audit, Session].map((m: any) => m.syncIndexes()));
 
-  const tenant = await Tenant.create({ name: 'Board of Revenue — Bahawalpur Division', slug: SLUG, settings: { timezone: 'Asia/Karachi', currency: 'PKR', ratingScale: 5 } });
+  const tenant = await Tenant.create({ name: 'Board of Revenue — Bahawalpur Division', slug: SLUG, industry: 'Public sector', branding: { logoUrl: '/punjab-logo-white.png', tagline: 'Government of the Punjab', shortName: 'Board of Revenue' }, settings: { timezone: 'Asia/Karachi', currency: 'PKR', ratingScale: 5 } });
   const passwordHash = await hashPassword(PASSWORD);
   const tid = tenant._id;
+
+  await runAsTenant(tid, () => saveBlueprint(String(tid), { ...revenueDepartment, name: tenant.name }, { template: 'revenue_department', note: 'Seeded', skipUsageCheck: true }));
 
   await runAsTenant(tid, async () => {
     const units: any[] = [];
@@ -306,11 +311,13 @@ async function main() {
 
   logger.info(`Seeded ${SLUG}. Password for all test users: ${PASSWORD}`);
   logger.info('Try: admin@bwp.test · sci.hasilpur@bwp.test · commissioner@bwp.test · dc.bahawalpur@bwp.test · ac.hasilpur@bwp.test · tehsildar.hasilpur@bwp.test · wasilbaqi.hasilpur@bwp.test · girdawar1.hasilpur@bwp.test · patwari1.hasilpur@bwp.test');
+  await closeRedis();
   await disconnectDb();
 }
 
 main().catch(async (err) => {
   logger.error({ err }, 'Seed failed');
+  await closeRedis();
   await disconnectDb();
   process.exit(1);
 });

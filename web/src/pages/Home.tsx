@@ -9,7 +9,7 @@ import { TargetCard, useAssigned } from '../components/targets';
 import { TargetSummary } from './Assigned';
 import { get } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { MILLIONS, UNIT_LABEL, fmtPKR, useCaps, useFy, type Block, type RevBand } from '../lib/rev';
+import { fmtPKR, getOrg, MILLIONS, T, UNIT_LABEL, useCaps, useFy, type Block, type RevBand } from '../lib/rev';
 import { useUnit, type UnitData } from './UnitView';
 
 interface MyScore { post: string; postLabel: string; score: number | null; band: RevBand; blocks: Record<Block, number | null>; target: number; collected: number; units: number }
@@ -53,7 +53,7 @@ export default function Home() {
                     <div className="min-w-0 flex-1 space-y-2">
                       {!perf && <RevBandBadge band={s.band} size="md" />}
                       <MetricCard
-                        title="Revenue — current year" achieved={s.collected} total={s.target} fmt={fmtPKR} unit={MILLIONS} compact
+                        title={`${T.money} — current year`} achieved={s.collected} total={s.target} fmt={fmtPKR} unit={MILLIONS} compact
                         pace={elapsed}
                       />
                       <div className="text-[11px] text-slate-400">{s.postLabel} · {s.units} unit{s.units === 1 ? '' : 's'} in charge</div>
@@ -71,7 +71,7 @@ export default function Home() {
       {unit.data && <KpiHeads data={unit.data} canDrill />}
 
       {caps.loaded && !caps.roots.length && (
-        <Card><Empty title="No posting assigned" body="Ask the administrator to post you to a division, district, tehsil, qanungoi or patwar circle." /></Card>
+        <Card><Empty title="No posting assigned" body="Ask your administrator to post you to a unit." /></Card>
       )}
     </>
   );
@@ -84,13 +84,13 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
   for (const r of data.revenue) {
     if (!(r.target > 0)) continue;
     cards.push({
-      code: r.code, eyebrow: 'Revenue', title: r.name, achieved: r.collected, total: r.target, fmt: fmtPKR, unit: MILLIONS,
+      code: r.code, eyebrow: 'Revenue', title: r.name, achieved: r.collected, total: r.target, fmt: r.unit === 'money' ? fmtPKR : (v: number) => v.toLocaleString(), unit: r.unit === 'money' ? MILLIONS : '(count)', labels: { achieved: T.achieved },
       pace: r.crop ? null : data.elapsed,
       extras: r.pendingVerification > 0 ? [{ label: 'Unverified', value: fmtPKR(r.pendingVerification), tone: 'warn' }] : [],
     });
   }
   const ad = data.arrears.total;
-  if (ad.demand > 0) cards.push({ code: 'ARREARS', eyebrow: 'Revenue', title: 'Arrears (all heads)', achieved: ad.collected, total: ad.demand, fmt: fmtPKR, labels: { total: 'Arrears' }, unit: MILLIONS });
+  if (ad.demand > 0) cards.push({ code: 'ARREARS', eyebrow: 'Revenue', title: 'Arrears (all KPIs)', achieved: ad.collected, total: ad.demand, fmt: fmtPKR, labels: { total: 'Arrears' }, unit: MILLIONS });
   for (const c of data.cases) {
     const load = c.opening + c.received;
     if (!(load > 0)) continue;
@@ -101,7 +101,7 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
     });
   }
   if (data.audit.n) cards.push({
-    code: 'AUDIT', eyebrow: 'Other', title: 'Audit paras', achieved: data.audit.rec, total: data.audit.amt, fmt: fmtPKR, labels: { total: 'Amount' }, unit: MILLIONS,
+    code: 'AUDIT', eyebrow: 'Other', title: getOrg()?.registers.map((x) => x.label).join(' / ') || 'Registers', achieved: data.audit.rec, total: data.audit.amt, fmt: fmtPKR, labels: { total: 'Amount' }, unit: MILLIONS,
     extras: [{ label: 'Paras settled', value: `${data.audit.settled} / ${data.audit.n}` }],
   });
   if (data.tasks.due) cards.push({
@@ -134,7 +134,7 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
           );
           return canDrill ? <Link key={code} to={`/staff?head=${code}`} className="block active:bg-slate-50 dark:active:bg-slate-800">{row}</Link> : <div key={code}>{row}</div>;
         })}
-        <div className="py-1.5 text-center text-[10px] font-medium text-slate-400">Revenue {MILLIONS} · cases, paras and tasks as counts</div>
+        <div className="py-1.5 text-center text-[10px] font-medium text-slate-400">{T.money} {MILLIONS} · other KPIs as counts</div>
       </Card>
       <KpiTable cards={cards} canDrill={canDrill} />
       {canDrill && <p className="mt-1.5 px-1 text-[11px] text-slate-400">Tap a KPI to see every subordinate ranked on it.</p>}
@@ -144,9 +144,9 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
 
 type KpiRowData = MetricCardProps & { code: string };
 const GROUPS: { key: string; label: string }[] = [
-  { key: 'Revenue', label: `Revenue · ${MILLIONS}` },
+  { key: 'Revenue', label: `${T.money} · ${MILLIONS}` },
   { key: 'Cases', label: 'Case registers · (cases)' },
-  { key: 'Other', label: 'Audit paras & tasks' },
+  { key: 'Other', label: 'Registers & tasks' },
 ];
 
 /** Desktop / tablet KPI view: one aligned table, grouped by category, one KPI per row. */
@@ -210,7 +210,7 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
         </table>
       </div>
       <div className="border-t border-slate-200 px-3 py-1.5 text-center text-[10px] font-medium text-slate-400 dark:border-slate-700">
-        "Expected by now" assumes an even pace through the year; crop heads (Rabi / Kharif) are seasonal and show "—".
+        "Expected by now" assumes an even pace through the year; tagged (seasonal) KPIs show "—".
       </div>
     </Card>
   );

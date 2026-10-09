@@ -10,6 +10,8 @@ export interface AuthUser {
   role: Role;
   name: string;
   email: string;
+  /** Signed in to the platform tenant (super-admin console). */
+  isPlatform?: boolean;
 }
 
 declare global {
@@ -38,7 +40,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
       User.findOne({ _id: payload.sub, tenantId: payload.tid })
         .select('name email role status tokenVersion')
         .lean(),
-      Tenant.findById(payload.tid).select('status').lean(),
+      Tenant.findById(payload.tid).select('status isPlatform').lean(),
     ]),
   );
   if (!user || user.status !== 'active' || user.tokenVersion !== payload.tv) throw unauthorized('Session revoked');
@@ -50,11 +52,12 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     role: user.role as Role,
     name: user.name,
     email: user.email,
+    isPlatform: !!tenant.isPlatform,
   };
   runWithContext({ tenantId: payload.tid, userId: req.user.id }, () => next());
 }
 
-const RANK: Record<Role, number> = { employee: 0, manager: 1, admin: 2, owner: 3 };
+const RANK: Record<Role, number> = { employee: 0, manager: 1, admin: 2, owner: 3, superadmin: 4 };
 
 /** Allow the request if the user's role is at least `min`. */
 export const requireRole =

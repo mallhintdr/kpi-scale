@@ -6,7 +6,7 @@ import { PageHeader } from '../components/AppShell';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, useToast } from '../components/ui';
 import { get, put } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { MILLIONS, fmtPKR, fyMonthsUpToNow, monthLabel, useCaps, useFy, type HeadDef, type UnitRef } from '../lib/rev';
+import { MILLIONS, UNIT_LABEL, fmtValue, fyMonthsUpToNow, levelIndex, monthLabel, useCaps, useFy, useMeta, type HeadDef, type UnitRef } from '../lib/rev';
 
 interface EntryRow {
   head: HeadDef;
@@ -31,68 +31,91 @@ export default function Entry() {
   const months = fyMonthsUpToNow(fy);
   const { data: charges = [] } = useQuery({ queryKey: ['rev', 'my-charges'], queryFn: () => get<MyChargeFull[]>('/rev/my-charges') });
 
-  // Wasil Baqi and SCI work across every circle of their tehsil
-  const wbTehsils = charges.filter((c) => c.post === 'wasilbaqi' || c.post === 'sci').map((c) => c.unit);
-  const patwariCircles = charges.filter((c) => c.post === 'patwari').map((c) => c.unit);
-  // Revenue officers enter their registers against the tehsil that contains their charge
-  const roTehsils = useMemo(() => {
-    const ids = new Set<string>();
-    for (const c of charges) if (c.post === 'tehsildar' || c.post === 'naib_tehsildar') ids.add(c.unit.type === 'tehsil' ? c.unit._id : String(c.unit.anc[2]));
-    return [...ids];
-  }, [charges]);
+  const { data: meta } = useMeta();
+  const heads = meta?.heads ?? [];
 
-  const [mode, setMode] = useState<'circle' | 'ro'>('circle');
-  const [tehsilId, setTehsilId] = useState('');
+  /*
+   * Where may I enter? For each posting:
+   *  - KPIs recorded per unit whose enter posts include my post → units at the KPI's level on or under my unit
+   *  - KPIs recorded per person whose holder posts include my post → my own register on my ancestor at that level
+   */
+  const unitHeads = heads.filter((h) => !h.perHolder);
+  const scopes = charges
+    .map((c) => {
+      const lvls = [...new Set(unitHeads.filter((h) => h.enterPosts.includes(c.post) && levelIndex(h.level) >= levelIndex(c.unit.type)).map((h) => h.level))];
+      return lvls.length ? { charge: c, level: lvls[0] } : null;
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+  const direct = scopes.filter((x) => x.charge.unit.type === x.level).map((x) => x.charge.unit);
+  const parents = scopes.filter((x) => x.charge.unit.type !== x.level);
+  const ownRegisters = useMemo(() => {
+    const ids = new Set<string>();
+    for (const h of heads.filter((x) => x.perHolder)) {
+      for (const c of charges) {
+        if (!h.holderPosts.includes(c.post)) continue;
+        const li = levelIndex(h.level);
+        const ui = levelIndex(c.unit.type);
+        if (li < 0 || ui < li) continue;
+        ids.add(String(c.unit.anc[c.unit.anc.length - 1 - (ui - li)]));
+      }
+    }
+    return [...ids];
+  }, [charges, heads]);
+
+  const [mode, setMode] = useState<'unit' | 'self'>('unit');
+  const [parentId, setParentId] = useState('');
   const [unitId, setUnitId] = useState('');
   const [month, setMonth] = useState('');
+  const parentScope = parents.find((x) => x.charge.unit._id === parentId) ?? parents[0];
+  const entryLevel = parentScope?.level ?? scopes[0]?.level ?? '';
 
   useEffect(() => {
     if (!month && months.length) setMonth(months[0]);
   }, [months, month]);
   useEffect(() => {
-    if (!charges.length) return;
-    if (!patwariCircles.length && !wbTehsils.length && roTehsils.length) setMode('ro');
-    if (!tehsilId && wbTehsils[0]) setTehsilId(wbTehsils[0]._id);
-    if (!unitId && patwariCircles[0]) setUnitId(patwariCircles[0]._id);
-  }, [charges]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!charges.length || !meta) return;
+    if (!scopes.length && ownRegisters.length) setMode('self');
+    if (!parentId && parents[0]) setParentId(parents[0].charge.unit._id);
+    if (!unitId && direct[0]) setUnitId(direct[0]._id);
+  }, [charges, meta]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const tehsilCircles = useQuery({
-    queryKey: ['rev', 'circles', tehsilId],
-    queryFn: () => get<UnitRef[]>(`/rev/units/${tehsilId}/descendants?type=circle`),
-    enabled: !!tehsilId,
+  const childUnits = useQuery({
+    queryKey: ['rev', 'descendants', parentScope?.charge.unit._id, parentScope?.level],
+    queryFn: () => get<UnitRef[]>(`/rev/units/${parentScope!.charge.unit._id}/descendants?type=${parentScope!.level}`),
+    enabled: !!parentScope,
   });
-
-  const target = mode === 'ro' ? { unitId: roTehsils[0], roUserId: user.id } : { unitId, roUserId: undefined };
+  const unitOptions = [...direct, ...(childUnits.data ?? []).filter((u) => !direct.some((d) => d._id === u._id))];
+  const target = mode === 'self' ? { unitId: ownRegisters[0], roUserId: user.id } : { unitId, roUserId: undefined };
+  const canRecordRegister = caps.registers.length > 0;
 
   return (
     <>
-      <PageHeader title="Enter figures" subtitle={`FY ${fy}`} actions={(caps.isPatwari || caps.isWasilBaqi) && <Link to="/audit-paras" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50"><ListChecks className="size-4" />Audit paras</Link>} />
-      {!caps.canEnter ? <Card><Empty title="No data entry rights" body="Data is entered by Patwaris, Wasil Baqi Navees and Revenue Officers." /></Card> : (
+      <PageHeader title="Enter figures" subtitle={`FY ${fy}`} actions={canRecordRegister && <Link to="/audit-paras" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50"><ListChecks className="size-4" />{meta?.registers.find((r) => r.key === caps.registers[0])?.label ?? 'Registers'}</Link>} />
+      {!caps.canEnter ? <Card><Empty title="No data entry rights" body="Your postings do not include entering figures for any KPI." /></Card> : (
         <>
           <Card className="mb-4 space-y-3 p-4">
-            {roTehsils.length > 0 && (patwariCircles.length > 0 || wbTehsils.length > 0) && (
-              <Segmented value={mode} onChange={setMode} options={[{ value: 'circle', label: 'Patwar circle' }, { value: 'ro', label: 'My registers (RO)' }]} />
+            {ownRegisters.length > 0 && scopes.length > 0 && (
+              <Segmented value={mode} onChange={setMode} options={[{ value: 'unit', label: UNIT_LABEL[entryLevel] }, { value: 'self', label: 'My own registers' }]} />
             )}
             <div className="grid gap-3 sm:grid-cols-2">
-              {mode === 'circle' && (
-                wbTehsils.length ? (
-                  <Field label="Patwar circle">
-                    {(id) => (
-                      <Select id={id} value={unitId} onChange={(e) => setUnitId(e.target.value)}>
-                        <option value="">Choose circle…</option>
-                        {tehsilCircles.data?.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
-                      </Select>
-                    )}
-                  </Field>
-                ) : (
-                  <Field label="Patwar circle">
-                    {(id) => (
-                      <Select id={id} value={unitId} onChange={(e) => setUnitId(e.target.value)}>
-                        {patwariCircles.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
-                      </Select>
-                    )}
-                  </Field>
-                )
+              {mode === 'unit' && parents.length > 1 && (
+                <Field label="Within">
+                  {(id) => (
+                    <Select id={id} value={parentId} onChange={(e) => { setParentId(e.target.value); setUnitId(''); }}>
+                      {parents.map((x) => <option key={x.charge.unit._id} value={x.charge.unit._id}>{x.charge.unit.name}</option>)}
+                    </Select>
+                  )}
+                </Field>
+              )}
+              {mode === 'unit' && (
+                <Field label={UNIT_LABEL[entryLevel]}>
+                  {(id) => (
+                    <Select id={id} value={unitId} onChange={(e) => setUnitId(e.target.value)}>
+                      <option value="">Choose…</option>
+                      {unitOptions.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+                    </Select>
+                  )}
+                </Field>
               )}
               <Field label="Month">
                 {(id) => (
@@ -103,7 +126,7 @@ export default function Entry() {
               </Field>
             </div>
           </Card>
-          {target.unitId && month ? <EntrySheet unitId={target.unitId} roUserId={target.roUserId} month={month} /> : <Card><Empty title="Choose a circle and month" /></Card>}
+          {target.unitId && month ? <EntrySheet unitId={target.unitId} roUserId={target.roUserId} month={month} /> : <Card><Empty title={`Choose a ${UNIT_LABEL[entryLevel].toLowerCase()} and month`} /></Card>}
         </>
       )}
     </>
@@ -157,7 +180,7 @@ function EntrySheet({ unitId, roUserId, month }: { unitId: string; roUserId?: st
 
   if (isLoading) return <Loading />;
   if (error) return <ErrorState error={error} retry={refetch} />;
-  if (!data?.items.length) return <Card><Empty title="No heads to enter here" /></Card>;
+  if (!data?.items.length) return <Card><Empty title="No KPIs to enter here" /></Card>;
 
   const set = (code: string, k: keyof Draft[string]) => (e: React.ChangeEvent<HTMLInputElement>) => setDraft((d) => ({ ...d, [code]: { ...d[code], [k]: e.target.value } }));
   const revenue = data.items.filter((i) => i.head.kind === 'revenue');
@@ -179,21 +202,21 @@ function EntrySheet({ unitId, roUserId, month }: { unitId: string; roUserId?: st
     <div className="pb-20 lg:pb-0">
       {revenue.length > 0 && (
         <>
-          <SectionTitle>Collections · {monthLabel(month)} (Rs)</SectionTitle>
+          <SectionTitle>Achievement · {monthLabel(month)}</SectionTitle>
           <div className="grid gap-2.5 lg:grid-cols-2">
             {revenue.map((it) => (
               <Card key={it.head.code} className="p-4">
                 {head(it)}
                 <div className="mb-3 grid grid-cols-2 gap-x-3 text-xs text-slate-500">
-                  <span className="tabular-nums">Target {fmtPKR(it.target?.target ?? 0)} · YTD {fmtPKR(it.ytd?.cur ?? 0)}</span>
-                  <span className="tabular-nums">Arrears {fmtPKR(it.target?.arrearDemand ?? 0)} · YTD {fmtPKR(it.ytd?.arr ?? 0)}</span>
-                  <span className="col-span-2 text-[10px] text-slate-400">Target/YTD {MILLIONS} · enter amounts below in exact Rs</span>
+                  <span className="tabular-nums">Target {fmtValue(it.target?.target ?? 0, it.head.unit)} · YTD {fmtValue(it.ytd?.cur ?? 0, it.head.unit)}</span>
+                  {it.head.arrears && <span className="tabular-nums">Arrears {fmtValue(it.target?.arrearDemand ?? 0, it.head.unit)} · YTD {fmtValue(it.ytd?.arr ?? 0, it.head.unit)}</span>}
+                  {it.head.unit === 'money' && <span className="col-span-2 text-[10px] text-slate-400">Target/YTD {MILLIONS} · enter amounts below in full</span>}
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Current">{(id) => <Input id={id} type="number" inputMode="decimal" min={0} disabled={locked(it)} value={draft[it.head.code]?.current ?? ''} onChange={set(it.head.code, 'current')} />}</Field>
-                  <Field label="Arrears">{(id) => <Input id={id} type="number" inputMode="decimal" min={0} disabled={locked(it)} value={draft[it.head.code]?.arrear ?? ''} onChange={set(it.head.code, 'arrear')} />}</Field>
+                <div className={it.head.arrears ? 'grid grid-cols-2 gap-3' : 'grid gap-3'}>
+                  <Field label={it.head.arrears ? 'Current' : 'Achieved'}>{(id) => <Input id={id} type="number" inputMode="decimal" min={0} disabled={locked(it)} value={draft[it.head.code]?.current ?? ''} onChange={set(it.head.code, 'current')} />}</Field>
+                  {it.head.arrears && <Field label="Arrears">{(id) => <Input id={id} type="number" inputMode="decimal" min={0} disabled={locked(it)} value={draft[it.head.code]?.arrear ?? ''} onChange={set(it.head.code, 'arrear')} />}</Field>}
                 </div>
-                <div className="mt-3"><Input placeholder="Challan / PSID no." disabled={locked(it)} value={draft[it.head.code]?.ref ?? ''} onChange={set(it.head.code, 'ref')} /></div>
+                <div className="mt-3"><Input placeholder="Reference no. (optional)" disabled={locked(it)} value={draft[it.head.code]?.ref ?? ''} onChange={set(it.head.code, 'ref')} /></div>
               </Card>
             ))}
           </div>
@@ -201,7 +224,7 @@ function EntrySheet({ unitId, roUserId, month }: { unitId: string; roUserId?: st
       )}
       {cases.length > 0 && (
         <>
-          <SectionTitle>Case registers · {monthLabel(month)}</SectionTitle>
+          <SectionTitle>Workload · {monthLabel(month)}</SectionTitle>
           <div className="grid gap-2.5 lg:grid-cols-2">
             {cases.map((it) => {
               const pending = (it.target?.opening ?? 0) + (it.ytd?.rec ?? 0) - (it.ytd?.disp ?? 0);

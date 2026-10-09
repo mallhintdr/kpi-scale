@@ -7,14 +7,15 @@ import { PageHeader } from '../components/AppShell';
 import { FyPicker, UnitField } from '../components/rev';
 import { Button, Card, Empty, ErrorState, Field, Loading, Select } from '../components/ui';
 import { get } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { achievement, useViewMode } from '../lib/mode';
-import { fmtPKR, useCaps, useFy, useMeta, type Post, type UnitRef } from '../lib/rev';
+import { fmtPKR, groupLevels, MILLIONS, parentLevels, T, UNIT_LABEL, useCaps, useFy, useMeta, type Post, type UnitRef } from '../lib/rev';
 import { POSTS_BY_UNIT } from './League';
 
 interface Cell { pct: number | null; done: number; of: number }
 interface Row {
   user: { _id: string; name: string; designation?: string; bps?: number; phone?: string };
-  unitId: string; chargeType: string; district?: string; tehsil?: string;
+  unitId: string; chargeType: string; areas?: Record<string, string>;
   charges: string[]; context: string; score: number | null; target: number; collected: number; heads: Record<string, Cell>;
 }
 
@@ -23,7 +24,7 @@ type Detail = 'rank' | 'designation' | 'bps' | 'phone' | 'overall';
 
 const MEASURES: { key: Measure; label: string }[] = [
   { key: 'target', label: 'Target' },
-  { key: 'achieved', label: 'Recovered / Achieved' },
+  { key: 'achieved', label: 'Achieved' },
   { key: 'balance', label: 'Balance' },
   { key: 'pct', label: '% achieved' },
 ];
@@ -35,8 +36,8 @@ const DETAILS: { key: Detail; label: string }[] = [
   { key: 'phone', label: 'Phone' },
 ];
 const EXTRA_HEADS = [
-  { code: 'ARREARS', name: 'Arrears (all heads)', group: 'Revenue', money: true },
-  { code: 'AUDIT', name: 'Audit paras (settled / total)', group: 'Other', money: false },
+  { code: 'ARREARS', name: 'Arrears (all KPIs)', group: 'Revenue', money: true },
+  { code: 'AUDIT', name: 'Registers (settled / total)', group: 'Other', money: false },
   { code: 'TASKS', name: 'Tasks (on time / due)', group: 'Other', money: false },
 ];
 
@@ -67,6 +68,7 @@ function CheckGroup<T extends string>({ title, items, value, onChange, cols = 1 
 }
 
 export default function Reports() {
+  const { session } = useAuth();
   const caps = useCaps();
   const { data: meta } = useMeta();
   const [fy] = useFy();
@@ -84,7 +86,7 @@ export default function Reports() {
   }, [unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const headItems = useMemo(() => {
-    const heads = (meta?.heads ?? []).map((h) => ({ code: h.code, name: h.name, group: h.kind === 'revenue' ? 'Revenue' : 'Cases', money: h.kind === 'revenue' }));
+    const heads = (meta?.heads ?? []).map((h) => ({ code: h.code, name: h.name, group: h.kind === 'revenue' ? 'Revenue' : 'Cases', money: h.unit === 'money' }));
     return [...heads.filter((h) => h.group === 'Revenue'), EXTRA_HEADS[0], ...heads.filter((h) => h.group === 'Cases'), ...EXTRA_HEADS.slice(1)];
   }, [meta]);
 
@@ -132,17 +134,17 @@ export default function Reports() {
   };
   const chosenDetails = DETAILS.filter((d) => details.has(d.key));
   // District / Tehsil columns only when the list spans more than one
-  const multiDistrict = new Set(rows.map((r) => r.district)).size > 1;
-  const multiTehsil = new Set(rows.map((r) => r.tehsil)).size > 1;
+  // Hierarchy columns (e.g. District, Tehsil) appear only when the list spans more than one of them
+  const groupCols = groupLevels().filter((l) => new Set(rows.map((r) => r.areas?.[l])).size > 1);
   const areaOf = (r: (typeof rows)[number]) => r.charges.join(', ').replace(/ \(test\)/g, '') + (r.chargeType && r.chargeType !== 'regular' ? (r.chargeType === 'additional' ? ' (Addl. charge)' : ' (Look after)') : '');
   const [selected, setSelected] = useState<string | null>(null);
   const anyMoney = chosenHeads.some((h) => h.money);
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['S.No', ...(multiDistrict ? ['District'] : []), ...(multiTehsil ? ['Tehsil'] : []), 'Name', 'Area', ...chosenDetails.map((d) => (d.key === 'overall' ? (perf ? 'Revenue achievement %' : 'KPI score') : d.label)),
-      ...chosenHeads.flatMap((h) => chosenMeasures.map((m) => `${h.name} — ${m.label}${h.money && m.key !== 'pct' ? ' (Rs M)' : ''}`))];
-    const lines = rows.map((r, i) => [i + 1, ...(multiDistrict ? [r.district] : []), ...(multiTehsil ? [r.tehsil] : []), r.user.name, areaOf(r), ...chosenDetails.map((d) => detailValue(r, d.key)), ...chosenHeads.flatMap((h) => chosenMeasures.map((m) => value(r.heads[h.code], m.key, h.money).replace(/,/g, '')))].map(esc).join(','));
+    const header = ['S.No', ...groupCols.map((l) => UNIT_LABEL[l]), 'Name', 'Area', ...chosenDetails.map((d) => (d.key === 'overall' ? (perf ? `${T.money} achievement %` : 'KPI score') : d.label)),
+      ...chosenHeads.flatMap((h) => chosenMeasures.map((m) => `${h.name} — ${m.label}${h.money && m.key !== 'pct' ? ` ${MILLIONS}` : ''}`))];
+    const lines = rows.map((r, i) => [i + 1, ...groupCols.map((l) => r.areas?.[l] ?? ''), r.user.name, areaOf(r), ...chosenDetails.map((d) => detailValue(r, d.key)), ...chosenHeads.flatMap((h) => chosenMeasures.map((m) => value(r.heads[h.code], m.key, h.money).replace(/,/g, '')))].map(esc).join(','));
     const url = URL.createObjectURL(new Blob([[header.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv' }));
     Object.assign(document.createElement('a'), { href: url, download: `report-${data?.postLabel ?? post}-${unit?.name}-${fy}.csv` }).click();
     URL.revokeObjectURL(url);
@@ -165,13 +167,13 @@ export default function Reports() {
           />
         </Card>
         <div className="grid gap-3">
-          <Card className="p-4"><CheckGroup title="Figures per head" items={MEASURES} value={measures} onChange={setMeasures} /></Card>
+          <Card className="p-4"><CheckGroup title="Figures per KPI" items={MEASURES} value={measures} onChange={setMeasures} /></Card>
           <Card className="p-4"><CheckGroup title="Employee details" items={DETAILS} value={details} onChange={setDetails} /></Card>
         </div>
       </div>
 
       <Card className="mt-3 grid gap-3 p-4 print:hidden md:grid-cols-[1fr_1fr_1fr_auto] md:items-end">
-        <Field label="Area">{() => <UnitField value={unit} onChange={setUnit} accept={['division', 'district', 'tehsil', 'qanungoi']} />}</Field>
+        <Field label="Area">{() => <UnitField value={unit} onChange={setUnit} accept={parentLevels()} />}</Field>
         <Field label="Employees">{(id) => <Select id={id} value={post} onChange={(e) => setPost(e.target.value as Post)}>{options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}</Select>}</Field>
         <Field label="Sort by">
           {(id) => (
@@ -196,7 +198,7 @@ export default function Reports() {
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 print:hidden">
             <span className="text-sm text-slate-600 dark:text-slate-300">
               <b>{rows.length}</b> {data?.postLabel} · {unit?.name} · FY {generated.fy}
-              {anyMoney && <span className="ml-1 text-xs text-slate-400">· amounts (Rs in Millions)</span>}
+              {anyMoney && <span className="ml-1 text-xs text-slate-400">· amounts {MILLIONS}</span>}
             </span>
             <div className="flex gap-2">
               <Button variant="secondary" size="sm" onClick={() => window.print()}><Printer className="size-4" />Print</Button>
@@ -206,9 +208,9 @@ export default function Reports() {
 
           {/* Printable report */}
           <div className="hidden print:block print:mb-3">
-            <div className="text-xs font-bold uppercase tracking-wide">Government of the Punjab · Board of Revenue</div>
+            <div className="text-xs font-bold uppercase tracking-wide">{[session?.tenant.branding?.tagline, session?.tenant.name].filter(Boolean).join(' · ')}</div>
             <div className="text-lg font-bold">{data?.postLabel} report · {unit?.name} · FY {generated.fy}</div>
-            <div className="text-xs">Generated {new Date().toLocaleString()} · {perf ? 'Performance mode' : 'KPI evaluation mode'}{anyMoney && ' · amounts (Rs in Millions)'}</div>
+            <div className="text-xs">Generated {new Date().toLocaleString()} · {perf ? 'Performance mode' : 'KPI evaluation mode'}{anyMoney && ` · amounts ${MILLIONS}`}</div>
           </div>
 
           <Card className="overflow-hidden print:rounded-none print:shadow-none print:ring-0">
@@ -217,8 +219,7 @@ export default function Reports() {
                 <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white print:static">
                   <tr>
                     <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2 text-center print:static">#</th>
-                    {multiDistrict && <th rowSpan={2} className="border-b border-r border-white/60 px-2.5 py-2">District</th>}
-                    {multiTehsil && <th rowSpan={2} className="border-b border-r border-white/60 px-2.5 py-2">Tehsil</th>}
+                    {groupCols.map((l) => <th key={l} rowSpan={2} className="border-b border-r border-white/60 px-2.5 py-2">{UNIT_LABEL[l]}</th>)}
                     <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2 print:static">Name</th>
                     <th rowSpan={2} className="border-b border-r border-white/60 px-2.5 py-2">Area</th>
                     {chosenDetails.map((d) => (
@@ -228,14 +229,14 @@ export default function Reports() {
                     ))}
                     {chosenHeads.map((h) => (
                       <th key={h.code} colSpan={chosenMeasures.length} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-2 py-1.5 text-center">
-                        {h.name}{h.money && <span className="block text-[10.5px] font-normal text-brand-100">(Rs M)</span>}
+                        {h.name}{h.money && <span className="block text-[10.5px] font-normal text-brand-100">{MILLIONS}</span>}
                       </th>
                     ))}
                   </tr>
                   <tr>
                     {chosenHeads.flatMap((h) => chosenMeasures.map((m, i) => (
                       <th key={h.code + m.key} className={clsx('border-b border-white/30 bg-brand-600 px-2 py-1 text-center text-[11.5px] font-medium uppercase tracking-wide text-brand-50', i === chosenMeasures.length - 1 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25')}>
-                        {m.key === 'achieved' ? (h.group === 'Cases' ? 'Disposed' : h.code === 'AUDIT' ? 'Settled' : h.code === 'TASKS' ? 'On time' : 'Recovered') : m.key === 'pct' ? '%' : m.label}
+                        {m.key === 'achieved' ? (h.group === 'Cases' ? T.disposed : h.code === 'AUDIT' ? 'Settled' : h.code === 'TASKS' ? 'On time' : T.achieved) : m.key === 'pct' ? '%' : m.label}
                       </th>
                     )))}
                   </tr>
@@ -249,8 +250,7 @@ export default function Reports() {
                     <tr key={key} onClick={() => setSelected(on ? null : key)} aria-selected={on}
                       className={clsx('cursor-pointer', on ? 'bg-amber-100 outline outline-2 -outline-offset-2 outline-amber-400 dark:bg-amber-500/25' : idx % 2 ? 'bg-slate-50/50 hover:bg-slate-100 dark:bg-slate-800/30' : 'hover:bg-slate-50')}>
                       <td className={clsx('sticky left-0 z-10 w-10 min-w-10 border-b border-r border-b-slate-200 border-r-slate-500 px-1 py-1.5 text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700 print:static', stickyBg)}>{idx + 1}</td>
-                      {multiDistrict && <td className="whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-500 px-2.5 py-1.5 dark:border-slate-700">{r.district}</td>}
-                      {multiTehsil && <td className="whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-500 px-2.5 py-1.5 dark:border-slate-700">{r.tehsil}</td>}
+                      {groupCols.map((l) => <td key={l} className="whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-500 px-2.5 py-1.5 dark:border-slate-700">{r.areas?.[l]}</td>)}
                       <td className={clsx('sticky left-10 z-10 border-b border-r border-b-slate-200 border-r-slate-500 px-3 py-1.5 dark:border-slate-700 print:static', stickyBg)}>
                         <Link to={`/officers/${r.user._id}`} onClick={(e) => e.stopPropagation()} title={`Open ${r.user.name}'s profile`}
                           className={clsx('whitespace-nowrap font-medium text-slate-900 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline', on && 'underline')}>
@@ -279,8 +279,7 @@ export default function Reports() {
                 <tfoot className="bg-slate-50 font-semibold dark:bg-slate-800">
                   <tr>
                     <td className="sticky left-0 w-10 min-w-10 border-t-2 border-r border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 print:static" />
-                    {multiDistrict && <td className="border-t-2 border-r border-t-slate-300 border-r-slate-500" />}
-                    {multiTehsil && <td className="border-t-2 border-r border-t-slate-300 border-r-slate-500" />}
+                    {groupCols.map((l) => <td key={l} className="border-t-2 border-r border-t-slate-300 border-r-slate-500" />)}
                     <td className="sticky left-10 border-t-2 border-r border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800 print:static">Total · {rows.length}</td>
                     <td className="border-t-2 border-r border-t-slate-300 border-r-slate-500" />
                     {chosenDetails.map((d) => <td key={d.key} className="border-t-2 border-r border-t-slate-300 border-r-slate-500 dark:border-slate-700" />)}
@@ -299,7 +298,7 @@ export default function Reports() {
               </table>
             </div>
           </Card>
-          <p className="mt-1.5 text-[11px] text-slate-400 print:hidden">Audit paras: figures are paras settled / total; % is the amount recovered. Revenue amounts are in Rs Millions.</p>
+          <p className="mt-1.5 text-[11px] text-slate-400 print:hidden">Registers: figures are items settled / total; % is the amount recovered. Money amounts are {MILLIONS}.</p>
         </div>
       )}
     </>

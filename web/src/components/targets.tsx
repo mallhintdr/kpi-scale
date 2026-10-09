@@ -4,7 +4,7 @@ import { CalendarClock, CheckCircle2, Hourglass, OctagonX, Plus, Search, XCircle
 import { useDeferredValue, useState, type FormEvent } from 'react';
 import { ApiError, get, post } from '../lib/api';
 import { fmtDate, toDateInput } from '../lib/format';
-import { MILLIONS, fmtPKR, useMeta, type UnitRef } from '../lib/rev';
+import { fmtFull, fmtPKR, MILLIONS, parentLevels, symCaption, T, useMeta, type UnitRef } from '../lib/rev';
 import { useSave } from '../pages/admin/shared';
 import { Bullet } from './charts';
 import { UnitField } from './rev';
@@ -97,11 +97,11 @@ function ProgressSheet({ t, onClose }: { t: AssignedTarget; onClose: () => void 
     <Sheet open onClose={onClose} title={`Log progress · ${t.headName}`} footer={<Button form="prog-form" type="submit" block loading={save.isPending}>Save</Button>}>
       <form id="prog-form" onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <Field label={t.money ? 'Amount recovered (Rs)' : 'Cases disposed'}>{(id) => <Input id={id} type="number" inputMode="decimal" min={1} required autoFocus value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} />}</Field>
+          <Field label={t.money ? `Amount ${T.achieved.toLowerCase()} ${symCaption()}` : `${T.items[0].toUpperCase()}${T.items.slice(1)} ${T.disposed.toLowerCase()}`}>{(id) => <Input id={id} type="number" inputMode="decimal" min={1} required autoFocus value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} />}</Field>
           <Field label="Date">{(id) => <Input id={id} type="date" required min={t.startDate.slice(0, 10)} max={maxDate} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />}</Field>
         </div>
-        <Field label="Note / challan no. (optional)">{(id) => <Textarea id={id} rows={2} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />}</Field>
-        <p className="text-xs text-slate-500">Progress counts once verified by the {t.money ? 'Wasil Baqi Navees' : 'Service Centre In-charge (SCI)'}.</p>
+        <Field label={`Note / ${T.reference.toLowerCase()} (optional)`}>{(id) => <Textarea id={id} rows={2} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />}</Field>
+        <p className="text-xs text-slate-500">Progress counts once verified by the verifier of this KPI.</p>
         {t.progress.length > 0 && (
           <div>
             <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Logged so far</div>
@@ -111,7 +111,7 @@ function ProgressSheet({ t, onClose }: { t: AssignedTarget; onClose: () => void 
                   <span>{fmtDate(p.date)}{p.note && <span className="ml-1 text-xs text-slate-500">· {p.note}</span>}</span>
                   <span className="flex items-center gap-2">
                     <span className={clsx('text-[11px] font-semibold capitalize', PSTATUS[p.status ?? 'submitted'])}>{p.status ?? 'submitted'}</span>
-                    <b>{t.money ? `Rs ${p.value.toLocaleString()}` : p.value}</b>
+                    <b>{t.money ? fmtFull(p.value) : p.value}</b>
                   </span>
                 </div>
               ))}
@@ -144,16 +144,16 @@ export function AssignTargetSheet({ onClose, defaultMode = 'area' }: { onClose: 
 
 function CommonFields({ f, setF, circleOnly }: { f: any; setF: (v: any) => void; circleOnly?: boolean }) {
   const { data: meta } = useMeta();
-  const heads = (meta?.heads ?? []).filter((h) => !circleOnly || h.level === 'circle');
+  const heads = (meta?.heads ?? []).filter((h) => !circleOnly || !h.perHolder);
   const days = { week: 7, fortnight: 15, month: 30 }[f.period as 'week'];
   const end = new Date(new Date(f.startDate).getTime() + (days - 1) * 86_400_000);
   return (
     <>
-      <Field label="Head">
+      <Field label="KPI">
         {(id) => (
           <Select id={id} value={f.head} onChange={(e) => setF({ ...f, head: e.target.value })}>
-            <optgroup label="Revenue">{heads.filter((h) => h.kind === 'revenue').map((h) => <option key={h.code} value={h.code}>{h.name}</option>)}</optgroup>
-            <optgroup label="Case registers">{heads.filter((h) => h.kind === 'case').map((h) => <option key={h.code} value={h.code}>{h.name}</option>)}</optgroup>
+            <optgroup label={T.money}>{heads.filter((h) => h.kind === 'revenue').map((h) => <option key={h.code} value={h.code}>{h.name}</option>)}</optgroup>
+            <optgroup label={T.flowGroup}>{heads.filter((h) => h.kind === 'case').map((h) => <option key={h.code} value={h.code}>{h.name}</option>)}</optgroup>
           </Select>
         )}
       </Field>
@@ -194,18 +194,18 @@ function AreaForm({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="space-y-4">
-      <Field label="Area">{() => <UnitField value={area} onChange={(u) => { setArea(u); preview.reset(); }} accept={['qanungoi', 'tehsil', 'district', 'division']} scope="work" placeholder="Qanungoi, tehsil or district" />}</Field>
+      <Field label="Area">{() => <UnitField value={area} onChange={(u) => { setArea(u); preview.reset(); }} accept={parentLevels()} scope="work" placeholder="Choose an area" />}</Field>
       <CommonFields f={f} setF={set} circleOnly />
       <div className="grid grid-cols-2 gap-3">
         <Field label="Target as">
           {(id) => (
             <Select id={id} value={f.basis} onChange={(e) => set({ ...f, basis: e.target.value })}>
               <option value="percent">% of remaining balance</option>
-              <option value="amount">{head?.kind === 'case' ? 'Total cases' : 'Total amount (Rs)'}</option>
+              <option value="amount">{head?.unit !== 'money' ? `Total ${T.items}` : `Total amount ${symCaption()}`}</option>
             </Select>
           )}
         </Field>
-        <Field label={f.basis === 'percent' ? 'Percent' : head?.kind === 'case' ? 'Cases' : 'Amount (Rs)'}>
+        <Field label={f.basis === 'percent' ? 'Percent' : head?.unit !== 'money' ? 'Number' : `Amount ${symCaption()}`}>
           {(id) => <Input id={id} type="number" inputMode="decimal" min={0.1} max={f.basis === 'percent' ? 100 : undefined} step="any" required value={f.value} onChange={(e) => set({ ...f, value: e.target.value })} />}
         </Field>
       </div>
@@ -220,9 +220,9 @@ function AreaForm({ onDone }: { onDone: () => void }) {
         <div className="space-y-2 rounded-xl bg-amber-50 p-3 text-sm ring-1 ring-amber-200 dark:bg-amber-500/10 dark:ring-amber-500/30">
           <div className="flex items-start gap-2 font-medium text-amber-900 dark:text-amber-200">
             <OctagonX className="mt-0.5 size-4 shrink-0" />
-            <span>A drive for this head is already running in {conflict.unit?.replace(' (test)', '')} (set by {conflict.assignedBy}, until {new Date(conflict.endDate).toDateString()}).</span>
+            <span>A drive for this KPI is already running in {conflict.unit?.replace(' (test)', '')} (set by {conflict.assignedBy}, until {new Date(conflict.endDate).toDateString()}).</span>
           </div>
-          <p className="text-xs text-amber-800 dark:text-amber-300">Only one drive per head can run at a time. Stopping it closes it today — each Patwari is judged on the part of their share due by today — and this drive then starts from the remaining balance.</p>
+          <p className="text-xs text-amber-800 dark:text-amber-300">Only one drive per KPI can run at a time. Stopping it closes it today — each officer is judged on the part of their share due by today — and this drive then starts from the remaining balance.</p>
           {conflict.canStop ? (
             <Button block variant="danger" loading={stopAndRetry.isPending} onClick={() => confirm('Stop the running drive and start this one?') && stopAndRetry.mutate()}>Stop it and start this one</Button>
           ) : (
@@ -248,7 +248,7 @@ function AreaForm({ onDone }: { onDone: () => void }) {
               <thead className="sticky top-0 bg-brand-700 text-center text-[11.5px] font-semibold uppercase tracking-wide text-white">
                 <tr>
                   <th className="w-8 border-r border-white/50 px-1 py-2 text-center">#</th>
-                  <th className="border-r border-white/50 px-2 py-2 text-left">Circle · Patwari</th>
+                  <th className="border-r border-white/50 px-2 py-2 text-left">Unit · Officer</th>
                   <th className="border-r border-white/50 px-2 py-2 text-right">Remaining</th>
                   <th className="px-2 py-2 text-right">Share</th>
                 </tr>
@@ -266,9 +266,9 @@ function AreaForm({ onDone }: { onDone: () => void }) {
             </table>
           </div>
           <p className="text-[11px] text-slate-500">
-            Each circle gets the same share of its own remaining balance{f.basis === 'percent' ? ` (${f.value}%)` : ''} — larger balances carry larger targets.
-            {plan.vacant.length > 0 && <> {plan.vacant.length} vacant circle(s) skipped.</>}
-            {plan.zeroBalance > 0 && <> {plan.zeroBalance} circle(s) with no balance skipped.</>}
+            Each unit gets the same share of its own remaining balance{f.basis === 'percent' ? ` (${f.value}%)` : ''} — larger balances carry larger targets.
+            {plan.vacant.length > 0 && <> {plan.vacant.length} vacant unit(s) skipped.</>}
+            {plan.zeroBalance > 0 && <> {plan.zeroBalance} unit(s) with no balance skipped.</>}
             {plan.head.money && <> Amounts {MILLIONS}.</>}
           </p>
           <div className="flex gap-2">
@@ -306,7 +306,7 @@ function IndividualForm({ onDone }: { onDone: () => void }) {
         <div className="space-y-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-            <Input placeholder="Search subordinate or circle" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+            <Input placeholder="Search subordinate or unit" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           </div>
           <div className="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-xl ring-1 ring-slate-200 dark:divide-slate-800 dark:ring-slate-700">
             {isLoading ? <div className="p-3"><Loading /></div> : scored.length ? scored.map((p) => (
@@ -319,7 +319,7 @@ function IndividualForm({ onDone }: { onDone: () => void }) {
         </div>
       )}
       <CommonFields f={f} setF={setF} />
-      <Field label={head?.kind === 'case' ? 'Target (cases to dispose)' : 'Target amount (Rs)'}>
+      <Field label={head?.unit !== 'money' ? `Target (${T.items})` : `Target amount ${symCaption()}`}>
         {(id) => <Input id={id} type="number" inputMode="decimal" min={1} required value={f.targetValue} onChange={(e) => setF({ ...f, targetValue: e.target.value })} />}
       </Field>
       <Field label="Instructions (optional)">{(id) => <Textarea id={id} rows={2} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />}</Field>

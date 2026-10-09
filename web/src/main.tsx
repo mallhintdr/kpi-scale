@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, lazy, type ReactNode } from 'react';
+import { StrictMode, Suspense, lazy, useEffect, useRef, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -29,6 +29,10 @@ const Profile = lazy(() => import('./pages/Profile'));
 const AdminPeople = lazy(() => import('./pages/admin/People'));
 const AdminPostings = lazy(() => import('./pages/admin/Postings'));
 const AdminScoring = lazy(() => import('./pages/admin/Scoring'));
+const AdminOrg = lazy(() => import('./pages/admin/OrgSetup'));
+const AdminUnits = lazy(() => import('./pages/admin/Units'));
+const AdminImport = lazy(() => import('./pages/admin/Import'));
+const Platform = lazy(() => import('./pages/platform/Platform'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,10 +48,12 @@ const FullScreen = () => (
   <div className="grid min-h-dvh place-items-center"><Spinner /></div>
 );
 
-function Protected({ children, admin }: { children: ReactNode; admin?: boolean }) {
+function Protected({ children, admin, platform }: { children: ReactNode; admin?: boolean; platform?: boolean }) {
   const { session, loading, can } = useAuth();
   if (loading) return <FullScreen />;
   if (!session) return <Navigate to="/login" replace />;
+  // Super-admins live in the platform console; organisation users never see it
+  if (!!session.tenant.isPlatform !== !!platform) return <Navigate to={session.tenant.isPlatform ? '/platform' : '/'} replace />;
   if (admin && !can('admin')) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
@@ -60,11 +66,24 @@ function Explore() {
   return <Navigate to={`/units/${caps.roots[0]._id}`} replace />;
 }
 
+/** Each organisation's data (and its blueprint) is cached per signed-in user: drop it all when that changes. */
+function CacheReset() {
+  const { session } = useAuth();
+  const who = session ? `${session.tenant.id}|${session.user.id}` : '';
+  const prev = useRef(who);
+  useEffect(() => {
+    if (prev.current && prev.current !== who) queryClient.clear();
+    prev.current = who;
+  }, [who]);
+  return null;
+}
+
 function App() {
   return (
     <Suspense fallback={<FullScreen />}>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/platform" element={<Protected platform><Platform /></Protected>} />
         <Route element={<Protected><AppShell /></Protected>}>
           <Route index element={<Home />} />
           <Route path="explore" element={<Explore />} />
@@ -86,6 +105,9 @@ function App() {
           <Route path="admin/people" element={<Protected admin><AdminPeople /></Protected>} />
           <Route path="admin/postings" element={<Protected admin><AdminPostings /></Protected>} />
           <Route path="admin/scoring" element={<Protected admin><AdminScoring /></Protected>} />
+          <Route path="admin/org" element={<Protected admin><AdminOrg /></Protected>} />
+          <Route path="admin/units" element={<Protected admin><AdminUnits /></Protected>} />
+          <Route path="admin/import" element={<Protected admin><AdminImport /></Protected>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -99,6 +121,7 @@ createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <ToastProvider>
           <AuthProvider>
+            <CacheReset />
             <App />
           </AuthProvider>
         </ToastProvider>

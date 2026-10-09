@@ -5,7 +5,7 @@ import { PageHeader } from '../components/AppShell';
 import { Button, Card, Empty, ErrorState, Loading, SectionTitle, Segmented, useToast } from '../components/ui';
 import { useSearchParams } from 'react-router-dom';
 import { fmtDate } from '../lib/format';
-import { useCaps } from '../lib/rev';
+import { fmtFull, symCaption, useCaps } from '../lib/rev';
 import { get, post } from '../lib/api';
 import { fmtPKR, monthLabel } from '../lib/rev';
 
@@ -18,12 +18,11 @@ interface Pending {
 export default function Verify() {
   const caps = useCaps();
   const [params, setParams] = useSearchParams();
-  // SCI only verifies target progress for case heads; Wasil Baqi verifies both monthly entries and revenue-head progress
-  const onlyTargets = caps.isSci && !caps.isWasilBaqi;
+  const onlyTargets = !caps.canVerify;
   const tab = onlyTargets ? 'targets' : ((params.get('tab') as 'entries' | 'targets') ?? 'entries');
   return (
     <>
-      <PageHeader title="Verify" subtitle={tab === 'entries' ? 'Monthly figures submitted by Patwaris in your tehsil' : 'Progress logged against assigned targets'} />
+      <PageHeader title="Verify" subtitle={tab === 'entries' ? 'Monthly figures submitted in your area, awaiting your verification' : 'Progress logged against assigned targets'} />
       {!onlyTargets && (
         <div className="mb-3"><Segmented value={tab} onChange={(t) => setParams({ tab: t }, { replace: true })} options={[{ value: 'entries', label: 'Monthly entries' }, { value: 'targets', label: 'Target progress' }]} /></div>
       )}
@@ -83,7 +82,7 @@ function EntryQueue() {
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium">{e.headName}</div>
                         <div className="text-xs text-slate-500">
-                          {e.kind === 'revenue' ? <>Current {fmtPKR(e.current, { exact: true })} · Arrears {fmtPKR(e.arrear, { exact: true })} (Rs){e.ref && <> · {e.ref}</>}</> : <>Received {e.received} · Disposed {e.disposed}</>}
+                          {e.kind === 'revenue' ? <>Current {fmtPKR(e.current, { exact: true })} · Arrears {fmtPKR(e.arrear, { exact: true })} {symCaption()}{e.ref && <> · {e.ref}</>}</> : <>Received {e.received} · Disposed {e.disposed}</>}
                         </div>
                       </div>
                     </label>
@@ -110,7 +109,7 @@ interface TP {
   assignee: { _id: string; name: string }; unit: { _id: string; name: string }; date: string; value: number; note?: string; targetValue: number;
 }
 
-/** Progress against assigned targets awaiting verification (Wasil Baqi: revenue heads · SCI: case heads). */
+/** Progress against assigned targets awaiting verification by each KPI's verifiers. */
 function TargetQueue() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -146,8 +145,8 @@ function TargetQueue() {
               <div className="text-xs text-slate-500">{p.unit?.name} · {fmtDate(p.date)}{p.note && <> · {p.note}</>}</div>
             </div>
             <div className="text-right text-sm tabular-nums">
-              <b>{p.money ? `Rs ${p.value.toLocaleString()}` : p.value}</b>
-              <div className="text-[11px] text-slate-500">of {p.money ? `Rs ${p.targetValue.toLocaleString()}` : p.targetValue}</div>
+              <b>{p.money ? fmtFull(p.value) : p.value}</b>
+              <div className="text-[11px] text-slate-500">of {p.money ? fmtFull(p.targetValue) : p.targetValue}</div>
             </div>
           </label>
         ))}

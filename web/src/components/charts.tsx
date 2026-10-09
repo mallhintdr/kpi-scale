@@ -10,7 +10,7 @@ import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import {
   Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, LabelList, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { MILLIONS, REV_BAND, bandOf, fmtPKR, monthLabel, revColor, type RevBand } from '../lib/rev';
+import { bandOf, fmtPKR, MILLIONS, monthLabel, REV_BAND, revColor, T, type RevBand } from '../lib/rev';
 
 /* ------------------------------------------------------------------ */
 /*  Band badge: colour + icon + label (never colour alone)              */
@@ -190,7 +190,7 @@ export function MetricCard({ title, eyebrow, achieved, total, fmt, labels = {}, 
       <div className="mt-2.5 grid grid-cols-3 divide-x divide-slate-100 rounded-lg bg-slate-50 py-2 text-center dark:divide-slate-800 dark:bg-slate-800/50">
         {[
           { l: labels.total ?? 'Target', v: total },
-          { l: labels.achieved ?? 'Recovered', v: achieved },
+          { l: labels.achieved ?? T.achieved, v: achieved },
           { l: labels.balance ?? 'Balance', v: balance },
         ].map((c) => (
           <div key={c.l} className="min-w-0 px-1">
