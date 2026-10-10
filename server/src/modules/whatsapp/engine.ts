@@ -14,7 +14,7 @@ import { notify } from '../../lib/notify.js';
 import { defineJob, enqueue, schedule } from '../../lib/queue.js';
 import { bullConnection, redis } from '../../lib/redis.js';
 import { runAsTenant, runUnscoped } from '../../lib/tenantContext.js';
-import { Charge, Tenant, Unit, User, WaMessage } from '../../models/index.js';
+import { Charge, Tenant, Unit, User, WaMessage, WaState } from '../../models/index.js';
 import { getBlueprint } from '../org/service.js';
 import { leagueView } from '../revenue/performance.routes.js';
 import {
@@ -104,7 +104,9 @@ export async function runSlot(tenantId: string, slot: Slot, day: string, opts: {
   const s = tenant.whatsapp as unknown as WaSettings;
   const tz = tenant.settings?.timezone ?? 'Asia/Karachi';
   const lang: Lang = s?.language ?? 'english';
-  const people = await recipients(tenantId, s?.audience ?? 'scored', opts.onlyUserId);
+  // People on leave today get nothing, and their day does not count towards warnings
+  const onLeave = new Set((await WaState.find({ leaveFrom: { $lte: day }, leaveUntil: { $gte: day } }).select('userId').lean()).map((x) => String(x.userId)));
+  const people = (await recipients(tenantId, s?.audience ?? 'scored', opts.onlyUserId)).filter((u) => !onLeave.has(String(u._id)));
   const ranks: RankCache = new Map();
   const leagueFor = leagueCache(bp);
   const label = new Date().toLocaleDateString('en-GB', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short' });
@@ -136,7 +138,7 @@ export async function runSlot(tenantId: string, slot: Slot, day: string, opts: {
           if (esc.notifySupervisor) {
             const sup = await supervisorOf(bp, String(u._id));
             if (sup) {
-              await notify(String(sup._id), { type: 'performance.alert', title: `Staff alert: ${d.name}`, body: `${r.days} working days behind — ${reason}`, link: `/officers/${u._id}` });
+              await notify(String(sup._id), { type: 'performance.alert', title: `Performance alert: ${d.name}`, body: `${r.days} working days behind — ${reason}`, link: `/officers/${u._id}` });
               if (sup.phoneE164 && !sup.whatsappOptOut) await queueMessage(tenantId, { userId: String(sup._id), phone: sup.phoneE164, kind: 'supervisor', text: supervisorAlert(d, r.level, r.days, reason, lang), day });
             }
             if (r.level >= 3) {

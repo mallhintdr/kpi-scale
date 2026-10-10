@@ -225,7 +225,7 @@ export function evening(bp: BP, d: Digest, lang: Lang, dayLabel: string, warn: {
     ...(d.score != null ? [`KPI score: *${d.score}*${band ? ` (${band})` : ''}${d.rank ? ` · Rank *${d.rank.pos} of ${d.rank.of}* ${d.rank.label}` : ''}`] : []),
     ...(d.targets.length ? ['', '🎯 *Targets*', ...d.targets.slice(0, 5).map((t) => `• ${t.name}: ${fmtVal(bp, t.achieved, t.money)} of ${fmtVal(bp, t.target, t.money)} (${t.target ? Math.round((t.achieved / t.target) * 100) : 0}%)${t.pending ? ` + ${fmtVal(bp, t.pending, t.money)} awaiting verification` : ''}`)] : []),
     ...(d.weakest ? ['', `Tomorrow's focus: *${d.weakest.name}*`] : []),
-    ...(warn && warn.level ? ['', warningText(warn.level, warn.days, warn.reasons.map((r) => r.en).join('; '), 'en')] : ['', '👍 Keep it up.']),
+    ...(warn && warn.level ? ['', '────────', warningText(warn.level, warn.days, warn.reasons.map((r) => r.en).join('; '), 'en')] : ['', '👍 Keep it up.']),
   ].join('\n');
   const ur = [
     `🌙 *روزانہ خلاصہ — ${dayLabel}*`,
@@ -233,26 +233,47 @@ export function evening(bp: BP, d: Digest, lang: Lang, dayLabel: string, warn: {
     ...(d.money.pct != null ? [`ہدف کا *${d.money.pct}%* حاصل (اب تک متوقع ${d.elapsed}%)`] : []),
     ...(d.score != null ? [`کارکردگی اسکور: *${d.score}*${d.rank ? ` · درجہ *${d.rank.pos}/${d.rank.of}*` : ''}`] : []),
     ...(d.weakest ? ['', `کل کی توجہ: *${d.weakest.name}*`] : []),
-    ...(warn && warn.level ? ['', warningText(warn.level, warn.days, warn.reasons.map((r) => r.ur).join('؛ '), 'ur')] : ['', '👍 اسی طرح جاری رکھیں۔']),
+    ...(warn && warn.level ? ['', '────────', warningText(warn.level, warn.days, warn.reasons.map((r) => r.ur).join('؛ '), 'ur')] : ['', '👍 اسی طرح جاری رکھیں۔']),
   ].join('\n');
   return bi(lang, en, ur);
 }
 
+/**
+ * Formal notices (official tone, no emoji). Level 1: advisory · 2: performance under review ·
+ * 3: final warning. Wording can be adapted by the organisation; any action remains with the
+ * competent authority.
+ */
 export function warningText(level: number, days: number, reason: string, l: 'en' | 'ur') {
+  const dayEn = `${days} consecutive working day${days === 1 ? '' : 's'}`;
   if (l === 'ur') {
-    if (level === 1) return `⚠️ آپ پیچھے ہیں: ${reason}۔ براہ کرم کل رفتار تیز کریں۔`;
-    if (level === 2) return `⚠️ *کارکردگی زیرِ جائزہ۔* مسلسل ${days} ورکنگ دنوں سے آپ پیچھے ہیں (${reason})۔ آپ کے افسر کو مطلع کر دیا گیا ہے۔ فوری بہتری لائیں۔`;
-    return `🚫 *حتمی انتباہ۔* مسلسل ${days} ورکنگ دنوں سے آپ کی کارکردگی مطلوبہ معیار سے کم ہے (${reason})۔ بہتری نہ آنے کی صورت میں انتظامی یا تادیبی کارروائی شروع کی جا سکتی ہے۔ آپ کے افسر اور انتظامیہ کو مطلع کر دیا گیا ہے۔`;
+    if (level === 1) {
+      return `*اطلاع*\nآج آپ کی کارکردگی مقررہ معیار سے کم رہی (${reason})۔ آپ کو ہدایت کی جاتی ہے کہ آئندہ ورکنگ ڈے سے کام کی رفتار بہتر بنائیں۔`;
+    }
+    if (level === 2) {
+      return `*سرکاری نوٹس — کارکردگی زیرِ جائزہ*\nمشاہدہ کیا گیا ہے کہ مسلسل ${days} ورکنگ دنوں سے آپ کی کارکردگی مقررہ معیار سے کم ہے (${reason})۔ لہٰذا آپ کی کارکردگی کو زیرِ جائزہ رکھ دیا گیا ہے اور آپ کے رپورٹنگ افسر کو مطلع کر دیا گیا ہے۔ آپ کو ہدایت کی جاتی ہے کہ تفویض کردہ اہداف کے حصول کے لیے فوری اقدامات کریں۔`;
+    }
+    return `*حتمی انتباہ*\nسابقہ نوٹس کے باوجود مسلسل ${days} ورکنگ دنوں سے آپ کی کارکردگی مقررہ معیار سے کم ہے (${reason})۔ آپ کو متنبہ کیا جاتا ہے کہ فوری بہتری نہ آنے کی صورت میں مجاز اتھارٹی متعلقہ قواعد کے تحت آپ کے خلاف انتظامی اور/یا تادیبی کارروائی شروع کر سکتی ہے۔ آپ کے رپورٹنگ افسر اور انتظامیہ کو مطلع کر دیا گیا ہے۔`;
   }
-  if (level === 1) return `⚠️ You are falling behind: ${reason}. Please speed up tomorrow.`;
-  if (level === 2) return `⚠️ *Performance under review.* For ${days} working days in a row you have been behind (${reason}). Your supervisor has been informed. Improve immediately.`;
-  return `🚫 *Final warning.* Your performance has stayed below the required level for ${days} working days (${reason}). If it does not improve, administrative or disciplinary proceedings may be initiated. Your supervisor and the administration have been informed.`;
+  if (level === 1) {
+    return `*Notice*\nYour performance today has remained below the expected standard (${reason}). You are advised to improve the pace of work from the next working day.`;
+  }
+  if (level === 2) {
+    return `*Official Notice — Performance Under Review*\nIt has been observed that your performance has remained below the prescribed standard for ${dayEn} (${reason}). Your performance has accordingly been placed under review and your reporting officer has been informed. You are directed to take immediate steps to achieve your assigned targets.`;
+  }
+  return `*Final Warning*\nNotwithstanding the earlier notice, your performance has remained below the prescribed standard for ${dayEn} (${reason}). You are hereby warned that, in the absence of immediate improvement, the competent authority may initiate administrative and/or disciplinary proceedings against you under the applicable rules. Your reporting officer and the administration have been informed accordingly.`;
 }
 
 export function supervisorAlert(d: Digest, level: number, days: number, reason: string, lang: Lang) {
-  const tag = level >= 3 ? 'final warning issued' : 'placed under review';
-  const en = `📣 *Staff performance alert*\n${d.name}${d.post ? ` (${d.post}${d.unitName ? `, ${d.unitName}` : ''})` : ''} has been behind for ${days} working days: ${reason}.\nStatus: *${tag}*. Please review and take action as appropriate.`;
-  const ur = `📣 *عملے کی کارکردگی الرٹ*\n${d.name}${d.post ? ` (${d.post})` : ''} مسلسل ${days} ورکنگ دنوں سے پیچھے ہیں۔\nحیثیت: *${level >= 3 ? 'حتمی انتباہ' : 'زیرِ جائزہ'}*۔ براہ کرم جائزہ لیں۔`;
+  const who = `${d.name}${d.post ? `, ${d.post}${d.unitName ? ` (${d.unitName.replace(' (test)', '')})` : ''}` : ''}`;
+  const en = `*Performance Alert — For Necessary Action*\nThis is to inform you that ${who} has remained below the prescribed performance standard for ${days} consecutive working days (${reason}).\nCurrent status: *${level >= 3 ? 'Final Warning issued' : 'Under Review'}*.\nYou may review the matter and take such action as deemed appropriate.`;
+  const ur = `*کارکردگی الرٹ — برائے ضروری کارروائی*\nآپ کو مطلع کیا جاتا ہے کہ ${who} کی کارکردگی مسلسل ${days} ورکنگ دنوں سے مقررہ معیار سے کم ہے۔\nموجودہ حیثیت: *${level >= 3 ? 'حتمی انتباہ جاری' : 'زیرِ جائزہ'}*۔\nبراہ کرم معاملے کا جائزہ لے کر مناسب کارروائی کریں۔`;
+  return bi(lang, en, ur);
+}
+
+/** Sent when an admin withdraws a warning (e.g. the person was on leave). */
+export function withdrawalNotice(name: string, lang: Lang) {
+  const en = `*Notice — Warning Withdrawn*\nDear ${name.split(' ')[0]}, the performance notice issued to you has been withdrawn by the administration. Your record has been updated accordingly.`;
+  const ur = `*اطلاع — انتباہ واپس*\nمحترم ${name.split(' ')[0]}، آپ کو جاری کیا گیا کارکردگی نوٹس انتظامیہ کی جانب سے واپس لے لیا گیا ہے اور آپ کا ریکارڈ اسی مطابق درست کر دیا گیا ہے۔`;
   return bi(lang, en, ur);
 }
 

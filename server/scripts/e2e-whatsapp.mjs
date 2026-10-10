@@ -53,6 +53,23 @@ await wait(1500);
 const st = (await call(adm, 'GET', '/org/whatsapp/escalations')).b.find((x) => x.userId?._id === p1._id);
 check(st && st.history.length >= 1, `escalation recorded (now level ${st?.level}, ${st?.behindDays} day(s) behind: ${st?.lastReason ?? 'n/a'})`);
 void before;
+log = (await call(adm, 'GET', `/org/whatsapp/messages?userId=${p1._id}&kind=evening`)).b;
+const finalText = log.items.find((m) => /Final Warning/.test(m.text))?.text ?? '';
+check(/competent authority may initiate administrative and\/or disciplinary proceedings/.test(finalText), `final warning is in formal language:\n${finalText.split('────────')[1]?.trim().split('\n').map((l) => '      │ ' + l).join('\n')}`);
+
+console.log('Withdrawal and leave');
+check((await call(adm, 'POST', `/org/whatsapp/escalations/${p1._id}/reset`, { reason: 'On approved leave', inform: true })).b.withdrawn, 'admin withdraws the warning');
+await wait(1200);
+log = (await call(adm, 'GET', `/org/whatsapp/messages?userId=${p1._id}`)).b;
+check(log.items.some((m) => m.kind === 'notice' && /Warning Withdrawn/.test(m.text)), 'the person receives a formal withdrawal notice');
+check((await call(adm, 'PUT', `/org/whatsapp/leave/${p1._id}`, { from: '2099-02-01', until: '2099-02-10', note: 'Earned leave' })).s === 200, 'admin marks him on leave 1–10 Feb');
+const onLeaveRun = await call(adm, 'POST', '/org/whatsapp/send', { slot: 'evening', userId: p1._id, day: '2099-02-05' });
+check(onLeaveRun.b.queued === 0, 'during leave he receives nothing');
+const st2 = (await call(adm, 'GET', '/org/whatsapp/escalations')).b.find((x) => x.userId?._id === p1._id);
+check(!st2, 'and his leave day does not count towards a warning');
+const afterLeave = await call(adm, 'POST', '/org/whatsapp/send', { slot: 'evening', userId: p1._id, day: '2099-02-11' });
+check(afterLeave.b.queued === 1, 'after leave, messages resume');
+await call(adm, 'DELETE', `/org/whatsapp/leave/${p1._id}`);
 
 // Restore
 await call(adm, 'PUT', '/org/whatsapp', { ...settings, ...(original.settings ?? {}), enabled: false });

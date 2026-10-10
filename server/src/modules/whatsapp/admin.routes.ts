@@ -9,7 +9,8 @@ import { audit } from '../../lib/notify.js';
 import { requireRole } from '../../middleware/auth.js';
 import { objectId, q, validate } from '../../middleware/validate.js';
 import { Tenant, User, WaMessage, WaState } from '../../models/index.js';
-import { localNow } from './coach.js';
+import { notify } from '../../lib/notify.js';
+import { localNow, withdrawalNotice, type Lang } from './coach.js';
 import { queueMessage, recipients, runSlot } from './engine.js';
 import { handleInbound } from './webhook.routes.js';
 import { normalizePhone } from './phone.js';
@@ -116,10 +117,48 @@ router.get('/whatsapp/escalations', async (_req, res) => {
   res.json(rows);
 });
 
-router.post('/whatsapp/escalations/:userId/reset', validate({ params: z.object({ userId: objectId }) }), async (req, res) => {
-  await WaState.updateOne({ userId: req.params.userId }, { $set: { level: 0, behindDays: 0 } });
-  await audit('whatsapp.escalation.reset', 'User', req.params.userId as string);
-  res.json({ reset: true });
+/** Withdraw a person's warning: back to "on track", recorded in their history, and the person is informed. */
+async function withdraw(tenantId: string, userId: string, by: string, why: string, inform: boolean) {
+  const st = await WaState.findOne({ userId });
+  const had = st && st.level > 0;
+  if (st) {
+    st.set({ level: 0, behindDays: 0 });
+    st.history.push({ day: new Date().toISOString().slice(0, 10), level: 0, reason: `Warning withdrawn by ${by}${why ? `: ${why}` : ''}` });
+    await st.save();
+  }
+  if (had && inform) {
+    const [u, t] = await Promise.all([User.findById(userId).select('name phoneE164 whatsappOptOut').lean(), Tenant.findById(tenantId).select('whatsapp').lean()]);
+    await notify(userId, { type: 'performance.withdrawn', title: 'Performance notice withdrawn', body: why || 'Withdrawn by the administration', link: '/' });
+    if (u?.phoneE164 && !u.whatsappOptOut) await queueMessage(tenantId, { userId, phone: u.phoneE164, kind: 'notice', text: withdrawalNotice(u.name, ((t?.whatsapp as any)?.language ?? 'english') as Lang) });
+  }
+  return !!had;
+}
+
+router.post('/whatsapp/escalations/:userId/reset', validate({ params: z.object({ userId: objectId }), body: z.object({ reason: z.string().trim().max(200).optional(), inform: z.boolean().default(true) }) }), async (req, res) => {
+  const withdrawn = await withdraw(req.user!.tenantId, req.params.userId as string, req.user!.name, req.body.reason ?? '', req.body.inform);
+  await audit('whatsapp.warning.withdraw', 'User', req.params.userId as string, { reason: req.body.reason });
+  res.json({ withdrawn });
+});
+
+/* Leave: no messages and no warnings for the period; any current warning is withdrawn */
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+router.get('/whatsapp/leave', async (_req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  res.json(await WaState.find({ leaveUntil: { $gte: today } }).populate('userId', 'name designation').populate('leaveSetBy', 'name').sort({ leaveFrom: 1 }).lean());
+});
+router.put('/whatsapp/leave/:userId', validate({ params: z.object({ userId: objectId }), body: z.object({ from: day, until: day, note: z.string().trim().max(200).optional() }) }), async (req, res) => {
+  const { from, until, note } = req.body;
+  if (until < from) throw badRequest('Leave must end on or after it starts');
+  if (!(await User.exists({ _id: req.params.userId }))) throw notFound('User');
+  await WaState.updateOne({ userId: req.params.userId }, { $set: { leaveFrom: from, leaveUntil: until, leaveNote: note, leaveSetBy: req.user!.id }, $setOnInsert: { userId: req.params.userId } }, { upsert: true });
+  await withdraw(req.user!.tenantId, req.params.userId as string, req.user!.name, `on leave ${from} to ${until}${note ? ` (${note})` : ''}`, true);
+  await audit('whatsapp.leave.set', 'User', req.params.userId as string, { from, until, note });
+  res.json({ ok: true });
+});
+router.delete('/whatsapp/leave/:userId', validate({ params: z.object({ userId: objectId }) }), async (req, res) => {
+  await WaState.updateOne({ userId: req.params.userId }, { $unset: { leaveFrom: 1, leaveUntil: 1, leaveNote: 1, leaveSetBy: 1 } });
+  await audit('whatsapp.leave.clear', 'User', req.params.userId as string);
+  res.status(204).end();
 });
 
 export default router;

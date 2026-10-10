@@ -8,7 +8,7 @@ import { AlertTriangle, MessageCircle, Plus, RotateCcw, Save, Send, Trash2, User
 import { useDeferredValue, useEffect, useState } from 'react';
 import { PageHeader } from '../../components/AppShell';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, useToast } from '../../components/ui';
-import { get, post, put } from '../../lib/api';
+import { del, get, post, put } from '../../lib/api';
 import { useSave } from './shared';
 
 interface Settings {
@@ -26,7 +26,7 @@ const DEFAULTS: Settings = {
   enabled: false, language: 'english', morningAt: '08:30', followupsAt: ['11:30', '14:30'], eveningAt: '18:00', workdays: [1, 2, 3, 4, 5, 6], holidays: [],
   audience: 'scored', allowOptOut: false, escalation: { enabled: true, paceGap: 15, overdueTasks: 3, days: 3, notifySupervisor: true },
 };
-const LEVEL = ['On track', 'Nudged', 'Under review', 'Final warning'];
+const LEVEL = ['On track', 'Notice issued', 'Under review', 'Final warning'];
 const LEVEL_TONE = ['bg-emerald-100 text-emerald-800', 'bg-amber-100 text-amber-800', 'bg-orange-100 text-orange-800', 'bg-rose-100 text-rose-800'];
 
 export default function WhatsApp() {
@@ -269,24 +269,73 @@ function Log() {
   );
 }
 
+interface Leave { _id: string; leaveFrom: string; leaveUntil: string; leaveNote?: string; userId: { _id: string; name: string; designation?: string } | null; leaveSetBy?: { name: string } }
+
 function Review() {
   const { data, isLoading } = useQuery({ queryKey: ['org', 'whatsapp', 'esc'], queryFn: () => get<Esc[]>('/org/whatsapp/escalations') });
-  const reset = useSave((id: string) => post(`/org/whatsapp/escalations/${id}/reset`), [['org', 'whatsapp']], 'Reset to on track');
-  if (isLoading) return <Loading />;
-  if (!data?.length) return <Card><Empty title="Nobody is behind" body="People who fall behind appear here with their level and reason." /></Card>;
+  const leave = useQuery({ queryKey: ['org', 'whatsapp', 'leave'], queryFn: () => get<Leave[]>('/org/whatsapp/leave') });
+  const withdraw = useSave((v: { id: string; reason: string }) => post(`/org/whatsapp/escalations/${v.id}/reset`, { reason: v.reason, inform: true }), [['org', 'whatsapp']], 'Warning withdrawn — the person has been informed');
+  const endLeave = useSave((id: string) => del(`/org/whatsapp/leave/${id}`), [['org', 'whatsapp']], 'Leave removed');
+  const [who, setWho] = useState<UserRow | null>(null);
+  const today = new Date().toISOString().slice(0, 10);
+  const [from, setFrom] = useState(today);
+  const [until, setUntil] = useState(today);
+  const [note, setNote] = useState('');
+  const markLeave = useSave(() => put(`/org/whatsapp/leave/${who!._id}`, { from, until, note: note || undefined }), [['org', 'whatsapp']], 'Marked on leave — no messages or warnings for that period', () => { setWho(null); setNote(''); });
+
   return (
-    <Card className="divide-y divide-slate-100 dark:divide-slate-800">
-      {data.map((e) => (
-        <div key={e._id} className="flex items-start gap-3 px-3 py-2.5 text-sm">
-          <Badge tone={LEVEL_TONE[e.level]}>{LEVEL[e.level]}</Badge>
-          <div className="min-w-0 flex-1">
-            <div className="font-medium">{e.userId?.name} <span className="text-xs font-normal text-slate-500">{e.userId?.designation}</span></div>
-            <div className="text-xs text-slate-500">{e.behindDays} working day{e.behindDays === 1 ? '' : 's'} behind · last {e.lastDay}</div>
-            {e.lastReason && <div className="text-xs text-slate-600 dark:text-slate-300">{e.lastReason}</div>}
+    <div className="space-y-4">
+      <div>
+        <SectionTitle>Under review</SectionTitle>
+        {isLoading ? <Loading /> : !data?.length ? <Card><Empty title="Nobody is behind" body="People who fall behind appear here with their level and the reason." /></Card> : (
+          <Card className="divide-y divide-slate-100 dark:divide-slate-800">
+            {data.map((e) => (
+              <div key={e._id} className="flex flex-wrap items-start gap-3 px-3 py-2.5 text-sm">
+                <Badge tone={LEVEL_TONE[e.level]}>{LEVEL[e.level]}</Badge>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">{e.userId?.name} <span className="text-xs font-normal text-slate-500">{e.userId?.designation}</span></div>
+                  <div className="text-xs text-slate-500">{e.behindDays} consecutive working day{e.behindDays === 1 ? '' : 's'} behind · last {e.lastDay}</div>
+                  {e.lastReason && <div className="text-xs text-slate-600 dark:text-slate-300">{e.lastReason}</div>}
+                </div>
+                <div className="flex gap-1">
+                  <Button size="sm" variant="secondary" onClick={() => { if (!e.userId) return; const reason = prompt(`Reason for withdrawing ${e.userId.name}'s warning (e.g. on approved leave):`); if (reason !== null) withdraw.mutate({ id: e.userId._id, reason }); }}>
+                    <RotateCcw className="size-4" />Withdraw warning
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => e.userId && setWho({ _id: e.userId._id, name: e.userId.name, designation: e.userId.designation })}>On leave…</Button>
+                </div>
+              </div>
+            ))}
+          </Card>
+        )}
+      </div>
+
+      <div>
+        <SectionTitle>On leave</SectionTitle>
+        <Card className="space-y-3 p-4">
+          <p className="text-xs text-slate-500">People on leave receive no WhatsApp messages and their days do not count towards warnings. Marking leave also withdraws any current warning, and the person is informed.</p>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_repeat(2,minmax(0,0.7fr))_minmax(0,1fr)_auto] lg:items-end">
+            <Field label="Person">{() => <PersonPicker value={who} onChange={setWho} />}</Field>
+            <Field label="From">{(id) => <Input id={id} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />}</Field>
+            <Field label="Until">{(id) => <Input id={id} type="date" value={until} min={from} onChange={(e) => setUntil(e.target.value)} />}</Field>
+            <Field label="Note">{(id) => <Input id={id} placeholder="e.g. Earned leave" value={note} onChange={(e) => setNote(e.target.value)} />}</Field>
+            <Button disabled={!who} loading={markLeave.isPending} onClick={() => markLeave.mutate(undefined)}>Mark on leave</Button>
           </div>
-          <Button size="sm" variant="ghost" onClick={() => e.userId && confirm(`Reset ${e.userId.name} to "on track"?`) && reset.mutate(e.userId._id)}><RotateCcw className="size-4" />Reset</Button>
-        </div>
-      ))}
-    </Card>
+          {!!leave.data?.length && (
+            <div className="divide-y divide-slate-100 rounded-lg ring-1 ring-slate-200 dark:divide-slate-800 dark:ring-slate-700">
+              {leave.data.map((l) => (
+                <div key={l._id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <b>{l.userId?.name}</b> <span className="text-xs text-slate-500">{l.userId?.designation}</span>
+                    <div className="text-xs text-slate-500">{l.leaveFrom} → {l.leaveUntil}{l.leaveNote && ` · ${l.leaveNote}`}{l.leaveSetBy && ` · by ${l.leaveSetBy.name}`}</div>
+                  </div>
+                  {l.leaveFrom <= today && <Badge tone="bg-sky-100 text-sky-800">On leave now</Badge>}
+                  <Button size="sm" variant="ghost" onClick={() => l.userId && confirm(`End leave for ${l.userId.name}?`) && endLeave.mutate(l.userId._id)}><Trash2 className="size-4" /></Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
   );
 }

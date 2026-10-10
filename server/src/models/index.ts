@@ -456,6 +456,11 @@ const waStateSchema = new Schema(
     lastDay: String,
     lastReason: String,
     history: [{ day: String, level: Number, reason: String, _id: false }],
+    /** On leave (YYYY-MM-DD, inclusive): no messages, days not counted towards warnings. */
+    leaveFrom: String,
+    leaveUntil: String,
+    leaveNote: { type: String, maxlength: 200 },
+    leaveSetBy: ref('User'),
   },
   opts,
 );
