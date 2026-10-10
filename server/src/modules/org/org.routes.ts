@@ -56,7 +56,7 @@ router.post('/blueprint/rollback/:version', validate({ params: z.object({ versio
 });
 
 router.get('/templates', (_req, res) => {
-  res.json(Object.entries(TEMPLATES).map(([key, t]) => ({ key, label: t.label, description: t.description, blueprint: t.blueprint })));
+  res.json(Object.entries(TEMPLATES).map(([key, t]) => ({ key, label: t.label, category: t.category, description: t.description, blueprint: t.blueprint })));
 });
 
 /* ---------------- Settings & branding ---------------- */

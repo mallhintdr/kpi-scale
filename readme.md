@@ -39,12 +39,15 @@ Everything that used to be hard-coded for the Board of Revenue is now data, one 
 
 Every save is validated (unknown references and duplicate keys are listed by path). Removing anything still used by data is refused. Every version is kept and can be restored from History.
 
-**Templates**:
-- Revenue Department (Board of Revenue), which reproduces the original framework exactly;
-- Sales & Marketing;
-- HR Services;
-- Public service;
-- Blank.
+**Templates** (27, grouped by category, all validated by `npx tsx scripts/check-templates.ts` in `server`):
+- **Public sector**: Revenue Department (Board of Revenue, the original framework exactly), Police, Excise & Taxation, Local Government, District Health Authority, School Education, Agriculture Extension, Electricity Distribution (DISCO), Public service.
+- **Banking & finance**: Commercial bank branch network, Microfinance, Insurance / Takaful.
+- **Sales & distribution**: FMCG distribution, Pharmaceutical sales force, Telecom franchise & retail, Real estate & housing society, Retail store chain, Sales & Marketing.
+- **Services**: Private school / college chain, Hospital network, Courier & logistics, NGO / development programme, IT & software services, HR Services.
+- **Industry**: Textile / manufacturing plant, Construction & projects.
+- **Blank**, to build everything from scratch.
+
+Each template sets the hierarchy, posts and their abilities, KPIs (who enters and who verifies each one), scoring weights, a register, the organisation's own terms and the financial-year start. Everything is editable after creation.
 
 ## Run locally
 Requires Node 22, MongoDB and (recommended) Redis ≥ 5.

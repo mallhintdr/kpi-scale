@@ -504,19 +504,20 @@ function HistorySheet({ onClose, onRestored }: { onClose: () => void; onRestored
 }
 
 function TemplateSheet({ onClose, onPick }: { onClose: () => void; onPick: (doc: Draft) => void }) {
-  const t = useQuery({ queryKey: ['org', 'templates'], queryFn: () => get<{ key: string; label: string; description: string; blueprint: Draft }[]>('/org/templates') });
+  const t = useQuery({ queryKey: ['org', 'templates'], queryFn: () => get<{ key: string; label: string; category: string; description: string; blueprint: Draft }[]>('/org/templates') });
   return (
     <Sheet open onClose={onClose} title="Start from a template">
       <p className="mb-3 text-sm text-slate-500">Loads the template into the editor. Nothing changes until you save, and items your data still uses cannot be removed.</p>
       {t.isLoading ? <Loading /> : (
         <div className="space-y-2">
-          {t.data?.map((x) => (
+          {[...new Set(t.data?.map((x) => x.category))].map((cat) => <div key={cat} className="space-y-2"><div className="pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{cat}</div>
+          {t.data?.filter((x) => x.category === cat).map((x) => (
             <Card key={x.key} className="p-3" onClick={() => confirm(`Replace the editor contents with "${x.label}"?`) && onPick(structuredClone(x.blueprint))}>
               <div className="font-medium">{x.label}</div>
               <div className="text-xs text-slate-500">{x.description}</div>
               <div className="mt-1 text-[11px] text-slate-400">{x.blueprint.levels.map((l) => l.label).join(' › ')} · {x.blueprint.metrics.length} KPIs</div>
             </Card>
-          ))}
+          ))}</div>)}
         </div>
       )}
     </Sheet>

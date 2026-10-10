@@ -3,6 +3,7 @@
  * `revenue_department` reproduces the Board of Revenue framework exactly.
  */
 import type { BlueprintInput as Blueprint } from './blueprint.js';
+import { PK_TEMPLATES } from './templates-pk.js';
 
 const BANDS: Blueprint['bands'] = [
   { key: 'outstanding', label: 'Outstanding', min: 90 },
@@ -225,13 +226,15 @@ export const publicService: Blueprint = {
   money: { currency: 'PKR', symbol: 'Rs', scale: 1e6, scaleLabel: 'Millions', decimals: 2 },
 };
 
-export const TEMPLATES: Record<string, { label: string; description: string; blueprint: Blueprint }> = {
-  revenue_department: { label: 'Revenue Department (Board of Revenue)', description: 'Division › District › Tehsil › Qanungoi › Patwar Circle › Mouza, revenue heads, case registers, audit paras.', blueprint: revenueDepartment },
-  sales_company: { label: 'Sales & Marketing company', description: 'Company › Region › Branch › Territory, sales targets, lead conversion, complaints.', blueprint: salesCompany },
-  hr_services: { label: 'HR Services provider', description: 'Company › Practice › Team, placements, billing, service requests, grievances.', blueprint: hrServices },
-  public_service: { label: 'Public service organisation', description: 'Province › District › Office, fee collection, applications, audit observations.', blueprint: publicService },
+export const TEMPLATES: Record<string, { label: string; description: string; category: string; blueprint: Blueprint }> = {
+  revenue_department: { label: 'Revenue Department (Board of Revenue)', category: 'Public sector', description: 'Division › District › Tehsil › Qanungoi › Patwar Circle › Mouza, revenue heads, case registers, audit paras.', blueprint: revenueDepartment },
+  sales_company: { label: 'Sales & Marketing company', category: 'Sales & distribution', description: 'Company › Region › Branch › Territory, sales targets, lead conversion, complaints.', blueprint: salesCompany },
+  hr_services: { label: 'HR Services provider', category: 'Services', description: 'Company › Practice › Team, placements, billing, service requests, grievances.', blueprint: hrServices },
+  public_service: { label: 'Public service organisation', category: 'Public sector', description: 'Province › District › Office, fee collection, applications, audit observations.', blueprint: publicService },
+  ...PK_TEMPLATES,
   blank: {
     label: 'Blank',
+    category: 'Start from scratch',
     description: 'One level, one post, no KPIs — build everything yourself.',
     blueprint: {
       name: 'New organisation',

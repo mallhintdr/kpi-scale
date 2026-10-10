@@ -19,7 +19,7 @@ interface TenantRow {
   stats: { users: number; units: number; postings: number; entries: number };
   blueprint: { version: number; name?: string; kpis: number } | null;
 }
-interface Template { key: string; label: string; description: string; levels: string[]; kpis: number }
+interface Template { key: string; label: string; category: string; description: string; levels: string[]; kpis: number }
 
 export default function Platform() {
   const { session, logout } = useAuth();
@@ -134,7 +134,11 @@ function CreateSheet({ onClose }: { onClose: () => void }) {
         </div>
         <Field label="Start from template" hint="The organisation's admin can change everything afterwards">
           {(id) => templates.isLoading ? <Spinner /> : (
-            <Select id={id} value={f.template} onChange={set('template')}>{templates.data?.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}</Select>
+            <Select id={id} value={f.template} onChange={set('template')}>
+              {[...new Set(templates.data?.map((t) => t.category))].map((c) => (
+                <optgroup key={c} label={c}>{templates.data?.filter((t) => t.category === c).map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}</optgroup>
+              ))}
+            </Select>
           )}
         </Field>
         {tpl && <Card className="p-3 text-xs text-slate-600 dark:text-slate-300">{tpl.description}<div className="mt-1 text-slate-400">{tpl.levels.join(' › ')} · {tpl.kpis} KPIs</div></Card>}

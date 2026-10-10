@@ -30,7 +30,7 @@ const adminBody = z.object({
 });
 
 router.get('/templates', (_req, res) => {
-  res.json(Object.entries(TEMPLATES).map(([key, t]) => ({ key, label: t.label, description: t.description, levels: t.blueprint.levels.map((l) => l.label), kpis: t.blueprint.metrics.length })));
+  res.json(Object.entries(TEMPLATES).map(([key, t]) => ({ key, label: t.label, category: t.category, description: t.description, levels: t.blueprint.levels.map((l) => l.label), kpis: t.blueprint.metrics.length })));
 });
 
 /* Organisations with headline counts */
