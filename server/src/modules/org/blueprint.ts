@@ -109,6 +109,8 @@ export const blueprintSchema = z
       .min(1)
       .max(10),
     calendar: z.object({ fyStartMonth: z.number().int().min(1).max(12).default(7) }),
+    /** Who may view what: everyone the whole organisation (default), or only their own jurisdiction + granted areas. */
+    access: z.object({ viewScope: z.enum(['organisation', 'jurisdiction']).default('organisation') }).default({}),
     /** The organisation's own words on screens and reports. */
     terms: z
       .object({
@@ -339,6 +341,7 @@ export function publicBlueprint(bp: BP) {
     calendar: r.calendar,
     money: r.money,
     terms: r.terms,
+    access: r.access,
   };
 }
 

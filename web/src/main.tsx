@@ -34,6 +34,7 @@ const AdminUnits = lazy(() => import('./pages/admin/Units'));
 const AdminImport = lazy(() => import('./pages/admin/Import'));
 const Platform = lazy(() => import('./pages/platform/Platform'));
 const Trends = lazy(() => import('./pages/Trends'));
+const AdminAccess = lazy(() => import('./pages/admin/Access'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -110,6 +111,7 @@ function App() {
           <Route path="admin/org" element={<Protected admin><AdminOrg /></Protected>} />
           <Route path="admin/units" element={<Protected admin><AdminUnits /></Protected>} />
           <Route path="admin/import" element={<Protected admin><AdminImport /></Protected>} />
+          <Route path="admin/access" element={<Protected admin><AdminAccess /></Protected>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -15,7 +15,10 @@ export default function Targets() {
   const { data: meta } = useMeta();
   const [fy] = useFy();
   const setters = new Set((meta?.posts ?? []).filter((p) => p.caps.includes('set_targets')).map((p) => p.key));
-  const tehsils = caps.isAdmin ? [] : caps.charges.filter((c) => setters.has(c.post)).map((c) => c.unit);
+  const tehsils = caps.isAdmin ? [] : [
+    ...caps.charges.filter((c) => setters.has(c.post)).map((c) => c.unit),
+    ...caps.grants.filter((g) => g.unit && g.rights.includes('set_targets')).map((g) => g.unit!),
+  ].filter((u, i, all) => all.findIndex((x) => x._id === u._id) === i);
   const [tehsilId, setTehsilId] = useState('');
   const [head, setHead] = useState('');
   useEffect(() => {

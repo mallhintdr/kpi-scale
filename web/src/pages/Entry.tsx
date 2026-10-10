@@ -46,6 +46,12 @@ export default function Entry() {
       return lvls.length ? { charge: c, level: lvls[0] } : null;
     })
     .filter((x): x is NonNullable<typeof x> => !!x);
+  // Areas granted directly by an admin (enter / edit), limited to the granted KPIs if any
+  for (const g of caps.grants) {
+    if (!g.unit || !(g.rights.includes('enter') || g.rights.includes('edit'))) continue;
+    const lv = [...new Set(unitHeads.filter((h) => (!g.metrics.length || g.metrics.includes(h.code)) && levelIndex(h.level) >= levelIndex(g.unit!.type)).map((h) => h.level))];
+    if (lv.length && !scopes.some((x) => x.charge.unit._id === g.unit!._id)) scopes.push({ charge: { post: '', unit: g.unit } as MyChargeFull, level: lv[0] });
+  }
   const direct = scopes.filter((x) => x.charge.unit.type === x.level).map((x) => x.charge.unit);
   const parents = scopes.filter((x) => x.charge.unit.type !== x.level);
   const ownRegisters = useMemo(() => {

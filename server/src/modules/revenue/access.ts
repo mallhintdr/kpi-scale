@@ -1,12 +1,35 @@
 /**
- * Who can see, enter, verify and set targets — derived from the organisation's blueprint
- * (posts, their levels and capabilities, and each KPI's enter/verify posts). No post names here.
+ * Who can see, enter, verify and set targets. Two sources, combined:
+ *   1. posts — the blueprint says what each post may do (capabilities, each KPI's enter/verify posts)
+ *   2. access grants — rights an admin gives a person directly on a unit and everything below it,
+ *      optionally only for some KPIs and until a date
+ * No post names here.
  */
 import { Types } from 'mongoose';
+import { cached } from '../../lib/cache.js';
 import { forbidden, notFound } from '../../lib/errors.js';
 import { atLeast, type AuthUser } from '../../middleware/auth.js';
-import { Charge, Unit } from '../../models/index.js';
+import { AccessGrant, Charge, Unit, type GrantRight } from '../../models/index.js';
 import type { BP, Cap } from '../org/blueprint.js';
+import { getBlueprint } from '../org/service.js';
+
+export interface Grant { _id: string; unitId: string; anc: string[]; rights: GrantRight[]; metrics: string[] }
+
+/** A person's live grants (cached briefly; invalidated when an admin changes grants). */
+export async function grantsOf(me: AuthUser): Promise<Grant[]> {
+  return cached(`grants:${me.tenantId}:${me.id}`, 120, async () => {
+    const rows = await AccessGrant.find({ userId: me.id, $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] }).select('unitId anc rights metrics').lean();
+    return rows.map((g) => ({ _id: String(g._id), unitId: String(g.unitId), anc: g.anc.map(String), rights: g.rights as GrantRight[], metrics: g.metrics ?? [] }));
+  });
+}
+
+/** Does a grant give `right` on this unit (it, or an ancestor, is the granted unit) for this KPI? */
+const covers = (g: Grant, right: GrantRight, unit?: { anc: Types.ObjectId[] | string[] }, code?: string) =>
+  g.rights.includes(right) && (!unit || unit.anc.some((a) => String(a) === g.unitId)) && (!code || !g.metrics.length || g.metrics.includes(code));
+
+export async function hasGrant(me: AuthUser, right: GrantRight, unit?: { anc: Types.ObjectId[] | string[] }, code?: string) {
+  return (await grantsOf(me)).some((g) => covers(g, right, unit, code));
+}
 
 export interface MyCharge {
   _id: Types.ObjectId;
@@ -45,6 +68,8 @@ export async function scopeRoots(me: AuthUser, bp: BP): Promise<Types.ObjectId[]
     }
     return { id: c.unit._id, anc: c.unit.anc.map(String) };
   });
+  // Units granted to the person directly are part of their jurisdiction too
+  for (const g of await grantsOf(me)) roots.push({ id: new Types.ObjectId(g.unitId), anc: g.anc });
   // Drop roots already covered by another root, and duplicates
   const set = new Set(roots.map((r) => String(r.id)));
   const out = new Map<string, Types.ObjectId>();
@@ -59,11 +84,27 @@ export async function loadUnit(unitId: string) {
 }
 
 /**
- * Read-only access: every employee may VIEW performance data for any unit in their organisation
- * (tenant isolation still applies). Writes use assertCanSee / capability checks.
+ * Read access. By default every employee may view any unit of their organisation (tenant isolation
+ * still applies). When the organisation restricts viewing to jurisdiction, a person sees only their own
+ * area, areas they were granted, and the path above them. Writes use assertCanSee / capability checks.
  */
-export async function assertCanRead(_me: AuthUser, unitId: string) {
-  return loadUnit(unitId);
+export async function assertCanRead(me: AuthUser, unitId: string) {
+  const unit = await loadUnit(unitId);
+  if (isAdmin(me)) return unit;
+  const bp = await getBlueprint(me.tenantId);
+  if (!bp || bp.raw.access?.viewScope !== 'jurisdiction') return unit;
+  const roots = (await scopeRoots(me, bp)).map(String);
+  // Inside one of my areas, or an ancestor of one of them (to see where I stand)
+  if (unit.anc.some((a) => roots.includes(String(a)))) return unit;
+  const mine = await Unit.find({ _id: { $in: roots } }).select('anc').lean();
+  if (mine.some((m) => m.anc.some((a) => String(a) === String(unit._id)))) return unit;
+  throw forbidden('This area is outside what you are allowed to view');
+}
+
+/** Units a person may browse from (whole organisation, or their own areas when viewing is restricted). */
+export async function browseRootsFor(me: AuthUser, bp: BP) {
+  if (isAdmin(me) || bp.raw.access?.viewScope !== 'jurisdiction') return topUnits(bp);
+  return Unit.find({ _id: { $in: await scopeRoots(me, bp) } }).select('type name').sort({ name: 1 }).lean();
 }
 
 export async function canSeeUnit(me: AuthUser, unit: { anc: Types.ObjectId[] }, bp: BP) {
@@ -88,6 +129,7 @@ export async function holdsOn(me: AuthUser, posts: string[], unit: { anc: Types.
 /** Does the user hold a post with this capability anywhere (or on/above `unit`)? */
 export async function hasCap(me: AuthUser, bp: BP, cap: Cap, unit?: { anc: Types.ObjectId[] }) {
   if (isAdmin(me)) return true;
+  if (await hasGrant(me, cap, unit)) return true;
   const posts = bp.postsWithCap(cap);
   if (!posts.length) return false;
   if (unit) return holdsOn(me, posts, unit);
@@ -101,9 +143,16 @@ export const canSetTargets = (me: AuthUser, bp: BP, unit: { anc: Types.ObjectId[
 export async function canVerify(me: AuthUser, bp: BP, code: string, unit: { anc: Types.ObjectId[] }) {
   const m = bp.metric.get(code);
   if (!m) return false;
+  if (await hasGrant(me, 'verify', unit, code)) return true;
   return holdsOn(me, m.verifyPosts, unit);
 }
 export const autoVerifies = canVerify;
+
+/** May correct figures that are already verified (without being their verifier). */
+export async function canEditVerified(me: AuthUser, bp: BP, code: string, unit: { anc: Types.ObjectId[] }) {
+  if (isAdmin(me)) return true;
+  return (await hasGrant(me, 'edit', unit, code)) || canVerify(me, bp, code, unit);
+}
 
 /**
  * Can the user enter figures for this KPI on this unit?
@@ -114,6 +163,8 @@ export const autoVerifies = canVerify;
 export async function canEnter(me: AuthUser, bp: BP, code: string, unit: UnitLike, roUserId?: string | null) {
   const m = bp.metric.get(code);
   if (!m || !m.active || unit.type !== m.level) return false;
+  // A direct grant to enter (or edit) this KPI on this area
+  if (!m.perHolder && ((await hasGrant(me, 'enter', unit, code)) || (await hasGrant(me, 'edit', unit, code)))) return true;
   if (m.perHolder) {
     if (!roUserId) return false;
     if (roUserId === me.id) {

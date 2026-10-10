@@ -8,7 +8,7 @@ import { objectId, q, validate } from '../../middleware/validate.js';
 import { AuditPara, Charge, ScoreConfig, Task, Unit, User } from '../../models/index.js';
 import type { BP } from '../org/blueprint.js';
 import { bpOf } from '../org/service.js';
-import { activeFilter, assertCanRead, assertCanSee, hasCap, holdsOn, myCharges, scopeRoots } from './access.js';
+import { activeFilter, assertCanRead, assertCanSee, hasCap, hasGrant, holdsOn, myCharges, scopeRoots } from './access.js';
 import { configResolver } from './scoring.js';
 
 const router = Router();
@@ -45,9 +45,10 @@ router.get(
 );
 
 /** Holders of the register's enter posts on (or above) the unit may maintain its items. */
-const canMaintain = (me: AuthUser, bp: BP, regKey: string, unit: { anc: Types.ObjectId[]; type: string }) => {
+const canMaintain = async (me: AuthUser, bp: BP, regKey: string, unit: { anc: Types.ObjectId[]; type: string }) => {
   const reg = bp.register.get(regKey);
-  if (!reg || !reg.levels.includes(unit.type)) return Promise.resolve(false);
+  if (!reg || !reg.levels.includes(unit.type)) return false;
+  if ((await hasGrant(me, 'manage_registers', unit)) || (await hasGrant(me, 'enter', unit))) return true;
   return holdsOn(me, reg.enterPosts, unit);
 };
 

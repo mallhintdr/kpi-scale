@@ -8,7 +8,7 @@ import { objectId, q, validate } from '../../middleware/validate.js';
 import { Charge, RevEntry, RevTarget, Unit } from '../../models/index.js';
 import type { BP } from '../org/blueprint.js';
 import { bpOf } from '../org/service.js';
-import { activeFilter, assertCanSee, autoVerifies, canEnter, canSetTargets, canVerify, holdersIn } from './access.js';
+import { activeFilter, assertCanSee, autoVerifies, canEditVerified, canEnter, canSetTargets, canVerify, grantsOf, holdersIn } from './access.js';
 
 const router = Router();
 const num = z.number().min(0).max(1e12);
@@ -167,7 +167,8 @@ router.put(
       const existing = await RevEntry.findOne(filter);
       const auto = await autoVerifies(req.user!, bp, it.head, unit);
       if (!auto) submittedCodes.add(it.head);
-      if (existing?.status === 'verified' && !auto) throw forbidden(`${m.name} for ${mo} is already verified`);
+      // Verified figures can be corrected only by a verifier or someone granted "edit" (the change is then re-verified)
+      if (existing?.status === 'verified' && !auto && !(await canEditVerified(req.user!, bp, it.head, unit))) throw forbidden(`${m.name} for ${mo} is already verified`);
       const doc = existing ?? new RevEntry({ ...filter, anc: unit.anc });
       Object.assign(doc, {
         current: it.current, arrear: it.arrear, received: it.received, disposed: it.disposed, ref: it.ref, note: it.note,
@@ -209,6 +210,12 @@ router.get('/verify', validate({ query: z.object({ tehsilId: objectId.optional()
     for (const c of mine) {
       const codes = bp.metrics.filter((m) => m.verifyPosts.includes(c.post)).map((m) => m.code);
       if (codes.length) or.push({ anc: c.unitId, head: { $in: codes } });
+    }
+    // Areas where the person was granted the right to verify
+    for (const g of await grantsOf(me)) {
+      if (!g.rights.includes('verify')) continue;
+      const codes = g.metrics.length ? g.metrics : bp.metrics.map((m) => m.code);
+      or.push({ anc: new Types.ObjectId(g.unitId), head: { $in: codes } });
     }
   }
   if (!or.length) return res.json([]);

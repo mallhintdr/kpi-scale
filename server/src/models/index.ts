@@ -391,6 +391,31 @@ notificationSchema.index({ tenantId: 1, userId: 1, readAt: 1, createdAt: -1 });
 notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 180 });
 export const Notification = mongoose.model('Notification', notificationSchema);
 
+/* ---------------- Access grants: rights given to a person directly, on top of their posts ----------------
+ * A grant covers a unit and everything below it, optionally only some KPIs, optionally until a date.
+ */
+export const GRANT_RIGHTS = ['view', 'enter', 'edit', 'verify', 'set_targets', 'assign_targets', 'compare', 'manage_registers'] as const;
+export type GrantRight = (typeof GRANT_RIGHTS)[number];
+const accessGrantSchema = new Schema(
+  {
+    ...tenantField,
+    userId: ref('User', true),
+    unitId: ref('Unit', true),
+    anc: [{ type: Schema.Types.ObjectId }],
+    rights: [{ type: String, enum: GRANT_RIGHTS }],
+    /** KPI codes the grant is limited to (empty = every KPI). */
+    metrics: [{ type: String }],
+    expiresAt: { type: Date, default: null },
+    note: { type: String, maxlength: 300 },
+    grantedBy: ref('User'),
+  },
+  opts,
+);
+accessGrantSchema.plugin(tenantPlugin);
+accessGrantSchema.index({ tenantId: 1, userId: 1 });
+accessGrantSchema.index({ tenantId: 1, unitId: 1 });
+export const AccessGrant = mongoose.model('AccessGrant', accessGrantSchema);
+
 /* ---------------- Pre-computed period statistics (rebuilt by the "rollup" job) ----------------
  * One document per unit × period. Every unit holds the totals of its whole subtree, so any view of
  * any area for any period is a single indexed read.

@@ -27,6 +27,7 @@ interface Draft {
   calendar: { fyStartMonth: number };
   money: { currency?: string; symbol?: string; scale?: number; scaleLabel?: string; decimals?: number };
   terms?: Record<string, string>;
+  access?: { viewScope?: 'organisation' | 'jurisdiction' };
 }
 interface BlueprintRes { version: number; template?: string; updatedAt?: string; doc: Draft | null }
 interface Issue { path: string; message: string }
@@ -239,6 +240,14 @@ function General({ d, update }: Ed) {
       <Card className="grid gap-3 p-4 sm:grid-cols-2">
         <Field label="Framework name">{(id) => <Input id={id} value={d.name} onChange={(e) => update((x) => { x.name = e.target.value; })} />}</Field>
         <Field label="Industry">{(id) => <Input id={id} value={d.industry ?? ''} placeholder="e.g. Marketing, HR, Public sector" onChange={(e) => update((x) => { x.industry = e.target.value; })} />}</Field>
+        <Field label="Who can view what" hint="Extra areas can be opened to individuals under Access rights">
+          {(id) => (
+            <Select id={id} value={d.access?.viewScope ?? 'organisation'} onChange={(e) => update((x) => { x.access = { viewScope: e.target.value as 'organisation' | 'jurisdiction' }; })}>
+              <option value="organisation">Everyone sees the whole organisation (read-only)</option>
+              <option value="jurisdiction">Each person sees only their own jurisdiction</option>
+            </Select>
+          )}
+        </Field>
         <Field label="Financial year starts in" hint="Targets, trends and reports run over this 12-month year">
           {(id) => <Select id={id} value={d.calendar.fyStartMonth} onChange={(e) => update((x) => { x.calendar.fyStartMonth = Number(e.target.value); })}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</Select>}
         </Field>

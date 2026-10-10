@@ -16,6 +16,7 @@ import { errorHandler, notFoundHandler } from './middleware/error.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import notificationRoutes from './modules/notifications/notifications.routes.js';
 import './modules/org/imports.js';
+import accessRoutes from './modules/org/access.routes.js';
 import orgRoutes from './modules/org/org.routes.js';
 import { withBlueprint } from './modules/org/service.js';
 import platformRoutes from './modules/platform/platform.routes.js';
@@ -70,7 +71,7 @@ export function createApp() {
   api.use('/platform', platformRoutes);
   api.use('/users', userRoutes);
   api.use('/notifications', notificationRoutes);
-  api.use('/org', orgRoutes);
+  api.use('/org', orgRoutes, accessRoutes);
   api.use('/rev', withBlueprint, performanceRoutes, entryRoutes, registerRoutes, assignedRoutes, statsRoutes);
 
   app.use('/api', api);

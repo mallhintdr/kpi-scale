@@ -44,6 +44,8 @@ export interface RevMe {
   canCompare: boolean;
   caps: { canEnter: boolean; canVerify: boolean; canSetTargets: boolean; canAssign: boolean; canCompare: boolean; canManageRegisters: boolean; registers: string[]; isScored: boolean };
   charges: { _id: string; post: Post; postLabel: string; chargeType: string; unit: UnitRef; path: string[] }[];
+  /** Rights granted to this person directly, on a unit and everything below it. */
+  grants: { _id: string; unitId: string; rights: string[]; metrics: string[]; unit: (UnitRef & { anc: string[] }) | null }[];
 }
 
 /* ------------------------------------------------------------------ *
@@ -205,6 +207,7 @@ export function useCaps() {
     /** Best starting unit for read-only lists: own jurisdiction if it has staff below it, else the organisation. */
     viewRoot: (data?.roots ?? []).find((r) => parentLevels().slice(0, -1).includes(r.type) || (org && levelIndex(r.type) < levels().length - 2)) ?? data?.browseRoots?.[0] ?? null,
     charges: data?.charges ?? [],
+    grants: data?.grants ?? [],
   };
 }
 

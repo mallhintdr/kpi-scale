@@ -8,7 +8,7 @@ import { objectId, q, validate } from '../../middleware/validate.js';
 import { Charge, RevEntry, RevTarget, Unit, User } from '../../models/index.js';
 import { publicBlueprint, type BP } from '../org/blueprint.js';
 import { bpOf } from '../org/service.js';
-import { activeFilter, assertCanRead, hasCap, myCharges, scopeRoots, topUnits } from './access.js';
+import { activeFilter, assertCanRead, browseRootsFor, grantsOf, hasCap, myCharges, scopeRoots } from './access.js';
 import { breakdown, configResolver, headCells, inUnit, loadFacts, rollup, scoreFacts, type FactSet } from './scoring.js';
 
 const router = Router();
@@ -53,31 +53,36 @@ router.get('/me', async (req, res) => {
   const me = req.user!;
   const bp = bpOf(req);
   const [charges, roots] = await Promise.all([myCharges(me.id), scopeRoots(me, bp)]);
-  const [rootUnits, browse] = await Promise.all([
+  const [rootUnits, browse, grants] = await Promise.all([
     Unit.find({ _id: { $in: roots } }).select('type name').sort({ type: 1, name: 1 }).lean(),
-    topUnits(bp),
+    browseRootsFor(me, bp),
+    grantsOf(me),
   ]);
+  const grantUnits = new Map((await Unit.find({ _id: { $in: grants.map((g) => g.unitId) } }).select('type name anc').lean()).map((u) => [String(u._id), u]));
+  const granted = (r: string) => grants.some((g) => g.rights.includes(r as never));
   const ancIds = [...new Set(charges.flatMap((c) => c.unit.anc.map(String)))];
   const names = new Map((await Unit.find({ _id: { $in: ancIds } }).select('name type').lean()).map((u) => [String(u._id), u]));
   const admin = atLeast(me.role, 'admin');
   const posts = new Set(charges.map((c) => c.post));
   const any = (list: string[]) => list.some((p) => posts.has(p));
-  const capOf = (cap: Parameters<BP['postsWithCap']>[0]) => admin || any(bp.postsWithCap(cap));
+  const capOf = (cap: Parameters<BP['postsWithCap']>[0]) => admin || any(bp.postsWithCap(cap)) || granted(cap);
   res.json({
     isAdmin: admin,
     roots: rootUnits,
     browseRoots: browse,
     canCompare: capOf('compare'),
     caps: {
-      canEnter: admin || bp.metrics.some((m) => any(m.enterPosts) || (m.perHolder && any(m.holderPosts))),
-      canVerify: admin || bp.metrics.some((m) => any(m.verifyPosts)),
+      canEnter: admin || granted('enter') || granted('edit') || bp.metrics.some((m) => any(m.enterPosts) || (m.perHolder && any(m.holderPosts))),
+      canVerify: admin || granted('verify') || bp.metrics.some((m) => any(m.verifyPosts)),
       canSetTargets: capOf('set_targets'),
       canAssign: capOf('assign_targets'),
       canCompare: capOf('compare'),
       canManageRegisters: capOf('manage_registers'),
-      registers: bp.registers.filter((r) => admin || any(r.enterPosts)).map((r) => r.key),
+      registers: bp.registers.filter((r) => admin || any(r.enterPosts) || granted('manage_registers')).map((r) => r.key),
       isScored: [...posts].some((p) => bp.post.get(p)?.scored),
     },
+    // Rights granted to this person directly (the entry and target screens use them as extra areas)
+    grants: grants.map((g) => ({ ...g, unit: grantUnits.get(g.unitId) ? { _id: g.unitId, type: grantUnits.get(g.unitId)!.type, name: grantUnits.get(g.unitId)!.name, anc: grantUnits.get(g.unitId)!.anc.map(String) } : null })),
     charges: charges.map((c) => ({
       _id: c._id,
       post: c.post,
@@ -355,6 +360,19 @@ router.get('/officers/:userId', validate({ params: z.object({ userId: objectId }
   if (!user) throw badRequest('Officer not found');
   const charges = all.filter((c) => !bp.dataPosts.has(c.post));
   if (!charges.length) throw badRequest('This officer holds no scored posting');
+  if (bp.raw.access?.viewScope === 'jurisdiction') {
+    let ok = false;
+    for (const c of charges) {
+      try {
+        await assertCanRead(req.user!, String(c.unit._id));
+        ok = true;
+        break;
+      } catch {
+        /* try the next posting */
+      }
+    }
+    if (!ok) throw forbidden('This officer is outside what you are allowed to view');
+  }
 
   const byPost = new Map<string, typeof charges>();
   for (const c of charges) byPost.set(c.post, [...(byPost.get(c.post) ?? []), c]);
