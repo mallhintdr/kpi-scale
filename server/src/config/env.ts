@@ -14,6 +14,19 @@ const schema = z.object({
   REDIS_URL: z.string().optional().transform((v) => v || undefined),
   RUN_WORKER: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
   MONGO_POOL: z.coerce.number().default(50),
+  /** WhatsApp: mock (default, log only) | wasender | cloud (Meta). */
+  WHATSAPP_MODE: z.enum(['mock', 'wasender', 'cloud']).default('mock'),
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+  WHATSAPP_APP_SECRET: z.string().optional(),
+  /** Shared secret for the WASender webhook (?secret=… or X-Webhook-Signature). */
+  WHATSAPP_WEBHOOK_SECRET: z.string().optional(),
+  /** Meta: approved utility template with one body variable, used outside the 24-hour window. */
+  WHATSAPP_CLOUD_TEMPLATE: z.string().optional(),
+  WHATSAPP_CLOUD_TEMPLATE_LANG: z.string().default('en'),
+  /** Outbound messages per second across all organisations (provider rate limit). */
+  WHATSAPP_RATE_PER_SEC: z.coerce.number().default(10),
   /** Platform super-admin seeded on first start (only if no super-admin exists). */
   SUPERADMIN_EMAIL: z.string().email().optional(),
   SUPERADMIN_PASSWORD: z.string().min(10).optional(),

@@ -90,7 +90,7 @@ async function main() {
       let e = email, i = 2;
       while (usedEmails.has(e)) e = email.replace('@', `${i++}@`);
       usedEmails.add(e);
-      const u = { _id: new Types.ObjectId(), tenantId: tid, name, email: e, passwordHash, role, designation, bps, status: 'active', employeeCode: `BWP-${1000 + users.length}` };
+      const u = { _id: new Types.ObjectId(), tenantId: tid, name, email: e, passwordHash, role, designation, bps, status: 'active', employeeCode: `BWP-${1000 + users.length}`, phone: `0300-${String(10000000 + users.length).slice(1)}`, phoneE164: `+92300${String(10000000 + users.length).slice(1)}` };
       users.push(u);
       return u;
     };

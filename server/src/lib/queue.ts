@@ -62,11 +62,17 @@ function startInlineSchedules() {
   setInterval(() => {
     const now = new Date();
     for (const s of schedules) {
+      const hdl = handlers.get(s.name);
+      // "*/N * * * *": every N minutes
+      const every = /^\*\/(\d+) /.exec(s.pattern);
+      if (every) {
+        if (now.getMinutes() % Number(every[1]) === 0) hdl?.({ tenantId: '' }).catch((err) => logger.error({ err, job: s.name }, 'scheduled job failed'));
+        continue;
+      }
       const [m, h] = s.pattern.split(' ').map(Number);
       const tag = `${s.name}${now.toDateString()}`;
       if (now.getHours() === h && now.getMinutes() >= m && !lastRun.includes(tag)) {
         lastRun += tag;
-        const hdl = handlers.get(s.name);
         hdl?.({ tenantId: '' }).catch((err) => logger.error({ err, job: s.name }, 'scheduled job failed'));
       }
     }

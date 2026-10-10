@@ -28,6 +28,9 @@ import './modules/revenue/rollup.js';
 import statsRoutes from './modules/revenue/stats.routes.js';
 import './modules/revenue/warm.js';
 import userRoutes from './modules/users/users.routes.js';
+import waAdminRoutes from './modules/whatsapp/admin.routes.js';
+import './modules/whatsapp/engine.js';
+import waWebhookRoutes from './modules/whatsapp/webhook.routes.js';
 
 /** Shared limiter store across API instances when Redis is available. */
 const store = (prefix: string) => {
@@ -50,7 +53,9 @@ export function createApp() {
   app.use(cors({ origin: env.corsOrigins, credentials: true }));
   app.use(compression());
   // Bulk imports carry CSV files; everything else stays small
-  app.use((req, res, next) => (req.path === '/api/org/imports' ? next() : express.json({ limit: '200kb' })(req, res, next)));
+  // Raw body kept for webhook signature checks (Meta HMAC); bulk imports carry CSV files
+  const json = express.json({ limit: '200kb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } });
+  app.use((req, res, next) => (req.path === '/api/org/imports' ? next() : json(req, res, next)));
   app.use(cookieParser());
   app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/health' } }));
 
@@ -65,13 +70,14 @@ export function createApp() {
   const api = Router();
   api.use(rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: 'draft-8', legacyHeaders: false, keyGenerator: clientKey, store: store('rl:api:') }));
   api.use('/auth', authRoutes);
+  api.use('/whatsapp', waWebhookRoutes); // public: provider webhooks
 
   // Everything below requires a valid session and runs inside the caller's tenant context.
   api.use(authenticate);
   api.use('/platform', platformRoutes);
   api.use('/users', userRoutes);
   api.use('/notifications', notificationRoutes);
-  api.use('/org', orgRoutes, accessRoutes);
+  api.use('/org', orgRoutes, accessRoutes, waAdminRoutes);
   api.use('/rev', withBlueprint, performanceRoutes, entryRoutes, registerRoutes, assignedRoutes, statsRoutes);
 
   app.use('/api', api);

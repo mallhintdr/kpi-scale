@@ -90,6 +90,17 @@ node scripts/e2e-tenant.mjs     # 28 checks: create org → import → targets �
 node scripts/baseline.mjs out.json   # snapshot of every Board of Revenue score; diff two snapshots to prove a change is score-neutral
 ```
 
+## WhatsApp coaching
+Each organisation can switch on a daily WhatsApp routine under **Manage › WhatsApp coaching**:
+- **Morning goals**: running targets with the amount needed per day, tasks due or overdue, year-to-date position against pace, the weakest KPI to focus on, and the verification queue for verifiers.
+- **Follow-ups** (up to four): what has been recorded today and what is still open.
+- **Evening summary**: today's activity, achievement against expected pace, KPI score and band, rank among peers, and tomorrow's focus.
+- **Escalation ladder** for people who stay behind (pace gap or overdue tasks): a nudge, then **under review** after N working days (supervisor informed), then a **final warning** after 2N days that administrative or disciplinary proceedings may be initiated (supervisor and admins informed). One good day resets the count. Any action remains a human decision.
+- **Replies**: employees can send STATUS, TASKS, DONE <n> (closes a task and notifies the assigning officer) and HELP.
+- **Settings**: English, Urdu or bilingual messages; working days, holidays and times in the organisation's timezone; previews, test sends, simulated replies, a message log and the escalation list.
+
+Delivery follows WHATSAPP_INTEGRATION.md: a provider facade for **mock** (default, log only), **WASender** and **Meta Cloud API** (approved template outside the 24-hour window), a webhook that checks signatures and secrets and drops duplicates, and a separate BullMQ queue capped at WHATSAPP_RATE_PER_SEC. Settings are listed in server/.env.example. End-to-end test: node scripts/e2e-whatsapp.mjs.
+
 ## Architecture
 
 ### Isolation

@@ -1,6 +1,7 @@
 import mongoose, { Schema, type InferSchemaType, type Types } from 'mongoose';
 import { dataVersionPlugin } from '../lib/dataVersion.js';
 import { tenantPlugin } from '../lib/tenantPlugin.js';
+import { normalizePhone } from '../modules/whatsapp/phone.js';
 
 const opts = { timestamps: true } as const;
 const tenantField = { tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, immutable: true } } as const;
@@ -31,6 +32,30 @@ const tenantSchema = new Schema(
       currency: { type: String, default: 'PKR' },
       ratingScale: { type: Number, default: 5 },
     },
+    /** Daily WhatsApp coaching: morning goals, follow-ups, evening summary, escalation ladder. */
+    whatsapp: {
+      enabled: { type: Boolean, default: false },
+      language: { type: String, enum: ['english', 'urdu', 'bilingual'], default: 'english' },
+      morningAt: { type: String, default: '08:30' },
+      followupsAt: { type: [String], default: ['11:30', '14:30'] },
+      eveningAt: { type: String, default: '18:00' },
+      /** 0 = Sunday … 6 = Saturday */
+      workdays: { type: [Number], default: [1, 2, 3, 4, 5, 6] },
+      holidays: { type: [String], default: [] }, // YYYY-MM-DD
+      /** Who receives it: scored staff only, or everyone with a posting */
+      audience: { type: String, enum: ['scored', 'all'], default: 'scored' },
+      escalation: {
+        enabled: { type: Boolean, default: true },
+        /** A day is "behind" when achievement trails the year's pace by more than this many points … */
+        paceGap: { type: Number, default: 15 },
+        /** … or overdue tasks reach this many */
+        overdueTasks: { type: Number, default: 3 },
+        /** Consecutive behind days for level 2 (review notice); level 3 at twice this */
+        days: { type: Number, default: 3 },
+        notifySupervisor: { type: Boolean, default: true },
+      },
+      allowOptOut: { type: Boolean, default: false },
+    },
   },
   opts,
 );
@@ -53,6 +78,9 @@ const userSchema = new Schema(
     employeeCode: { type: String, trim: true, maxlength: 40 },
     bps: { type: Number, min: 1, max: 22 },
     phone: { type: String, trim: true, maxlength: 30 },
+    /** E.164 form of phone (set automatically) — used to match WhatsApp replies. */
+    phoneE164: { type: String, index: true },
+    whatsappOptOut: { type: Boolean, default: false },
     status: { type: String, enum: ['active', 'invited', 'disabled'], default: 'active' },
     lastLoginAt: Date,
     tokenVersion: { type: Number, default: 0 },
@@ -60,6 +88,9 @@ const userSchema = new Schema(
   opts,
 );
 userSchema.plugin(tenantPlugin);
+userSchema.pre('save', function () {
+  if (this.isModified('phone')) this.set('phoneE164', normalizePhone(this.get('phone')) || undefined);
+});
 userSchema.index({ tenantId: 1, email: 1 }, { unique: true });
 userSchema.index({ email: 1 });
 userSchema.index({ tenantId: 1, status: 1, name: 1 });
@@ -390,6 +421,48 @@ notificationSchema.plugin(tenantPlugin);
 notificationSchema.index({ tenantId: 1, userId: 1, readAt: 1, createdAt: -1 });
 notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 180 });
 export const Notification = mongoose.model('Notification', notificationSchema);
+
+/* ---------------- WhatsApp messages (outbox + inbox) ---------------- */
+const waMessageSchema = new Schema(
+  {
+    ...tenantField,
+    userId: ref('User'),
+    phone: { type: String, required: true },
+    direction: { type: String, enum: ['out', 'in'], required: true },
+    kind: { type: String, required: true }, // morning | followup | evening | warning | supervisor | reply | test | inbound
+    text: { type: String, maxlength: 4096 },
+    status: { type: String, enum: ['queued', 'sent', 'failed', 'received', 'skipped'], default: 'queued' },
+    provider: String,
+    providerId: String,
+    error: String,
+    day: String, // YYYY-MM-DD in the organisation's timezone
+    sentAt: Date,
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+waMessageSchema.plugin(tenantPlugin);
+waMessageSchema.index({ tenantId: 1, createdAt: -1 });
+waMessageSchema.index({ tenantId: 1, userId: 1, createdAt: -1 });
+waMessageSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 365 });
+export const WaMessage = mongoose.model('WaMessage', waMessageSchema);
+
+/** Escalation ladder state per person. */
+const waStateSchema = new Schema(
+  {
+    ...tenantField,
+    userId: ref('User', true),
+    behindDays: { type: Number, default: 0 },
+    level: { type: Number, default: 0 }, // 0 ok · 1 nudge · 2 under review · 3 disciplinary warning
+    lastDay: String,
+    lastReason: String,
+    history: [{ day: String, level: Number, reason: String, _id: false }],
+  },
+  opts,
+);
+waStateSchema.plugin(tenantPlugin);
+waStateSchema.index({ tenantId: 1, userId: 1 }, { unique: true });
+waStateSchema.index({ tenantId: 1, level: -1 });
+export const WaState = mongoose.model('WaState', waStateSchema);
 
 /* ---------------- Access grants: rights given to a person directly, on top of their posts ----------------
  * A grant covers a unit and everything below it, optionally only some KPIs, optionally until a date.

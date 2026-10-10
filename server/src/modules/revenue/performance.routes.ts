@@ -248,7 +248,7 @@ router.get('/league', validate({ query: fyQuery.extend({ unitId: objectId, post:
   res.json(await view(req, bp, `league:${unit._id}:${post}:${fy}`, () => leagueView(bp, unit, post, fy)));
 });
 
-async function leagueView(bp: BP, unit: any, post: string, fy: string) {
+export async function leagueView(bp: BP, unit: any, post: string, fy: string) {
 
   const [facts, resolve] = await Promise.all([loadFacts(unit._id, fy, bp), configResolver(bp)]);
   const subtree = [...facts.units.keys()];
@@ -295,24 +295,26 @@ async function leagueView(bp: BP, unit: any, post: string, fy: string) {
 }
 
 /* My own officer score(s), one per post held */
-router.get('/my-score', validate({ query: fyQuery }), async (req, res) => {
-  const bp = bpOf(req);
-  const fy = resolveFy(bp, q<any>(req).fy);
-  const charges = await myCharges(req.user!.id);
+/** A person's own score(s), one per scored post they hold (also used by the WhatsApp digests). */
+export async function scoresForUser(bp: BP, userId: string, fy: string) {
+  const charges = await myCharges(userId);
   const scored = charges.filter((c) => !bp.dataPosts.has(c.post));
-  if (!scored.length) return res.json({ fy, items: [] });
+  if (!scored.length) return [];
   const resolve = await configResolver(bp);
   const facts = await loadFacts(factsRootFor(bp, scored.map((c) => c.unit)), fy, bp);
   const byPost = new Map<string, OfficerCharge[]>();
   for (const c of scored) {
     const list = byPost.get(c.post) ?? [];
-    list.push({ userId: req.user!.id, post: c.post, unitId: String(c.unit._id), anc: c.unit.anc.map(String) });
+    list.push({ userId, post: c.post, unitId: String(c.unit._id), anc: c.unit.anc.map(String) });
     byPost.set(c.post, list);
   }
-  res.json({
-    fy,
-    items: [...byPost.entries()].map(([post, list]) => ({ post, postLabel: bp.postLabel(post), ...officerScore(bp, facts, resolve, list, post) })),
-  });
+  return [...byPost.entries()].map(([post, list]) => ({ post, postLabel: bp.postLabel(post), unitIds: list.map((l) => l.unitId), ...officerScore(bp, facts, resolve, list, post) }));
+}
+
+router.get('/my-score', validate({ query: fyQuery }), async (req, res) => {
+  const bp = bpOf(req);
+  const fy = resolveFy(bp, q<any>(req).fy);
+  res.json({ fy, items: (await scoresForUser(bp, req.user!.id, fy)).map(({ unitIds: _u, ...x }) => x) });
 });
 
 /* ------------------------------------------------------------------ *

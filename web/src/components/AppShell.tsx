@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import {
-  Award, Bell, KeyRound, BarChart3, CalendarRange, CheckSquare, Gauge, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
+  Award, Bell, KeyRound, MessageCircle, BarChart3, CalendarRange, CheckSquare, Gauge, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
   Crosshair, FileSpreadsheet, GitCompareArrows, Network, ShieldCheck, SlidersHorizontal, Table2, Target, Upload, UserCog, Workflow,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
@@ -42,6 +42,7 @@ export const NAV: NavItem[] = [
   { to: '/admin/access', label: 'Access rights', icon: KeyRound, show: (c) => c.isAdmin, group: 'admin' },
   { to: '/admin/postings', label: 'Postings', icon: MapPinned, show: (c) => c.isAdmin, group: 'admin' },
   { to: '/admin/scoring', label: 'Scoring weights', icon: SlidersHorizontal, show: (c) => c.isAdmin, group: 'admin' },
+  { to: '/admin/whatsapp', label: 'WhatsApp coaching', icon: MessageCircle, show: (c) => c.isAdmin, group: 'admin' },
   { to: '/admin/import', label: 'Bulk import', icon: Upload, show: (c) => c.isAdmin, group: 'admin' },
 ];
 export const visibleNav = (c: Caps) => NAV.filter((n) => !n.show || n.show(c));

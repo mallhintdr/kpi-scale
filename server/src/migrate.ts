@@ -11,7 +11,8 @@ import mongoose from 'mongoose';
 import { connectDb, disconnectDb } from './lib/db.js';
 import { logger } from './lib/logger.js';
 import { runAsTenant, runUnscoped } from './lib/tenantContext.js';
-import { AuditPara, Blueprint, Tenant } from './models/index.js';
+import { AuditPara, Blueprint, Tenant, User } from './models/index.js';
+import { normalizePhone } from './modules/whatsapp/phone.js';
 import { saveBlueprint } from './modules/org/service.js';
 import { TEMPLATES } from './modules/org/templates.js';
 import { closeRedis } from './lib/redis.js';
@@ -45,6 +46,10 @@ async function main() {
         await runUnscoped(() => Tenant.updateOne({ _id: t._id }, { $set: { 'branding.logoUrl': '/punjab-logo-white.png', 'branding.tagline': 'Government of the Punjab', 'branding.shortName': 'Board of Revenue' } }));
         logger.info({ tenant: t.slug }, 'branding set');
       }
+      // E.164 phone numbers for WhatsApp matching
+      const users = await User.find({ phone: { $exists: true, $ne: '' }, phoneE164: { $exists: false } }).select('phone');
+      for (const u of users) { u.set('phoneE164', normalizePhone(u.get('phone')) || undefined); await u.save(); }
+      if (users.length) logger.info({ tenant: t.slug, n: users.length }, 'phone numbers normalised');
       const tagged = await AuditPara.updateMany({ register: { $exists: false } }, { $set: { register: 'audit' } });
       if (tagged.modifiedCount) logger.info({ tenant: t.slug, n: tagged.modifiedCount }, 'register items tagged');
     });

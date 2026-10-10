@@ -13,6 +13,7 @@ import { Types } from 'mongoose';
 import { defineJob } from '../../lib/queue.js';
 import { Charge, ImportRun, Tenant, Unit, User } from '../../models/index.js';
 import { hashPassword } from '../auth/auth.routes.js';
+import { normalizePhone } from '../whatsapp/phone.js';
 import { checkPosting } from '../revenue/registers.routes.js';
 import type { BP } from './blueprint.js';
 import { getBlueprint } from './service.js';
@@ -72,7 +73,7 @@ async function importUsers(rows: Row[], c: Ctx) {
     const role = (r.role || 'employee').toLowerCase();
     if (!ROLES.includes(role)) { c.errors.push({ row: i, message: `Unknown role "${r.role}"` }); continue; }
     const pw = r.password || c.defaultPassword;
-    const data = { name: r.name, role, designation: r.designation || undefined, employeeCode: r.employee_code || undefined, phone: r.phone || undefined };
+    const data = { name: r.name, role, designation: r.designation || undefined, employeeCode: r.employee_code || undefined, phone: r.phone || undefined, phoneE164: normalizePhone(r.phone) || undefined };
     if (existing.has(email)) {
       if (!c.dryRun) await User.updateOne({ email }, data);
       c.updated++;
