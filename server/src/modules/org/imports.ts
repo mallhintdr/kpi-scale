@@ -25,7 +25,7 @@ export function parseCsv(text: string): Row[] {
   return parse(text, { columns: (h: string[]) => h.map((x) => x.trim().toLowerCase().replace(/\s+/g, '_')), skip_empty_lines: true, trim: true, bom: true });
 }
 
-interface Ctx { bp: BP; dryRun: boolean; errors: { row: number; message: string }[]; created: number; updated: number; defaultPassword?: string }
+interface Ctx { bp: BP; dryRun: boolean; errors: { row: number; message: string }[]; created: number; updated: number; defaultPassword?: string; actorRole?: string }
 
 async function importUnits(rows: Row[], c: Ctx) {
   const { bp } = c;
@@ -72,10 +72,13 @@ async function importUsers(rows: Row[], c: Ctx) {
     if (!r.name || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { c.errors.push({ row: i, message: 'name and a valid email are required' }); continue; }
     const role = (r.role || 'employee').toLowerCase();
     if (!ROLES.includes(role)) { c.errors.push({ row: i, message: `Unknown role "${r.role}"` }); continue; }
+    // Only an owner may create owners; imports never change an existing person's role
+    if (role === 'owner' && c.actorRole !== 'owner') { c.errors.push({ row: i, message: 'Only an organisation owner can create owners' }); continue; }
     const pw = r.password || c.defaultPassword;
     const data = { name: r.name, role, designation: r.designation || undefined, employeeCode: r.employee_code || undefined, phone: r.phone || undefined, phoneE164: normalizePhone(r.phone) || undefined };
     if (existing.has(email)) {
-      if (!c.dryRun) await User.updateOne({ email }, data);
+      const { role: _ignored, ...profile } = data;
+      if (!c.dryRun) await User.updateOne({ email }, profile);
       c.updated++;
       continue;
     }
@@ -122,7 +125,7 @@ defineJob('import', async (d) => {
     if (!bp) throw new Error('Organisation is not configured');
     const rows = parseCsv(String(d.csv));
     run.total = rows.length;
-    const ctx: Ctx = { bp, dryRun: run.dryRun, errors: [], created: 0, updated: 0, defaultPassword: d.defaultPassword as string | undefined };
+    const ctx: Ctx = { bp, dryRun: run.dryRun, errors: [], created: 0, updated: 0, defaultPassword: d.defaultPassword as string | undefined, actorRole: d.actorRole as string | undefined };
     if (run.kind === 'units') {
       const t = await Tenant.findById(d.tenantId).select('limits').lean();
       const now = await Unit.countDocuments();

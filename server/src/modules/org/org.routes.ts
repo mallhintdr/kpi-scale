@@ -177,7 +177,7 @@ router.post(
     if (!total) throw badRequest('The file has no data rows');
     if (total > 50_000) throw badRequest('Split the file: at most 50,000 rows per import');
     const run = await ImportRun.create({ kind, dryRun, total, createdBy: req.user!.id });
-    await enqueue('import', { tenantId: req.user!.tenantId, runId: String(run._id), csv, defaultPassword });
+    await enqueue('import', { tenantId: req.user!.tenantId, runId: String(run._id), csv, defaultPassword, actorRole: req.user!.role });
     res.status(202).json(run);
   },
 );
