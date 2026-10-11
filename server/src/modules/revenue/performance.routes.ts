@@ -214,7 +214,7 @@ function officerScore(bp: BP, facts: FactSet, resolve: Awaited<ReturnType<typeof
   const lvl = facts.units.get(charges[0].unitId)?.type;
   const s = scoreFacts(f, bp.profileForPost(post, lvl), resolve(charges[0].anc), bp);
   const b = breakdown(f, bp);
-  return { score: s.score, band: bp.band(s.score), blocks: s.blocks, target: b.totals.target, collected: b.totals.collected, units: unitIds.length, heads: headCells(b, bp) };
+  return { score: s.score, band: bp.band(s.score), blocks: s.blocks, weights: s.weights, target: b.totals.target, collected: b.totals.collected, units: unitIds.length, heads: headCells(b, bp) };
 }
 
 /** Facts root for an officer: their shallowest unit, raised to the shallowest per-holder KPI level so their own rows are covered. */

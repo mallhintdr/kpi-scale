@@ -1,18 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/AppShell';
-import { BlockBars, FyPicker, RevBandBadge } from '../components/rev';
+import { FyPicker, RevBandBadge } from '../components/rev';
 import { Card, Empty, Loading, SectionTitle } from '../components/ui';
-import { MetricCard, ScoreGauge, type MetricCardProps } from '../components/charts';
+import { type MetricCardProps } from '../components/charts';
 import { useViewMode } from '../lib/mode';
 import { TargetCard, useAssigned } from '../components/targets';
 import { TargetSummary } from './Assigned';
 import { get } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { fmtPKR, getOrg, MILLIONS, T, UNIT_LABEL, useCaps, useFy, type Block, type RevBand } from '../lib/rev';
+import { BLOCK_LABEL, fmtPKR, getOrg, MILLIONS, T, UNIT_LABEL, useCaps, useFy, type Block, type RevBand } from '../lib/rev';
 import { useUnit, type UnitData } from './UnitView';
 
-interface MyScore { post: string; postLabel: string; score: number | null; band: RevBand; blocks: Record<Block, number | null>; target: number; collected: number; units: number }
+interface MyScore { post: string; postLabel: string; score: number | null; band: RevBand; blocks: Record<Block, number | null>; weights?: Record<Block, number>; target: number; collected: number; units: number }
 
 export default function Home() {
   const { user } = useMe();
@@ -43,27 +43,7 @@ export default function Home() {
       {!tmode && myScore.data?.items.length ? (
         <>
           <SectionTitle>My performance · FY {fy}</SectionTitle>
-          <div className={`grid gap-3 ${myScore.data.items.length > 1 ? '2xl:grid-cols-2' : ''}`}>
-            {myScore.data.items.map((s) => (
-              <Card key={s.post} className="overflow-hidden">
-                <div className="h-1 bg-gradient-to-r from-brand-700 via-brand-500 to-gold-400" />
-                <div className="p-4">
-                  <div className={perf ? '' : 'mb-4 flex items-center gap-4'}>
-                    {!perf && <ScoreGauge value={s.score} size={132} label={s.postLabel} />}
-                    <div className="min-w-0 flex-1 space-y-2">
-                      {!perf && <RevBandBadge band={s.band} size="md" />}
-                      <MetricCard
-                        title={`${T.money} — current year`} achieved={s.collected} total={s.target} fmt={fmtPKR} unit={MILLIONS} compact
-                        pace={elapsed}
-                      />
-                      <div className="text-[11px] text-slate-400">{s.postLabel} · {s.units} unit{s.units === 1 ? '' : 's'} in charge</div>
-                    </div>
-                  </div>
-                  {!perf && <BlockBars blocks={s.blocks} />}
-                </div>
-              </Card>
-            ))}
-          </div>
+          <MyPerformanceTable items={myScore.data.items} perf={perf} elapsed={elapsed} />
         </>
       ) : myScore.isLoading ? <Loading /> : null}
 
@@ -77,7 +57,85 @@ export default function Home() {
   );
 }
 
-/** One card per KPI head (plus arrears, audit paras and tasks) for the officer's jurisdiction. */
+/** The official's own position, one row per post held: target, achieved, balance, pace and (KPI mode) score. */
+function MyPerformanceTable({ items, perf, elapsed }: { items: MyScore[]; perf: boolean; elapsed: number }) {
+  const th = 'border-b border-r border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3 sm:py-2.5';
+  const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 text-right tabular-nums sm:px-3 dark:border-slate-700';
+  const wide = 'hidden md:table-cell';
+  const blocks = getOrg()?.blocks ?? [];
+  return (
+    <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full border-separate border-spacing-0 text-[12px] sm:text-[13px]">
+          <thead className="bg-brand-700 text-center text-[11px] uppercase tracking-wide text-white sm:text-[12.5px]">
+            <tr>
+              <th className={th}>Post</th>
+              <th className={th}>Target</th>
+              <th className={th}>{T.achieved}</th>
+              <th className={th}>Balance</th>
+              <th className={`${th} ${wide}`}>Expected by Now</th>
+              <th className={`${th} ${wide}`}>Ahead / Short</th>
+              <th className={th}>%</th>
+              {!perf && <th className={th}>Score</th>}
+              {!perf && <th className="border-b border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3">Band</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((s) => {
+              const pct = s.target > 0 ? Math.min(100, (s.collected / s.target) * 100) : null;
+              const expected = s.target > 0 ? (s.target * elapsed) / 100 : null;
+              const gap = expected != null ? s.collected - expected : null;
+              return (
+                <tr key={s.post}>
+                  <td className="border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 sm:px-3 dark:border-slate-700">
+                    <div className="font-medium text-slate-900 dark:text-white">{s.postLabel}</div>
+                    <div className="text-[11px] text-slate-500">{s.units} unit{s.units === 1 ? '' : 's'} in charge</div>
+                  </td>
+                  <td className={td}>{fmtPKR(s.target)}</td>
+                  <td className={`${td} font-semibold text-slate-900 dark:text-white`}>{fmtPKR(s.collected)}</td>
+                  <td className={td}>{fmtPKR(Math.max(0, s.target - s.collected))}</td>
+                  <td className={`${td} ${wide} text-slate-500`}>{expected == null ? '—' : fmtPKR(expected)}</td>
+                  <td className={`${td} ${wide} font-medium ${gap == null ? 'text-slate-400' : gap >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}`}>{gap == null ? '—' : `${gap >= 0 ? '+' : '−'}${fmtPKR(Math.abs(gap))}`}</td>
+                  <td className={`${td} font-bold text-slate-900 dark:text-white`}>{pct == null ? '—' : `${Math.round(pct)}%`}</td>
+                  {!perf && <td className={`${td} font-bold text-slate-900 dark:text-white`}>{s.score == null ? '—' : Math.round(s.score)}</td>}
+                  {!perf && <td className="border-b border-b-slate-200 px-1.5 py-2 text-center sm:px-3 dark:border-slate-700"><RevBandBadge band={s.band} /></td>}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {/* KPI evaluation: the score broken down by block, as a table too */}
+      {!perf && (
+        <div className="overflow-x-auto border-t border-slate-200 dark:border-slate-700">
+          <table className="w-full border-separate border-spacing-0 text-[12px] sm:text-[13px]">
+            <thead className="bg-brand-600 text-center text-[11px] text-brand-50">
+              <tr>
+                <th className="border-b border-r border-white/30 px-2 py-1.5">Block</th>
+                {items.map((s) => <th key={s.post} className="border-b border-r border-white/30 px-2 py-1.5">{s.postLabel}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {blocks.map((b) => (
+                <tr key={b.key}>
+                  <td className="border-b border-r border-b-slate-200 border-r-slate-300 px-2 py-1.5 dark:border-slate-700">{BLOCK_LABEL[b.key]}</td>
+                  {items.map((s) => (
+                    <td key={s.post} className="border-b border-r border-b-slate-200 border-r-slate-300 px-2 py-1.5 text-right tabular-nums dark:border-slate-700">
+                      {s.blocks[b.key] == null ? <span className="text-slate-400">Not applicable</span> : <><b>{Math.round(s.blocks[b.key] as number)}</b>{s.weights?.[b.key] != null && <span className="ml-1 text-[11px] text-slate-500">(weight {s.weights[b.key]}%)</span>}</>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="border-t border-slate-200 px-3 py-1.5 text-center text-[10px] font-medium text-slate-400 dark:border-slate-700">{MILLIONS} · {Math.round(elapsed)}% of the year gone</div>
+    </Card>
+  );
+}
+
+/** One row per KPI head (plus arrears, registers and tasks) for the officer's jurisdiction. */
 function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
   const count = (v: number) => v.toLocaleString();
   const cards: (MetricCardProps & { code: string })[] = [];
@@ -114,28 +172,6 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
   return (
     <>
       <SectionTitle action={<Link to={`/units/${data.unit._id}`} className="text-[13px] font-medium text-brand-600 hover:underline">Full Performance →</Link>}>KPIs · {data.unit.name} · {UNIT_LABEL[data.unit.type]}</SectionTitle>
-      {/* Phones: one compact row per KPI */}
-      <Card className="divide-y divide-slate-100 sm:hidden dark:divide-slate-800">
-        {cards.map(({ code, ...c }) => {
-          const p = c.total > 0 ? Math.min(100, (c.achieved / c.total) * 100) : null;
-          const row = (
-            <div className="px-3 py-2.5">
-              <div className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium text-slate-800 dark:text-slate-100">{c.title}</div>
-                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-slate-600 tabular-nums dark:text-slate-300">
-                    <span>{c.fmt(c.achieved)} / {c.fmt(c.total)}</span>
-                    <span>{c.labels?.balance ?? 'Balance'} {c.fmt(Math.max(0, c.total - c.achieved))}</span>
-                  </div>
-                </div>
-                <span className="shrink-0 text-base font-bold text-slate-900 tabular-nums dark:text-white">{p == null ? '—' : `${Math.round(p)}%`}</span>
-              </div>
-            </div>
-          );
-          return canDrill ? <Link key={code} to={`/staff?head=${code}`} className="block active:bg-slate-50 dark:active:bg-slate-800">{row}</Link> : <div key={code}>{row}</div>;
-        })}
-        <div className="py-1.5 text-center text-[10px] font-medium text-slate-400">{T.money} {MILLIONS} · other KPIs as counts</div>
-      </Card>
       <KpiTable cards={cards} canDrill={canDrill} />
       {canDrill && <p className="mt-1.5 px-1 text-[11px] text-slate-400">Tap a KPI to see every subordinate ranked on it.</p>}
     </>
@@ -152,23 +188,25 @@ const GROUPS: { key: string; label: string }[] = [
 /** Desktop / tablet KPI view: one aligned table, grouped by category, one KPI per row. */
 function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean }) {
   const navigate = useNavigate();
-  const th = 'border-b border-r border-white/50 px-3 py-2.5 text-center font-semibold';
-  const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-3 py-2 text-right tabular-nums dark:border-slate-700';
+  const th = 'border-b border-r border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3 sm:py-2.5';
+  const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 text-right tabular-nums sm:px-3 dark:border-slate-700';
+  // Shown from tablets up; phones keep KPI · Target · Achieved · Balance · %
+  const wide = 'hidden md:table-cell';
   let n = 0;
   return (
-    <Card className="hidden overflow-hidden sm:block">
+    <Card className="overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[13px]">
-          <thead className="bg-brand-700 text-center text-[12.5px] uppercase tracking-wide text-white">
+        <table className="w-full border-separate border-spacing-0 text-[12px] sm:text-[13px]">
+          <thead className="bg-brand-700 text-center text-[11px] uppercase tracking-wide text-white sm:text-[12.5px]">
             <tr>
-              <th className="w-10 border-b border-r border-white/50 px-1 py-2.5 text-center font-semibold">#</th>
-              <th className="border-b border-r border-white/50 px-3 py-2.5 text-center font-semibold">KPI</th>
+              <th className="hidden w-10 border-b border-r border-white/50 px-1 py-2.5 text-center font-semibold sm:table-cell">#</th>
+              <th className="border-b border-r border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3 sm:py-2.5">KPI</th>
               <th className={th}>Target</th>
               <th className={th}>Achieved</th>
               <th className={th}>Balance</th>
-              <th className={th}>Expected by Now</th>
-              <th className={th}>Ahead / Short</th>
-              <th className="w-16 border-b border-white/50 px-3 py-2.5 text-center font-semibold">%</th>
+              <th className={`${th} ${wide}`}>Expected by Now</th>
+              <th className={`${th} ${wide}`}>Ahead / Short</th>
+              <th className="w-12 border-b border-white/50 px-1.5 py-2 text-center font-semibold sm:w-16 sm:px-3 sm:py-2.5">%</th>
             </tr>
           </thead>
           <tbody>
@@ -177,7 +215,7 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
               if (!rows.length) return null;
               return [
                 <tr key={g.key}>
-                  <td colSpan={8} className="border-b border-slate-300 bg-brand-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-800 dark:border-slate-600 dark:bg-brand-500/10 dark:text-brand-200">{g.label}</td>
+                  <td colSpan={8} className="border-b border-slate-300 bg-brand-50 px-2 py-1.5 sm:px-3 text-[11px] font-semibold uppercase tracking-wide text-brand-800 dark:border-slate-600 dark:bg-brand-500/10 dark:text-brand-200">{g.label}</td>
                 </tr>,
                 ...rows.map((c) => {
                   n += 1;
@@ -188,19 +226,19 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
                     <tr key={c.code} onClick={canDrill ? () => navigate(`/staff?head=${c.code}`) : undefined}
                       title={canDrill ? `See every officer's ${c.title}` : undefined}
                       className={canDrill ? 'group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60' : ''}>
-                      <td className="border-b border-r border-b-slate-200 border-r-slate-300 text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700">{n}</td>
-                      <td className="border-b border-r border-b-slate-200 border-r-slate-300 px-3 py-2 dark:border-slate-700">
-                        <span className="font-medium text-slate-900 decoration-2 underline-offset-2 group-hover:underline dark:text-white">{c.title}</span>
-                        {c.extras?.filter((e) => e.label === 'Unverified').map((e) => <span key={e.label} className="ml-2 text-[11px] font-medium text-amber-700">+{e.value} unverified</span>)}
+                      <td className="hidden border-b border-r border-b-slate-200 border-r-slate-300 text-center text-xs font-semibold text-slate-500 tabular-nums sm:table-cell dark:border-slate-700">{n}</td>
+                      <td className="border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 sm:px-3 dark:border-slate-700">
+                        <span className="font-medium leading-tight text-slate-900 decoration-2 underline-offset-2 group-hover:underline dark:text-white">{c.title}</span>
+                        {c.extras?.filter((e) => e.label === 'Unverified').map((e) => <span key={e.label} className="block text-[10.5px] font-medium text-amber-700 sm:ml-2 sm:inline sm:text-[11px]">+{e.value} unverified</span>)}
                       </td>
                       <td className={td}>{c.fmt(c.total)}</td>
                       <td className={`${td} font-semibold text-slate-900 dark:text-white`}>{c.fmt(c.achieved)}</td>
                       <td className={td}>{c.fmt(Math.max(0, c.total - c.achieved))}</td>
-                      <td className={`${td} text-slate-500`}>{expected == null ? '—' : c.fmt(expected)}</td>
-                      <td className={`${td} font-medium ${gap == null ? 'text-slate-400' : gap >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}`}>
+                      <td className={`${td} ${wide} text-slate-500`}>{expected == null ? '—' : c.fmt(expected)}</td>
+                      <td className={`${td} ${wide} font-medium ${gap == null ? 'text-slate-400' : gap >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}`}>
                         {gap == null ? '—' : `${gap >= 0 ? '+' : '−'}${c.fmt(Math.abs(gap))}`}
                       </td>
-                      <td className="border-b border-b-slate-200 px-3 py-2 text-right font-bold text-slate-900 tabular-nums dark:border-slate-700 dark:text-white">{p == null ? '—' : `${Math.round(p)}%`}</td>
+                      <td className="border-b border-b-slate-200 px-1.5 py-2 text-right font-bold sm:px-3 text-slate-900 tabular-nums dark:border-slate-700 dark:text-white">{p == null ? '—' : `${Math.round(p)}%`}</td>
                     </tr>
                   );
                 }),
@@ -210,7 +248,7 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
         </table>
       </div>
       <div className="border-t border-slate-200 px-3 py-1.5 text-center text-[10px] font-medium text-slate-400 dark:border-slate-700">
-        "Expected by now" assumes an even pace through the year; tagged (seasonal) KPIs show "—".
+        {MILLIONS} for money KPIs · "Expected by now" assumes an even pace through the year; seasonal KPIs show "—"
       </div>
     </Card>
   );
