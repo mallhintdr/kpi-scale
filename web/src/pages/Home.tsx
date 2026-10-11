@@ -90,7 +90,7 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
     });
   }
   const ad = data.arrears.total;
-  if (ad.demand > 0) cards.push({ code: 'ARREARS', eyebrow: 'Revenue', title: 'Arrears (all KPIs)', achieved: ad.collected, total: ad.demand, fmt: fmtPKR, labels: { total: 'Arrears' }, unit: MILLIONS });
+  if (ad.demand > 0) cards.push({ code: 'ARREARS', eyebrow: 'Revenue', title: 'Arrears (All KPIs)', achieved: ad.collected, total: ad.demand, fmt: fmtPKR, labels: { total: 'Arrears' }, unit: MILLIONS });
   for (const c of data.cases) {
     const load = c.opening + c.received;
     if (!(load > 0)) continue;
@@ -106,14 +106,14 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
   });
   if (data.tasks.due) cards.push({
     code: 'TASKS', eyebrow: 'Other', title: 'Tasks', achieved: data.tasks.onTime, total: data.tasks.due, fmt: count,
-    labels: { total: 'Due', achieved: 'On time', balance: 'Late / open' }, unit: '(Tasks)',
+    labels: { total: 'Due', achieved: 'On Time', balance: 'Late / open' }, unit: '(Tasks)',
     extras: [{ label: 'Open', value: count(data.tasks.open) }, ...(data.tasks.overdue ? [{ label: 'Overdue', value: count(data.tasks.overdue), tone: 'bad' as const }] : [])],
   });
   if (!cards.length) return null;
 
   return (
     <>
-      <SectionTitle action={<Link to={`/units/${data.unit._id}`} className="text-[13px] font-medium text-brand-600 hover:underline">Full performance →</Link>}>KPIs · {data.unit.name} · {UNIT_LABEL[data.unit.type]}</SectionTitle>
+      <SectionTitle action={<Link to={`/units/${data.unit._id}`} className="text-[13px] font-medium text-brand-600 hover:underline">Full Performance →</Link>}>KPIs · {data.unit.name} · {UNIT_LABEL[data.unit.type]}</SectionTitle>
       {/* Phones: one compact row per KPI */}
       <Card className="divide-y divide-slate-100 sm:hidden dark:divide-slate-800">
         {cards.map(({ code, ...c }) => {
@@ -166,8 +166,8 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
               <th className={th}>Target</th>
               <th className={th}>Achieved</th>
               <th className={th}>Balance</th>
-              <th className={th}>Expected by now</th>
-              <th className={th}>Ahead / short</th>
+              <th className={th}>Expected by Now</th>
+              <th className={th}>Ahead / Short</th>
               <th className="w-16 border-b border-white/50 px-3 py-2.5 text-center font-semibold">%</th>
             </tr>
           </thead>

@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { useAuth } from '../lib/auth';
+import { titleCase, titleNode } from '../lib/text';
 import { X, Loader2, Inbox, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import {
   createContext, forwardRef, useCallback, useContext, useEffect, useId, useState,
@@ -32,7 +33,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
       {...rest}
     >
       {loading && <Loader2 className="size-4 animate-spin" />}
-      {children}
+      {titleNode(children)}
     </button>
   ),
 );
@@ -59,7 +60,7 @@ export const Card = ({ className, children, onClick }: { className?: string; chi
 
 export const SectionTitle = ({ children, action }: { children: ReactNode; action?: ReactNode }) => (
   <div className="mb-1.5 mt-4 flex items-center justify-between px-0.5 first:mt-0">
-    <h2 className="text-[13px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{children}</h2>
+    <h2 className="text-[13px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{titleNode(children)}</h2>
     {action}
   </div>
 );
@@ -72,7 +73,7 @@ export const Field = ({ label, hint, error, children }: { label: string; hint?: 
   const id = useId();
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-sm font-medium text-slate-700 dark:text-slate-300">{label}</label>
+      <label htmlFor={id} className="block text-sm font-medium text-slate-700 dark:text-slate-300">{titleCase(label)}</label>
       {children(id)}
       {error ? <p className="text-xs text-rose-600">{error}</p> : hint && <p className="text-xs text-slate-500">{hint}</p>}
     </div>
@@ -189,7 +190,7 @@ export const Loading = () => (
 export const Empty = ({ title, body, action, icon: Icon = Inbox }: { title: string; body?: string; action?: ReactNode; icon?: typeof Inbox }) => (
   <div className="flex flex-col items-center px-6 py-12 text-center">
     <div className="mb-3 grid size-14 place-items-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800"><Icon className="size-7" /></div>
-    <p className="font-semibold">{title}</p>
+    <p className="font-semibold">{titleCase(title)}</p>
     {body && <p className="mt-1 max-w-xs text-sm text-slate-500">{body}</p>}
     {action && <div className="mt-4">{action}</div>}
   </div>
@@ -210,7 +211,7 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
           onClick={() => onChange(o.value)}
           className={clsx('flex-1 rounded-lg px-3 py-2 text-sm font-medium transition', value === o.value ? 'bg-white shadow-sm dark:bg-slate-900' : 'text-slate-500')}
         >
-          {o.label}
+          {titleNode(o.label)}
         </button>
       ))}
     </div>
@@ -232,7 +233,7 @@ export function Sheet({ open, onClose, title, children, footer }: { open: boolea
   }, [open, onClose]);
   if (!open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label={titleCase(title)}>
       <div className="animate-fade absolute inset-0 bg-slate-950/40 backdrop-blur-[2px]" onClick={onClose} />
       <div className="animate-sheet relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-white shadow-2xl sm:max-w-lg sm:rounded-3xl dark:bg-slate-900">
         <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-slate-200 sm:hidden dark:bg-slate-700" />

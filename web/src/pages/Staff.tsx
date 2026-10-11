@@ -23,7 +23,7 @@ interface StaffRow {
 const EXTRA: { code: string; name: string; money?: boolean }[] = [
   { code: 'ARREARS', name: 'Arrears (all heads)', money: true },
   { code: 'AUDIT', name: getOrg()?.registers.map((r) => r.label).join(' / ') || 'Registers' },
-  { code: 'TASKS', name: 'Tasks on time' },
+  { code: 'TASKS', name: 'Tasks on Time' },
 ];
 
 export default function Staff() {
@@ -133,7 +133,7 @@ export default function Staff() {
                     <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2.5">Name</th>
                     <th rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">Area</th>
                     {perf ? (
-                      <th colSpan={4} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-3 py-2">{tmode ? 'Assigned targets' : `${T.money} (all KPIs)`}</th>
+                      <th colSpan={4} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-3 py-2">{tmode ? 'Assigned Targets' : `${T.money} (all KPIs)`}</th>
                     ) : (
                       <th rowSpan={2} className="border-b border-r-2 border-white/60 border-r-white/80 px-3 py-2.5">KPI score</th>
                     )}
@@ -151,7 +151,7 @@ export default function Staff() {
                     ))}
                   </tr>
                   <tr className="bg-brand-600 text-[11.5px] font-medium text-brand-50">
-                    {perf && (tmode ? ['Assigned', 'Met', 'Not met', '%'] : ['Target', T.achieved, 'Balance', '%']).map((l, i) => (
+                    {perf && (tmode ? ['Assigned', 'Met', 'Not Met', '%'] : ['Target', T.achieved, 'Balance', '%']).map((l, i) => (
                       <th key={`o${l}`} className={`border-b border-white/30 px-2.5 py-1.5 ${i === 3 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25'}`}>{l}</th>
                     ))}
                     {columns.flatMap((c) => subLabels(c.code, c.money).map((l, i) => (
@@ -210,8 +210,8 @@ export default function Staff() {
 
 /** Sub-column labels for a head group. */
 function subLabels(code: string, money: boolean) {
-  if (code === 'AUDIT') return ['Paras', 'Settled', 'Pending', '% rec.'];
-  if (code === 'TASKS') return ['Due', 'On time', 'Late', '%'];
+  if (code === 'AUDIT') return ['Paras', 'Settled', 'Pending', '% Rec.'];
+  if (code === 'TASKS') return ['Due', 'On Time', 'Late', '%'];
   if (code === 'ARREARS') return ['Arrears', T.achieved, 'Balance', '%'];
   return money ? ['Target', T.achieved, 'Balance', '%'] : ['Total', T.disposed, T.pending, '%'];
 }

@@ -122,7 +122,7 @@ export default function Trends() {
                     <th rowSpan={2} className={clsx(th, 'sticky left-0 z-30 bg-brand-700')}>Period</th>
                     <th colSpan={3} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-2 py-2">{T.money} {MILLIONS}</th>
                     {kpis.map((h) => <th key={h.code} colSpan={3} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-2 py-2">{h.name}</th>)}
-                    <th rowSpan={2} className={th}>Tasks on time</th>
+                    <th rowSpan={2} className={th}>Tasks on Time</th>
                   </tr>
                   <tr className="bg-brand-600 text-[11.5px] font-medium text-brand-50">
                     {['Target', T.achieved, '%'].map((l, i) => <th key={`m${l}`} className={clsx('border-b border-white/30 px-2.5 py-1.5', i === 2 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25')}>{l}</th>)}

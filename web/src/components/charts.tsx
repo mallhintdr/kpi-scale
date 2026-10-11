@@ -1,3 +1,4 @@
+import { titleCase } from '../lib/text';
 /**
  * Chart primitives for the revenue dashboards.
  * Specs: marks ≤24px with 4px rounded data-ends, 2px lines, ≥8px markers with a surface ring,
@@ -167,7 +168,7 @@ export function MetricCard({ title, eyebrow, achieved, total, fmt, labels = {}, 
   const expected = pace != null && total > 0 ? (total * pace) / 100 : null;
   const gap = expected != null ? achieved - expected : null;
   const allExtras = [
-    ...(expected != null ? [{ label: 'Expected by now', value: fmt(expected), tone: 'muted' as const }] : []),
+    ...(expected != null ? [{ label: 'Expected by Now', value: fmt(expected), tone: 'muted' as const }] : []),
     ...(gap != null ? [{ label: gap >= 0 ? 'Ahead by' : 'Short by', value: fmt(Math.abs(gap)), tone: (gap >= 0 ? 'muted' : 'bad') as 'muted' | 'bad' }] : []),
     ...extras,
   ];
@@ -177,7 +178,7 @@ export function MetricCard({ title, eyebrow, achieved, total, fmt, labels = {}, 
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           {eyebrow && <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{eyebrow}</div>}
-          <div className={clsx('truncate font-semibold text-slate-800 dark:text-slate-100', compact ? 'text-[13px]' : 'text-sm')} title={title}>{title}</div>
+          <div className={clsx('truncate font-semibold text-slate-800 dark:text-slate-100', compact ? 'text-[13px]' : 'text-sm')} title={title}>{titleCase(title)}</div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <span className="rounded-lg px-2 py-0.5 text-lg font-bold leading-tight text-slate-900 tabular-nums dark:text-white" style={{ boxShadow: `inset 0 -3px 0 ${revColor(pct)}` }}>

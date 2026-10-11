@@ -10,6 +10,7 @@ import { get } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useCaps, useMeta } from '../lib/rev';
 import { useViewMode } from '../lib/mode';
+import { titleCase } from '../lib/text';
 import { ApiError } from '../lib/api';
 import { Avatar, Card, Empty, GovLogo, IconButton, Spinner } from './ui';
 
@@ -198,7 +199,7 @@ export function AppShell() {
                 <span className={clsx('grid h-7 w-14 place-items-center rounded-full transition', active && 'bg-brand-100 dark:bg-brand-500/20')}>
                   <t.icon className="size-[22px]" strokeWidth={active ? 2.4 : 2} />
                 </span>
-                {t.label}
+                {titleCase(t.label)}
                 {badge > 0 && <span className="absolute right-[22%] top-2 min-w-4 rounded-full bg-rose-500 px-1 text-center text-[10px] leading-4 text-white">{badge > 9 ? '9+' : badge}</span>}
               </Link>
             );
@@ -227,7 +228,7 @@ function SideLink({ item, badge = 0, collapsed }: { item: NavItem; badge?: numbe
       }
     >
       <item.icon className="size-[18px] shrink-0" />
-      {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+      {!collapsed && <span className="flex-1 truncate">{titleCase(item.label)}</span>}
       {badge > 0 &&
         (collapsed ? (
           <span className="absolute right-3 top-2 size-2 rounded-full bg-rose-500" />
@@ -242,7 +243,7 @@ function SideLink({ item, badge = 0, collapsed }: { item: NavItem; badge?: numbe
 const MODES = [
   { m: 'performance', label: 'Performance', icon: Gauge, hint: 'Achievement against annual targets' },
   { m: 'targets', label: 'Targets', icon: Crosshair, hint: 'Assigned short-term targets: target vs achievement' },
-  { m: 'kpi', label: 'KPI evaluation', icon: Award, hint: 'Weighted KPI scores, bands and rankings' },
+  { m: 'kpi', label: 'KPI Evaluation', icon: Award, hint: 'Weighted KPI scores, bands and rankings' },
 ] as const;
 
 /** View mode: at the bottom of the side menu (desktop) or above the bottom tab bar (phones). */
@@ -286,7 +287,7 @@ export function PageHeader({ title, subtitle, back, actions }: { title: string; 
             ‹ Back
           </button>
         )}
-        <h1 className="line-clamp-2 break-words border-l-4 border-gold-500 pl-2.5 text-lg font-bold leading-snug text-brand-800 sm:text-xl lg:text-2xl dark:text-white">{title}</h1>
+        <h1 className="line-clamp-2 break-words border-l-4 border-gold-500 pl-2.5 text-lg font-bold leading-snug text-brand-800 sm:text-xl lg:text-2xl dark:text-white">{titleCase(title)}</h1>
         {subtitle && <div className="mt-0.5 pl-3.5 text-[13px] text-slate-500">{subtitle}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-1">

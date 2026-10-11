@@ -36,7 +36,7 @@ const DETAILS: { key: Detail; label: string }[] = [
   { key: 'phone', label: 'Phone' },
 ];
 const EXTRA_HEADS = [
-  { code: 'ARREARS', name: 'Arrears (all KPIs)', group: 'Revenue', money: true },
+  { code: 'ARREARS', name: 'Arrears (All KPIs)', group: 'Revenue', money: true },
   { code: 'AUDIT', name: 'Registers (settled / total)', group: 'Other', money: false },
   { code: 'TASKS', name: 'Tasks (on time / due)', group: 'Other', money: false },
 ];
@@ -236,7 +236,7 @@ export default function Reports() {
                   <tr>
                     {chosenHeads.flatMap((h) => chosenMeasures.map((m, i) => (
                       <th key={h.code + m.key} className={clsx('border-b border-white/30 bg-brand-600 px-2 py-1 text-center text-[11.5px] font-medium uppercase tracking-wide text-brand-50', i === chosenMeasures.length - 1 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25')}>
-                        {m.key === 'achieved' ? (h.group === 'Cases' ? T.disposed : h.code === 'AUDIT' ? 'Settled' : h.code === 'TASKS' ? 'On time' : T.achieved) : m.key === 'pct' ? '%' : m.label}
+                        {m.key === 'achieved' ? (h.group === 'Cases' ? T.disposed : h.code === 'AUDIT' ? 'Settled' : h.code === 'TASKS' ? 'On Time' : T.achieved) : m.key === 'pct' ? '%' : m.label}
                       </th>
                     )))}
                   </tr>

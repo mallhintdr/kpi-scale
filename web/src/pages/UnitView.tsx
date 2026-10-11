@@ -1,3 +1,4 @@
+import { titleCase } from '../lib/text';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowDownRight, ArrowUpRight, ChevronRight, Phone, Timer } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
@@ -174,7 +175,7 @@ export function ChartCard({ title, subtitle, children, action }: { title: string
     <Card className="p-3.5 sm:p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-[15px] font-semibold text-slate-900 dark:text-white">{title}</h3>
+          <h3 className="text-[15px] font-semibold text-slate-900 dark:text-white">{titleCase(title)}</h3>
           {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
         </div>
         {action}

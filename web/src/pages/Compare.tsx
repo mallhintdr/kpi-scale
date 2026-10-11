@@ -37,7 +37,7 @@ export default function Compare() {
     { code: 'ARREARS', name: 'Arrears', money: true },
     ...(meta?.heads ?? []).filter((h) => h.kind === 'case').map((h) => ({ code: h.code, name: h.name, money: false })),
     ...(meta?.registers.length ? [{ code: 'AUDIT', name: `${meta.registers.map((r) => r.label).join(' / ')} (recovery)`, money: true }] : []),
-    { code: 'TASKS', name: 'Tasks on time', money: false },
+    { code: 'TASKS', name: 'Tasks on Time', money: false },
   ], [meta]);
   const [picked, setPicked] = useState<string[]>(['REVENUE', 'WR_KHARIF', 'AIT_LAND']);
   const toggle = (code: string) =>

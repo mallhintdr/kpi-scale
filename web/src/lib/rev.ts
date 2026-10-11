@@ -6,6 +6,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 import { get } from './api';
+import { titleCase as toTitle } from './text';
 
 export type UnitType = string;
 export type Post = string;
@@ -63,9 +64,9 @@ export const UNIT_PLURAL = lookup((m, k) => {
   return l ? (l.plural ?? `${l.label}s`) : undefined;
 });
 /** Weight profile label by key. */
-export const LEVEL_LABEL = lookup((m, k) => m.profiles.find((p) => p.key === k)?.label);
+export const LEVEL_LABEL = lookup((m, k) => { const l = m.profiles.find((p) => p.key === k)?.label; return l ? toTitle(l) : undefined; });
 /** Scoring block label by key. */
-export const BLOCK_LABEL = lookup((m, k) => m.blocks.find((b) => b.key === k)?.label);
+export const BLOCK_LABEL = lookup((m, k) => { const l = m.blocks.find((b) => b.key === k)?.label; return l ? toTitle(l) : undefined; });
 export const POST_LABEL = lookup((m, k) => m.posts.find((p) => p.key === k)?.label);
 export const postPlural = (k: string) => {
   const l = POST_LABEL[k];

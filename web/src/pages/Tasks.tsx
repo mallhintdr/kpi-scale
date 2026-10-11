@@ -27,7 +27,7 @@ export default function Tasks() {
     <>
       <PageHeader title="Tasks" actions={canAssign && <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />Assign</Button>} />
       {canAssign && (
-        <div className="mb-4"><Segmented value={box} onChange={(b) => setParams({ box: b }, { replace: true })} options={[{ value: 'mine', label: 'Assigned to me' }, { value: 'assigned', label: 'Assigned by me' }]} /></div>
+        <div className="mb-4"><Segmented value={box} onChange={(b) => setParams({ box: b }, { replace: true })} options={[{ value: 'mine', label: 'Assigned to me' }, { value: 'assigned', label: 'Assigned by Me' }]} /></div>
       )}
       {isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !data?.length ? (
         <Card><Empty icon={CheckCircle2} title="No tasks" /></Card>
