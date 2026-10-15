@@ -114,10 +114,10 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
             <tr className="border-b border-slate-100 dark:border-slate-800">
               <th className="w-12 border-r border-white/20 px-2 py-2.5 text-center font-medium">#</th>
               <th className="border-r border-white/20 px-3 py-2.5 font-medium">{data.head.perHolder ? 'Officer' : UNIT_LABEL[data.head.level]}</th>
-              {isCase ? <th className="px-3 py-2.5 text-right font-medium">Opening Pending</th> : (
+              {isCase ? <th className="px-3 py-2.5 text-center font-medium">Opening Pending</th> : (
                 <>
-                  <th className="border-r border-white/20 px-3 py-2.5 text-right font-medium">Current target {symCaption()}</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Arrears {symCaption()}</th>
+                  <th className="border-r border-white/20 px-3 py-2.5 text-center font-medium">Current target {symCaption()}</th>
+                  <th className="px-3 py-2.5 text-center font-medium">Arrears {symCaption()}</th>
                 </>
               )}
             </tr>
@@ -142,10 +142,10 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
             <tr>
               <td />
               <td className="px-3 py-2.5">Total · {rows.length} <span className="text-[10px] font-medium text-slate-400">{isCase ? '' : MILLIONS}</span></td>
-              {isCase ? <td className="px-3 py-2.5 text-right tabular-nums">{total('opening')}</td> : (
+              {isCase ? <td className="px-3 py-2.5 text-center tabular-nums">{total('opening')}</td> : (
                 <>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmtPKR(total('target'))}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmtPKR(total('arrearDemand'))}</td>
+                  <td className="px-3 py-2.5 text-center tabular-nums">{fmtPKR(total('target'))}</td>
+                  <td className="px-3 py-2.5 text-center tabular-nums">{fmtPKR(total('arrearDemand'))}</td>
                 </>
               )}
             </tr>

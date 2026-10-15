@@ -53,8 +53,8 @@ export default function Scoring() {
               <thead className="text-left text-xs text-slate-500">
                 <tr className="border-b border-slate-100 dark:border-slate-800">
                   <th className="px-4 py-2.5 font-medium">Profile</th>
-                  {data!.blocks.map((b) => <th key={b.key} className="px-2 py-2.5 text-right font-medium">{b.label}</th>)}
-                  <th className="px-4 py-2.5 text-right font-medium">Total</th>
+                  {data!.blocks.map((b) => <th key={b.key} className="px-2 py-2.5 text-center font-medium">{b.label}</th>)}
+                  <th className="px-4 py-2.5 text-center font-medium">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -64,9 +64,9 @@ export default function Scoring() {
                     <tr key={lvl}>
                       <td className="px-4 py-2 font-medium">{label}</td>
                       {data!.blocks.map((b) => (
-                        <td key={b.key} className="px-2 py-2 text-right"><input type="number" inputMode="numeric" min={0} max={100} className={cell} value={cfg.profiles[lvl]?.[b.key] ?? 0} onChange={(e) => setBlock(lvl, b.key, e.target.value)} /></td>
+                        <td key={b.key} className="px-2 py-2 text-center"><input type="number" inputMode="numeric" min={0} max={100} className={cell} value={cfg.profiles[lvl]?.[b.key] ?? 0} onChange={(e) => setBlock(lvl, b.key, e.target.value)} /></td>
                       ))}
-                      <td className={`px-4 py-2 text-right font-bold tabular-nums ${total === 100 ? 'text-emerald-600' : 'text-rose-600'}`}>{total}</td>
+                      <td className={`px-4 py-2 text-center font-bold tabular-nums ${total === 100 ? 'text-emerald-600' : 'text-rose-600'}`}>{total}</td>
                     </tr>
                   );
                 })}

@@ -60,7 +60,7 @@ export default function Home() {
 /** The official's own position, one row per post held: target, achieved, balance, pace and (KPI mode) score. */
 function MyPerformanceTable({ items, perf, elapsed }: { items: MyScore[]; perf: boolean; elapsed: number }) {
   const th = 'border-b border-r border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3 sm:py-2.5';
-  const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 text-right tabular-nums sm:px-3 dark:border-slate-700';
+  const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 text-center tabular-nums sm:px-3 dark:border-slate-700';
   const wide = 'hidden md:table-cell';
   const blocks = getOrg()?.blocks ?? [];
   return (
@@ -120,7 +120,7 @@ function MyPerformanceTable({ items, perf, elapsed }: { items: MyScore[]; perf: 
                 <tr key={b.key}>
                   <td className="border-b border-r border-b-slate-200 border-r-slate-300 px-2 py-1.5 dark:border-slate-700">{BLOCK_LABEL[b.key]}</td>
                   {items.map((s) => (
-                    <td key={s.post} className="border-b border-r border-b-slate-200 border-r-slate-300 px-2 py-1.5 text-right tabular-nums dark:border-slate-700">
+                    <td key={s.post} className="border-b border-r border-b-slate-200 border-r-slate-300 px-2 py-1.5 text-center tabular-nums dark:border-slate-700">
                       {s.blocks[b.key] == null ? <span className="text-slate-400">Not applicable</span> : <><b>{Math.round(s.blocks[b.key] as number)}</b>{s.weights?.[b.key] != null && <span className="ml-1 text-[11px] text-slate-500">(weight {s.weights[b.key]}%)</span>}</>}
                     </td>
                   ))}
@@ -189,7 +189,7 @@ const GROUPS: { key: string; label: string }[] = [
 function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean }) {
   const navigate = useNavigate();
   const th = 'border-b border-r border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3 sm:py-2.5';
-  const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 text-right tabular-nums sm:px-3 dark:border-slate-700';
+  const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 text-center tabular-nums sm:px-3 dark:border-slate-700';
   // Shown from tablets up; phones keep KPI · Target · Achieved · Balance · %
   const wide = 'hidden md:table-cell';
   let n = 0;
@@ -238,7 +238,7 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
                       <td className={`${td} ${wide} font-medium ${gap == null ? 'text-slate-400' : gap >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}`}>
                         {gap == null ? '—' : `${gap >= 0 ? '+' : '−'}${c.fmt(Math.abs(gap))}`}
                       </td>
-                      <td className="border-b border-b-slate-200 px-1.5 py-2 text-right font-bold sm:px-3 text-slate-900 tabular-nums dark:border-slate-700 dark:text-white">{p == null ? '—' : `${Math.round(p)}%`}</td>
+                      <td className="border-b border-b-slate-200 px-1.5 py-2 text-center font-bold sm:px-3 text-slate-900 tabular-nums dark:border-slate-700 dark:text-white">{p == null ? '—' : `${Math.round(p)}%`}</td>
                     </tr>
                   );
                 }),

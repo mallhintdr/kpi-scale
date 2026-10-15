@@ -181,7 +181,7 @@ export default function Compare() {
                         </td>
                         {chosen.map((p) => {
                           const c = u.heads[p.code];
-                          const sub = (i: number) => clsx('whitespace-nowrap border-b border-b-slate-200 px-2.5 py-1.5 text-right tabular-nums dark:border-slate-700', i === 3 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700');
+                          const sub = (i: number) => clsx('whitespace-nowrap border-b border-b-slate-200 px-2.5 py-1.5 text-center tabular-nums dark:border-slate-700', i === 3 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700');
                           const pct = c?.pct == null ? <span className="text-slate-300">—</span> : <span className="font-bold text-slate-900 dark:text-white">{Math.round(c.pct)}{p.code === 'SCORE' ? '' : '%'}</span>;
                           if (p.code === 'SCORE') return <td key={p.code} className={sub(3)}>{pct}</td>;
                           const f = (v: number) => (p.money ? fmtPKR(v) : v.toLocaleString());

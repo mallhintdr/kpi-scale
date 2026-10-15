@@ -249,8 +249,8 @@ function AreaForm({ onDone }: { onDone: () => void }) {
                 <tr>
                   <th className="w-8 border-r border-white/50 px-1 py-2 text-center">#</th>
                   <th className="border-r border-white/50 px-2 py-2 text-left">Unit · Officer</th>
-                  <th className="border-r border-white/50 px-2 py-2 text-right">Remaining</th>
-                  <th className="px-2 py-2 text-right">Share</th>
+                  <th className="border-r border-white/50 px-2 py-2 text-center">Remaining</th>
+                  <th className="px-2 py-2 text-center">Share</th>
                 </tr>
               </thead>
               <tbody>
@@ -258,8 +258,8 @@ function AreaForm({ onDone }: { onDone: () => void }) {
                   <tr key={r.unitId}>
                     <td className="border-b border-r border-b-slate-200 border-r-slate-400 text-center text-slate-500 tabular-nums">{i + 1}</td>
                     <td className="border-b border-r border-b-slate-200 border-r-slate-400 px-2 py-1"><div className="font-medium">{r.circle.replace(' (test)', '')}</div><div className="text-[11px] text-slate-500">{r.patwari}</div></td>
-                    <td className="border-b border-r border-b-slate-200 border-r-slate-400 px-2 py-1 text-right tabular-nums">{fmt(r.remaining)}</td>
-                    <td className="border-b border-b-slate-200 px-2 py-1 text-right font-semibold tabular-nums">{fmt(r.share)}</td>
+                    <td className="border-b border-r border-b-slate-200 border-r-slate-400 px-2 py-1 text-center tabular-nums">{fmt(r.remaining)}</td>
+                    <td className="border-b border-b-slate-200 px-2 py-1 text-center font-semibold tabular-nums">{fmt(r.share)}</td>
                   </tr>
                 ))}
               </tbody>

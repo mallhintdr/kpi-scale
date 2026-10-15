@@ -217,7 +217,7 @@ function subLabels(code: string, money: boolean) {
 }
 
 const subTd = (i: number, extra = '') =>
-  `whitespace-nowrap border-b border-b-slate-300 px-2.5 py-2 text-right tabular-nums dark:border-slate-700 ${i === 3 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700'} ${extra}`;
+  `whitespace-nowrap border-b border-b-slate-300 px-2.5 py-2 text-center tabular-nums dark:border-slate-700 ${i === 3 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700'} ${extra}`;
 
 /** % with a small status dot (text stays in ink). */
 const Pct = ({ v }: { v: number | null | undefined }) =>

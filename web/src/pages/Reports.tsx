@@ -264,7 +264,7 @@ export default function Reports() {
                       {chosenHeads.flatMap((h) => chosenMeasures.map((m, i) => {
                         const c = r.heads[h.code];
                         return (
-                          <td key={h.code + m.key} className={clsx('whitespace-nowrap border-b border-b-slate-200 px-2 py-1.5 text-right tabular-nums dark:border-b-slate-800', i === chosenMeasures.length - 1 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700', m.key === 'pct' ? 'font-semibold text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300')}>
+                          <td key={h.code + m.key} className={clsx('whitespace-nowrap border-b border-b-slate-200 px-2 py-1.5 text-center tabular-nums dark:border-b-slate-800', i === chosenMeasures.length - 1 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700', m.key === 'pct' ? 'font-semibold text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300')}>
                             {m.key === 'pct'
                               ? (c?.pct != null ? `${Math.round(c.pct)}%` : <span className="text-slate-300">—</span>)
                               : (value(c, m.key, h.money) || <span className="text-slate-300">—</span>)}
@@ -288,7 +288,7 @@ export default function Reports() {
                       const done = rows.reduce((s, r) => s + (r.heads[h.code]?.done ?? 0), 0);
                       const tot: Cell = { of, done, pct: achievement(done, of) };
                       return chosenMeasures.map((m, i) => (
-                        <td key={h.code + m.key} className={clsx('whitespace-nowrap border-t-2 border-t-slate-300 px-2 py-2 text-right tabular-nums dark:border-t-slate-700', i === chosenMeasures.length - 1 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700')}>
+                        <td key={h.code + m.key} className={clsx('whitespace-nowrap border-t-2 border-t-slate-300 px-2 py-2 text-center tabular-nums dark:border-t-slate-700', i === chosenMeasures.length - 1 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700')}>
                           {h.code === 'AUDIT' && m.key === 'pct' ? '' : m.key === 'pct' && tot.pct != null ? `${Math.round(tot.pct)}%` : value(tot, m.key, h.money)}
                         </td>
                       ));

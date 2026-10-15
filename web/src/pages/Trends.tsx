@@ -37,7 +37,7 @@ const PERIODS: { value: Period; label: ReactNode }[] = [
   { value: 'y', label: P('Yr', 'Year') },
 ];
 const th = 'border-b border-r border-white/50 px-2.5 py-2';
-const sub = (i: number) => clsx('whitespace-nowrap border-b border-b-slate-200 px-2.5 py-1.5 text-right tabular-nums dark:border-slate-700', i === 2 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700');
+const sub = (i: number) => clsx('whitespace-nowrap border-b border-b-slate-200 px-2.5 py-1.5 text-center tabular-nums dark:border-slate-700', i === 2 ? 'border-r-2 border-r-slate-500' : 'border-r border-r-slate-200 dark:border-r-slate-700');
 const Pct = ({ v }: { v: number | null | undefined }) => (v == null ? <span className="text-slate-300">—</span> : <b className="text-slate-900 dark:text-white">{Math.round(v)}%</b>);
 
 export default function Trends() {
@@ -146,7 +146,7 @@ export default function Trends() {
                             <td key={h.code + 'p'} className={sub(2)}><Pct v={c?.pct} /></td>,
                           ];
                         })}
-                        <td className="whitespace-nowrap border-b border-b-slate-200 px-2.5 py-1.5 text-right tabular-nums dark:border-slate-700">{r.tasks.due ? `${r.tasks.onTime}/${r.tasks.due} · ` : ''}<Pct v={r.tasks.pct} /></td>
+                        <td className="whitespace-nowrap border-b border-b-slate-200 px-2.5 py-1.5 text-center tabular-nums dark:border-slate-700">{r.tasks.due ? `${r.tasks.onTime}/${r.tasks.due} · ` : ''}<Pct v={r.tasks.pct} /></td>
                       </tr>
                     );
                   })}
@@ -176,7 +176,7 @@ export default function Trends() {
                         <td className={sub(0)}>{c.money.of ? fmtPKR(c.money.of) : '—'}</td>
                         <td className={clsx(sub(1), 'font-semibold')}>{fmtPKR(c.money.done)}</td>
                         <td className={sub(2)}><Pct v={c.money.pct} /></td>
-                        <td className="border-b border-b-slate-200 px-2.5 py-1.5 text-right dark:border-slate-700"><Pct v={c.tasks.pct} /></td>
+                        <td className="border-b border-b-slate-200 px-2.5 py-1.5 text-center dark:border-slate-700"><Pct v={c.tasks.pct} /></td>
                       </tr>
                     ))}
                   </tbody>

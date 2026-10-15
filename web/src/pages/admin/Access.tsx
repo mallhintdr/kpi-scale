@@ -81,7 +81,7 @@ export default function Access() {
                   <td className="border-b border-r border-slate-200 px-3 py-2 dark:border-slate-700"><div className="flex flex-wrap gap-1">{g.rights.map((r) => <Badge key={r} tone="bg-brand-50 text-brand-800 dark:bg-brand-500/15 dark:text-brand-200">{LABEL[r] ?? r}</Badge>)}</div></td>
                   <td className="border-b border-r border-slate-200 px-3 py-2 text-[12px] dark:border-slate-700">{g.metrics.length ? g.metrics.length === 1 ? g.metrics[0] : `${g.metrics.length} KPIs` : 'All'}</td>
                   <td className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 text-[12px] dark:border-slate-700">{g.expiresAt ? <>{new Date(g.expiresAt).toLocaleDateString()}{g.expired && <Badge className="ml-1">Expired</Badge>}</> : 'No end'}</td>
-                  <td className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-right dark:border-slate-700">
+                  <td className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-center dark:border-slate-700">
                     <button className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit" onClick={() => setEditing(g)}><Pencil className="size-4" /></button>
                     <button className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Remove" onClick={() => confirm(`Remove ${g.userId?.name}'s access to ${g.unitId?.name}?`) && remove.mutate(g._id)}><Trash2 className="size-4" /></button>
                   </td>

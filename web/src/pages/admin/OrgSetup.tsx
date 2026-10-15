@@ -442,7 +442,7 @@ function Scoring({ d, update }: Ed) {
                 <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
                   <td className="px-2 py-1.5"><Input value={p.label} onChange={(e) => update((x) => { x.profiles[i].label = e.target.value; })} /></td>
                   {d.blocks.map((b) => (
-                    <td key={b.key} className="px-1 py-1.5"><Input className="w-16 text-right" type="number" min={0} max={100} value={p.weights[b.key] ?? 0} onChange={(e) => update((x) => { x.profiles[i].weights[b.key] = Number(e.target.value); })} /></td>
+                    <td key={b.key} className="px-1 py-1.5"><Input className="w-16 text-center" type="number" min={0} max={100} value={p.weights[b.key] ?? 0} onChange={(e) => update((x) => { x.profiles[i].weights[b.key] = Number(e.target.value); })} /></td>
                   ))}
                   <td className={clsx('px-3 text-center font-bold tabular-nums', total === 100 ? 'text-emerald-600' : 'text-amber-600')}>{total}</td>
                   <td><Button variant="ghost" disabled={d.profiles.length <= 1} onClick={() => update((x) => { x.profiles.splice(i, 1); })}><Trash2 className="size-4" /></Button></td>
