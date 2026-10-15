@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { DEFAULT_TENANT, SINGLE_TENANT } from '../lib/edition';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { Building2, ChevronRight } from 'lucide-react';
 import { ApiError, get, post } from '../lib/api';
@@ -33,7 +34,7 @@ export default function Login() {
   const { session, setSession } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const slug = params.get('org') ?? read(ORG_KEY);
+  const slug = SINGLE_TENANT ? DEFAULT_TENANT : params.get('org') ?? read(ORG_KEY);
   const [brand, setBrand] = useState<Brand | null>(null);
   const [form, setForm] = useState({ email: read(EMAIL_KEY), password: '' });
   const [remember, setRemember] = useState(true);
@@ -107,7 +108,7 @@ export default function Login() {
               </label>
               <FormError error={error} />
               <Button type="submit" block loading={busy}>Sign in</Button>
-              {brand && (
+              {brand && !SINGLE_TENANT && (
                 <button type="button" className="w-full text-center text-xs text-slate-500 hover:underline" onClick={() => { write(ORG_KEY, null); setBrand(null); navigate('/login', { replace: true }); }}>
                   Not with {brand.name}? Sign in to another organisation
                 </button>

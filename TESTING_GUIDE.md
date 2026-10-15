@@ -19,7 +19,7 @@ The guide takes about 1–2 days. It covers every feature, tested from the accou
 | Platform console | `/login`, then sign in with the super-admin account |
 | Test password (all Board of Revenue accounts) | `Password123` |
 | Super-admin | `super@kpi.local` / `SuperAdmin123` (change this before go-live) |
-
+ 
 ### 0.2 Fresh data (recommended before a full run)
 ```bash
 cd server

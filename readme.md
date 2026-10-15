@@ -151,3 +151,6 @@ Scale with `docker compose up -d --scale api=4 --scale worker=2`.
 | API | Node 22, Express 5, TypeScript, Mongoose 8, Zod, ioredis, BullMQ, JWT with rotating refresh cookie, Helmet, Pino |
 | Web | React 19, Vite, Tailwind CSS 4, TanStack Query, React Router 7, Recharts, PWA |
 | Data | MongoDB, Redis |
+
+## Single-organisation mode (current)
+The app currently runs as a **Board of Revenue only** solution. `SINGLE_TENANT=true` (server `.env`, the default) and the web build default switch off the platform console, super-admin, organisation templates and organisation switching on the sign-in page. Only `DEFAULT_TENANT` (`bor-bahawalpur`) can sign in. All multi-organisation code stays in place. To turn it back on, set `SINGLE_TENANT=false` on the server and `VITE_SINGLE_TENANT=false` for the web build.

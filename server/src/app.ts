@@ -69,12 +69,13 @@ export function createApp() {
 
   const api = Router();
   api.use(rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: 'draft-8', legacyHeaders: false, keyGenerator: clientKey, store: store('rl:api:') }));
+  api.get('/config', (_req, res) => res.json({ singleTenant: env.SINGLE_TENANT, defaultTenant: env.SINGLE_TENANT ? env.DEFAULT_TENANT : null }));
   api.use('/auth', authRoutes);
   api.use('/whatsapp', waWebhookRoutes); // public: provider webhooks
 
   // Everything below requires a valid session and runs inside the caller's tenant context.
   api.use(authenticate);
-  api.use('/platform', platformRoutes);
+  if (!env.SINGLE_TENANT) api.use('/platform', platformRoutes);
   api.use('/users', userRoutes);
   api.use('/notifications', notificationRoutes);
   api.use('/org', orgRoutes, accessRoutes, waAdminRoutes);

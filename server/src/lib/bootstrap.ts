@@ -6,6 +6,7 @@ import { runAsTenant, runUnscoped } from './tenantContext.js';
 
 /** Ensures the platform tenant exists, and creates the first super-admin from env if there is none. */
 export async function bootstrapPlatform() {
+  if (env.SINGLE_TENANT) return; // no platform tenant or super-admin in single-organisation mode
   const platform =
     (await runUnscoped(() => Tenant.findOne({ isPlatform: true }))) ??
     (await runUnscoped(() => Tenant.create({ name: 'KPI Platform', slug: 'platform', isPlatform: true, plan: 'enterprise' })));

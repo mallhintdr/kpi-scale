@@ -6,6 +6,7 @@ import { AppShell } from './components/AppShell';
 import { Card, Empty, Spinner, ToastProvider } from './components/ui';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ApiError } from './lib/api';
+import { SINGLE_TENANT } from './lib/edition';
 import { useCaps } from './lib/rev';
 import './index.css';
 
@@ -86,7 +87,7 @@ function App() {
     <Suspense fallback={<FullScreen />}>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/platform" element={<Protected platform><Platform /></Protected>} />
+        {!SINGLE_TENANT && <Route path="/platform" element={<Protected platform><Platform /></Protected>} />}
         <Route element={<Protected><AppShell /></Protected>}>
           <Route index element={<Home />} />
           <Route path="explore" element={<Explore />} />

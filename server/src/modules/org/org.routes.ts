@@ -6,6 +6,7 @@
  *   bulk CSV imports
  */
 import express, { Router } from 'express';
+import { env } from '../../config/env.js';
 import { Types } from 'mongoose';
 import { z } from 'zod';
 import { badRequest, notFound } from '../../lib/errors.js';
@@ -56,6 +57,7 @@ router.post('/blueprint/rollback/:version', validate({ params: z.object({ versio
 });
 
 router.get('/templates', (_req, res) => {
+  if (env.SINGLE_TENANT) return res.json([]);
   res.json(Object.entries(TEMPLATES).map(([key, t]) => ({ key, label: t.label, category: t.category, description: t.description, blueprint: t.blueprint })));
 });
 

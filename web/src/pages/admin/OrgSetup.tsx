@@ -4,6 +4,7 @@
  * every saved version is kept and can be restored.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { SINGLE_TENANT } from '../../lib/edition';
 import clsx from 'clsx';
 import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, History, Plus, RotateCcw, Save, Trash2, Wand2 } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -115,7 +116,7 @@ export default function OrgSetup() {
         subtitle={`Version ${bp.data!.version}${bp.data!.template ? ` · started from "${bp.data!.template.replace(/_/g, ' ')}"` : ''} — hierarchy, posts, KPIs and scoring`}
         actions={
           <div className="flex gap-2">
-            <Button size="sm" variant="secondary" onClick={() => setTemplates(true)}><Wand2 className="size-4" />Templates</Button>
+            {!SINGLE_TENANT && <Button size="sm" variant="secondary" onClick={() => setTemplates(true)}><Wand2 className="size-4" />Templates</Button>}
             <Button size="sm" variant="secondary" onClick={() => setHistory(true)}><History className="size-4" />History</Button>
           </div>
         }

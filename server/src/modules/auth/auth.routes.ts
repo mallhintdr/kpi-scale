@@ -126,6 +126,7 @@ router.post(
     for (const u of candidates) {
       const t = u.tenantId as any;
       if (t?.status !== 'active') continue;
+      if (env.SINGLE_TENANT && t.slug !== env.DEFAULT_TENANT) continue; // only the one organisation
       if (await bcrypt.compare(pw, u.passwordHash)) matches.push(u);
     }
     // The organisation from the sign-in link is a preference, not a filter: a super-admin, or someone
