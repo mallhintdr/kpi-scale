@@ -74,6 +74,7 @@ export const revenueDepartment: Blueprint = {
     m({ code: 'MISSING_MUT', name: 'Missing Mutations', group: 'Missing Mutations', ...SCI_HEAD }),
     m({ code: 'GPC', name: 'Green Property Certificate', group: 'GPC', ...SCI_HEAD }),
     m({ code: 'INHERIT', name: 'Inheritance Mutations', group: 'Inheritance', ...SCI_HEAD }),
+    m({ code: 'PENDING_MUT', name: 'Pending Mutations', group: 'Pending Mutations', ...SCI_HEAD }),
     m({ code: 'REGISTRY', name: 'Pending Registries', group: 'Registries', ...RO_HEAD }),
     m({ code: 'PARTITION', name: 'Partition Cases', group: 'Partition', ...RO_HEAD }),
   ],
