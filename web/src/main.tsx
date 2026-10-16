@@ -35,6 +35,8 @@ const AdminUnits = lazy(() => import('./pages/admin/Units'));
 const AdminImport = lazy(() => import('./pages/admin/Import'));
 const Platform = lazy(() => import('./pages/platform/Platform'));
 const Trends = lazy(() => import('./pages/Trends'));
+const TameelList = lazy(() => import('./pages/Tameel').then((x) => ({ default: x.TameelList })));
+const TameelDetail = lazy(() => import('./pages/Tameel').then((x) => ({ default: x.TameelDetail })));
 const AdminAccess = lazy(() => import('./pages/admin/Access'));
 const AdminWhatsApp = lazy(() => import('./pages/admin/WhatsApp'));
 
@@ -94,6 +96,8 @@ function App() {
           <Route path="units/:id" element={<UnitView />} />
           <Route path="league" element={<League />} />
           <Route path="trends" element={<Trends />} />
+          <Route path="tameel" element={<TameelList />} />
+          <Route path="tameel/:id" element={<TameelDetail />} />
           <Route path="staff" element={<Staff />} />
           <Route path="officers/:id" element={<Officer />} />
           <Route path="reports" element={<Reports />} />

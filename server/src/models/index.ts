@@ -539,3 +539,69 @@ const auditSchema = new Schema(
 auditSchema.plugin(tenantPlugin);
 auditSchema.index({ tenantId: 1, createdAt: -1 });
 export const Audit = mongoose.model('Audit', auditSchema);
+
+/* ---------------- Tameel: information requests (an Excel format filled in by staff, per unit) ---------------- */
+const tameelSchema = new Schema(
+  {
+    ...tenantField,
+    title: { type: String, required: true, trim: true, maxlength: 200 },
+    /** Clear instructions shown to everyone who must fill it in. */
+    description: { type: String, required: true, maxlength: 5000 },
+    deadline: { type: Date, required: true },
+    /** Columns from the uploaded Excel header row (key = stable id, label = header text). */
+    columns: [{ key: { type: String, required: true }, label: { type: String, required: true }, _id: false }],
+    sourceFile: String,
+    /** Area covered, and the posts that must fill it in (one sheet per unit they hold inside the area). */
+    unitId: ref('Unit', true),
+    anc: [{ type: Schema.Types.ObjectId }],
+    posts: { type: [String], default: ['patwari'] },
+    /** Level whose combined Excel file is kept (e.g. tehsil). */
+    groupLevel: { type: String, required: true },
+    status: { type: String, enum: ['open', 'closed'], default: 'open' },
+    createdBy: ref('User', true),
+  },
+  opts,
+);
+tameelSchema.plugin(tenantPlugin);
+tameelSchema.index({ tenantId: 1, status: 1, deadline: 1 });
+tameelSchema.index({ tenantId: 1, anc: 1 });
+export const Tameel = mongoose.model('Tameel', tameelSchema);
+
+/** One unit's sheet for a Tameel. */
+const tameelSheetSchema = new Schema(
+  {
+    ...tenantField,
+    tameelId: ref('Tameel', true),
+    unitId: ref('Unit', true),
+    anc: [{ type: Schema.Types.ObjectId }],
+    groupId: ref('Unit'), // e.g. the tehsil
+    rows: [{ values: { type: Schema.Types.Mixed, default: {} }, updatedBy: ref('User'), updatedAt: Date }],
+    status: { type: String, enum: ['draft', 'submitted', 'returned', 'accepted'], default: 'draft' },
+    returnNote: { type: String, maxlength: 1000 },
+    submittedBy: ref('User'),
+    submittedAt: Date,
+    history: [{ at: Date, by: ref('User'), action: String, note: String, _id: false }],
+  },
+  opts,
+);
+tameelSheetSchema.plugin(tenantPlugin);
+tameelSheetSchema.index({ tenantId: 1, tameelId: 1, unitId: 1 }, { unique: true });
+tameelSheetSchema.index({ tenantId: 1, tameelId: 1, groupId: 1 });
+export const TameelSheet = mongoose.model('TameelSheet', tameelSheetSchema);
+
+/** Combined Excel file per group (e.g. tehsil), rebuilt on every submission and kept on the server. */
+const tameelFileSchema = new Schema(
+  {
+    ...tenantField,
+    tameelId: ref('Tameel', true),
+    groupId: ref('Unit', true),
+    name: String,
+    data: { type: Buffer, required: true },
+    rows: Number,
+    builtAt: Date,
+  },
+  opts,
+);
+tameelFileSchema.plugin(tenantPlugin);
+tameelFileSchema.index({ tenantId: 1, tameelId: 1, groupId: 1 }, { unique: true });
+export const TameelFile = mongoose.model('TameelFile', tameelFileSchema);

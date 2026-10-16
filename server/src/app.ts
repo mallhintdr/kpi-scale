@@ -27,6 +27,7 @@ import registerRoutes from './modules/revenue/registers.routes.js';
 import './modules/revenue/rollup.js';
 import statsRoutes from './modules/revenue/stats.routes.js';
 import './modules/revenue/warm.js';
+import tameelRoutes from './modules/tameel/tameel.routes.js';
 import userRoutes from './modules/users/users.routes.js';
 import waAdminRoutes from './modules/whatsapp/admin.routes.js';
 import './modules/whatsapp/engine.js';
@@ -55,7 +56,7 @@ export function createApp() {
   // Bulk imports carry CSV files; everything else stays small
   // Raw body kept for webhook signature checks (Meta HMAC); bulk imports carry CSV files
   const json = express.json({ limit: '200kb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } });
-  app.use((req, res, next) => (req.path === '/api/org/imports' ? next() : json(req, res, next)));
+  app.use((req, res, next) => (req.path === '/api/org/imports' || req.path === '/api/tameel/parse' ? next() : json(req, res, next)));
   app.use(cookieParser());
   app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/health' } }));
 
@@ -79,6 +80,7 @@ export function createApp() {
   api.use('/users', userRoutes);
   api.use('/notifications', notificationRoutes);
   api.use('/org', orgRoutes, accessRoutes, waAdminRoutes);
+  api.use('/tameel', withBlueprint, tameelRoutes);
   api.use('/rev', withBlueprint, performanceRoutes, entryRoutes, registerRoutes, assignedRoutes, statsRoutes);
 
   app.use('/api', api);
