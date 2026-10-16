@@ -48,6 +48,7 @@ const CAP_LABEL: Record<string, string> = {
   assign_targets: 'Assigns short-term targets',
   compare: 'Compares areas',
   manage_registers: 'Manages registers',
+  litigation: 'Enters litigation cases',
 };
 const KIND_LABEL: Record<BlockD['kind'], string> = {
   target: 'Target vs achieved',

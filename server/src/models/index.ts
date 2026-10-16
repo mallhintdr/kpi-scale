@@ -32,6 +32,8 @@ const tenantSchema = new Schema(
       currency: { type: String, default: 'PKR' },
       ratingScale: { type: Number, default: 5 },
     },
+    /** Litigation settings: case types and appeal periods (days) per court. */
+    litigation: { type: Schema.Types.Mixed, default: {} },
     /** Daily WhatsApp coaching: morning goals, follow-ups, evening summary, escalation ladder. */
     whatsapp: {
       enabled: { type: Boolean, default: false },
@@ -472,7 +474,7 @@ export const WaState = mongoose.model('WaState', waStateSchema);
 /* ---------------- Access grants: rights given to a person directly, on top of their posts ----------------
  * A grant covers a unit and everything below it, optionally only some KPIs, optionally until a date.
  */
-export const GRANT_RIGHTS = ['view', 'enter', 'edit', 'verify', 'set_targets', 'assign_targets', 'compare', 'manage_registers'] as const;
+export const GRANT_RIGHTS = ['view', 'enter', 'edit', 'verify', 'set_targets', 'assign_targets', 'compare', 'manage_registers', 'litigation'] as const;
 export type GrantRight = (typeof GRANT_RIGHTS)[number];
 const accessGrantSchema = new Schema(
   {
@@ -609,3 +611,103 @@ const tameelFileSchema = new Schema(
 tameelFileSchema.plugin(tenantPlugin);
 tameelFileSchema.index({ tenantId: 1, tameelId: 1, groupId: 1 }, { unique: true });
 export const TameelFile = mongoose.model('TameelFile', tameelFileSchema);
+
+/* ---------------- Litigation: court cases affecting land in a jurisdiction ---------------- */
+const hearingSchema = new Schema(
+  {
+    date: { type: Date, required: true },
+    court: String,
+    proceedingsDone: { type: String, maxlength: 3000 },
+    nextAction: { type: String, maxlength: 3000 },
+    nextDate: Date,
+    attendedBy: { type: String, maxlength: 200 },
+    by: ref('User'),
+  },
+  { _id: true, timestamps: { createdAt: true, updatedAt: false } },
+);
+const stageSchema = new Schema(
+  {
+    stage: { type: Number, required: true },
+    court: { type: String, required: true },
+    courtOther: String,
+    bench: String,
+    courtCaseNo: String,
+    institutedOn: Date,
+    decidedOn: Date,
+    result: String,
+    summary: { type: String, maxlength: 3000 },
+  },
+  { _id: false },
+);
+const litigationCaseSchema = new Schema(
+  {
+    ...tenantField,
+    caseId: { type: String, required: true }, // TEHSIL-MOUZA-NNNN, permanent
+    serial: { type: Number, required: true }, // per tehsil
+    unitId: ref('Unit', true), // mouza
+    anc: [{ type: Schema.Types.ObjectId }],
+    tehsilId: ref('Unit'),
+    caseType: { type: String, required: true, maxlength: 120 },
+    institutedOn: { type: Date, required: true },
+    court: { type: String, required: true },
+    courtOther: { type: String, maxlength: 200 },
+    bench: { type: String, maxlength: 200 },
+    courtCaseNo: { type: String, maxlength: 100 },
+    applicants: { type: [String], default: [] },
+    respondents: { type: [String], default: [] },
+    land: { kanal: Number, marla: Number, sarsai: Number, khasraNos: { type: [String], default: [] }, khewat: String, khatauni: String },
+    landSpec: { type: String, maxlength: 1000 },
+    governmentParty: { type: Boolean, default: false },
+    hearings: [hearingSchema],
+    lastHearing: Date,
+    nextHearing: Date,
+    lastProceedings: String,
+    nextAction: String,
+    status: { type: String, enum: ['pending', 'decided'], default: 'pending' },
+    decision: { date: Date, result: String, summary: { type: String, maxlength: 3000 } },
+    appeal: { filed: { type: String, enum: ['yes', 'no', 'undecided'], default: 'undecided' }, court: String, courtOther: String, filedOn: Date, appealNo: String, reasonNotFiled: { type: String, maxlength: 1000 } },
+    stage: { type: Number, default: 1 },
+    stages: [stageSchema],
+    note: { type: String, maxlength: 3000 },
+    notes: [{ text: { type: String, maxlength: 2000 }, by: ref('User'), at: Date, _id: false }],
+    history: [{ at: Date, by: ref('User'), action: String, fields: [String], _id: false }],
+    createdBy: ref('User'),
+    updatedBy: ref('User'),
+    deleted: { type: Boolean, default: false },
+  },
+  opts,
+);
+litigationCaseSchema.plugin(tenantPlugin);
+litigationCaseSchema.index({ tenantId: 1, caseId: 1 }, { unique: true });
+litigationCaseSchema.index({ tenantId: 1, anc: 1, status: 1, nextHearing: 1 });
+litigationCaseSchema.index({ tenantId: 1, deleted: 1, updatedAt: -1 });
+litigationCaseSchema.index({ caseId: 'text', applicants: 'text', respondents: 'text', courtCaseNo: 'text', 'land.khasraNos': 'text' });
+export const LitigationCase = mongoose.model('LitigationCase', litigationCaseSchema);
+
+/** Atomic running numbers (e.g. litigation serial per tehsil). */
+const counterSchema = new Schema({ ...tenantField, key: { type: String, required: true }, seq: { type: Number, default: 0 } });
+counterSchema.plugin(tenantPlugin);
+counterSchema.index({ tenantId: 1, key: 1 }, { unique: true });
+export const Counter = mongoose.model('Counter', counterSchema);
+
+/** A document attached to a case; the file itself lives in storage (GridFS now, cloud later). */
+const litigationDocSchema = new Schema(
+  {
+    ...tenantField,
+    caseRef: ref('LitigationCase', true),
+    stage: { type: Number, default: 1 },
+    category: { type: String, enum: ['plaint', 'reply', 'order_sheet', 'judgment', 'evidence', 'notice', 'other'], required: true },
+    title: { type: String, maxlength: 200 },
+    docDate: Date,
+    backend: { type: String, default: 'gridfs' },
+    storageKey: { type: String, required: true },
+    mime: { type: String, required: true },
+    size: Number,
+    pages: Number,
+    uploadedBy: ref('User'),
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+litigationDocSchema.plugin(tenantPlugin);
+litigationDocSchema.index({ tenantId: 1, caseRef: 1, category: 1 });
+export const LitigationDoc = mongoose.model('LitigationDoc', litigationDocSchema);

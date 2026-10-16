@@ -22,6 +22,7 @@ export const RIGHTS: { key: string; label: string; hint: string }[] = [
   { key: 'assign_targets', label: 'Assign targets', hint: 'Give short-term targets and area drives' },
   { key: 'compare', label: 'Compare areas', hint: 'Use the comparison page' },
   { key: 'manage_registers', label: 'Manage registers', hint: 'Record, edit and delete register items' },
+  { key: 'litigation', label: 'Litigation entry', hint: 'Add and update court cases and their documents' },
 ];
 const LABEL = Object.fromEntries(RIGHTS.map((r) => [r.key, r.label]));
 

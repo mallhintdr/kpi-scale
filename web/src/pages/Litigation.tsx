@@ -1,0 +1,575 @@
+/**
+ * Litigation register — every court case affecting land in the user's jurisdiction.
+ *   /litigation       dashboard, filters, list, new case, Excel export
+ *   /litigation/:id   the case: details, hearings, decision, appeal / stages, notes, documents, PDF
+ */
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import clsx from 'clsx';
+import { AlarmClock, Camera, Download, FileText, Gavel, Image as ImageIcon, Plus, Scale, Search, Trash2, Upload, X } from 'lucide-react';
+import { useDeferredValue, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { PageHeader } from '../components/AppShell';
+import { UnitField } from '../components/rev';
+import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, Sheet, Textarea, useToast } from '../components/ui';
+import { ApiError, del, download, get, patch, post } from '../lib/api';
+import { useCaps, type UnitRef } from '../lib/rev';
+
+interface Meta { courts: { group: string; items: [string, string][] }[]; caseTypes: string[]; categories: { key: string; label: string }[]; canEnter: boolean }
+interface ListRow { _id: string; caseId: string; unitId: { name: string } | null; caseType: string; courtName: string; applicants: string[]; respondents: string[]; nextHearing?: string; lastHearing?: string; status: 'pending' | 'decided'; stage: number; decision?: { date?: string } }
+interface Hearing { _id: string; date: string; court?: string; proceedingsDone?: string; nextAction?: string; nextDate?: string; attendedBy?: string; by?: { name: string } }
+interface Case {
+  _id: string; caseId: string; unitId: { _id: string; name: string }; caseType: string; institutedOn: string; court: string; courtOther?: string; bench?: string; courtCaseNo?: string;
+  applicants: string[]; respondents: string[]; land: { kanal?: number; marla?: number; sarsai?: number; khasraNos: string[]; khewat?: string; khatauni?: string }; landSpec?: string; governmentParty: boolean;
+  hearings: Hearing[]; lastHearing?: string; nextHearing?: string; lastProceedings?: string; nextAction?: string; status: 'pending' | 'decided';
+  decision?: { date?: string; result?: string; summary?: string }; appeal: { filed: 'yes' | 'no' | 'undecided'; court?: string; courtOther?: string; filedOn?: string; appealNo?: string; reasonNotFiled?: string };
+  stage: number; stages: { stage: number; court: string; courtOther?: string; courtCaseNo?: string; institutedOn?: string; decidedOn?: string; result?: string }[];
+  note?: string; notes: { text: string; by?: { name: string }; at: string }[]; history: { at: string; by?: { name: string }; action: string }[];
+}
+interface Doc { _id: string; category: string; title?: string; docDate?: string; pages?: number; size: number; createdAt: string; uploadedBy?: { name: string } }
+
+const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+const iso = (d?: string | null) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+const useMeta = () => useQuery({ queryKey: ['lit', 'meta'], queryFn: () => get<Meta>('/litigation/meta'), staleTime: 300_000 });
+const courtLabel = (m: Meta | undefined, code?: string, other?: string) => (code === 'other' ? other || 'Other' : m?.courts.flatMap((g) => g.items).find(([k]) => k === code)?.[1] ?? code ?? '—');
+const StatusBadge = ({ s }: { s: string }) => <Badge tone={s === 'decided' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>{s === 'decided' ? 'Decided' : 'Pending'}</Badge>;
+
+function CourtSelect({ meta, value, other, onChange, id }: { meta?: Meta; value: string; other?: string; onChange: (court: string, other?: string) => void; id?: string }) {
+  return (
+    <div className="space-y-1.5">
+      <Select id={id} value={value} onChange={(e) => onChange(e.target.value, other)}>
+        <option value="">Choose court…</option>
+        {meta?.courts.map((g) => <optgroup key={g.group} label={g.group}>{g.items.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</optgroup>)}
+      </Select>
+      {value === 'other' && <Input placeholder="Name of the court" value={other ?? ''} onChange={(e) => onChange(value, e.target.value)} />}
+    </div>
+  );
+}
+
+/** Names entered one per line (several applicants / respondents). */
+const Names = ({ value, onChange, id, placeholder }: { value: string[]; onChange: (v: string[]) => void; id?: string; placeholder?: string }) => (
+  <Textarea id={id} rows={2} dir="auto" placeholder={placeholder} value={value.join('\n')} onChange={(e) => onChange(e.target.value.split('\n'))} />
+);
+
+/* ================================================================== *
+ *  Register
+ * ================================================================== */
+export function LitigationList() {
+  const meta = useMeta();
+  const [search, setSearch] = useState('');
+  const term = useDeferredValue(search.trim());
+  const [status, setStatus] = useState<'' | 'pending' | 'decided'>('');
+  const [court, setCourt] = useState('');
+  const [area, setArea] = useState<UnitRef | null>(null);
+  const [week, setWeek] = useState(false);
+  const [page, setPage] = useState(1);
+  const [creating, setCreating] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const in7 = new Date(Date.now() + 6 * 86_400_000).toISOString().slice(0, 10);
+  const params = new URLSearchParams({ page: String(page), ...(term ? { search: term } : {}), ...(status ? { status } : {}), ...(court ? { court } : {}), ...(area ? { unitId: area._id } : {}), ...(week ? { hearingFrom: today, hearingTo: in7 } : {}) });
+  useEffect(() => setPage(1), [term, status, court, area, week]);
+  const list = useQuery({ queryKey: ['lit', 'list', params.toString()], queryFn: () => get<{ items: ListRow[]; total: number }>(`/litigation?${params}`) });
+  const dash = useQuery({ queryKey: ['lit', 'dash'], queryFn: () => get<{ total: number; pending: number; decided: number; thisWeek: number; overdue: number; appealDue: { _id: string; caseId: string; days: number }[] }>('/litigation/dashboard') });
+  const d = dash.data;
+  const pages = Math.max(1, Math.ceil((list.data?.total ?? 0) / 50));
+
+  return (
+    <>
+      <PageHeader title="Litigation" subtitle="Court cases in your jurisdiction" actions={
+        <div className="flex gap-2">
+          <Button size="sm" variant="secondary" onClick={() => download(`/litigation/export/xlsx?${params}`, 'litigation.xlsx')}><Download className="size-4" />Excel</Button>
+          {meta.data?.canEnter && <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />New Case</Button>}
+        </div>
+      } />
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {[
+          { l: 'Total Cases', v: d?.total, on: () => { setStatus(''); setWeek(false); } },
+          { l: 'Pending', v: d?.pending, on: () => { setStatus('pending'); setWeek(false); }, tone: 'text-amber-700' },
+          { l: 'Decided', v: d?.decided, on: () => { setStatus('decided'); setWeek(false); }, tone: 'text-emerald-700' },
+          { l: 'Hearings This Week', v: d?.thisWeek, on: () => { setStatus('pending'); setWeek(true); }, tone: 'text-sky-700' },
+          { l: 'Update Overdue', v: d?.overdue, tone: d?.overdue ? 'text-rose-700' : undefined },
+        ].map((c) => (
+          <Card key={c.l} className={clsx('p-3', c.on && 'cursor-pointer hover:ring-brand-200')} onClick={c.on}>
+            <div className={clsx('text-2xl font-bold tabular-nums', c.tone)}>{c.v ?? '—'}</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{c.l}</div>
+          </Card>
+        ))}
+      </div>
+      {!!d?.appealDue.length && (
+        <Card className="mb-3 flex flex-wrap items-center gap-2 border-l-4 border-rose-500 p-3 text-sm">
+          <AlarmClock className="size-4 text-rose-600" /><b>Appeal period ending:</b>
+          {d.appealDue.map((a) => <Link key={a._id} to={`/litigation/${a._id}`} className="font-medium text-rose-700 underline">{a.caseId} ({a.days} day{a.days === 1 ? '' : 's'})</Link>)}
+        </Card>
+      )}
+      <Card className="mb-3 grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input className="pl-9" placeholder="Case ID, party, court no., khasra…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+        <UnitField value={area} onChange={setArea} placeholder="Any area" />
+        <Select value={court} onChange={(e) => setCourt(e.target.value)}><option value="">Any court</option>{meta.data?.courts.map((g) => <optgroup key={g.group} label={g.group}>{g.items.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</optgroup>)}</Select>
+        <div className="flex gap-2">
+          <Select value={status} onChange={(e) => setStatus(e.target.value as never)}><option value="">Any status</option><option value="pending">Pending</option><option value="decided">Decided</option></Select>
+          {(area || court || status || week || term) && <Button variant="ghost" onClick={() => { setArea(null); setCourt(''); setStatus(''); setWeek(false); setSearch(''); }}><X className="size-4" /></Button>}
+        </div>
+      </Card>
+      {list.isLoading ? <Loading /> : list.error ? <ErrorState error={list.error} retry={list.refetch} /> : !list.data?.items.length ? (
+        <Card><Empty icon={Scale} title="No cases" body={meta.data?.canEnter ? 'Add the first case with New Case.' : 'No cases recorded in your jurisdiction yet.'} /></Card>
+      ) : (
+        <>
+          <Card className="overflow-x-auto">
+            <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[13px]">
+              <thead className="bg-brand-700 text-center text-[12.5px] text-white">
+                <tr>{['#', 'Case ID', 'Mouza', 'Type', 'Court', 'Parties', 'Next Hearing', 'Status'].map((h) => <th key={h} className="border-b border-r border-white/50 px-3 py-2">{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {list.data.items.map((c, i) => {
+                  const overdue = c.status === 'pending' && c.nextHearing && new Date(c.nextHearing) < new Date(Date.now() - 86_400_000);
+                  return (
+                    <tr key={c._id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60" onClick={() => (location.href = `/litigation/${c._id}`)}>
+                      <td className="border-b border-r border-slate-200 px-2 py-2 text-center text-xs text-slate-500">{(page - 1) * 50 + i + 1}</td>
+                      <td className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 text-center font-mono text-[12px] font-semibold"><Link to={`/litigation/${c._id}`} onClick={(e) => e.stopPropagation()} className="hover:underline">{c.caseId}</Link>{c.stage > 1 && <span className="ml-1 text-[10px] text-violet-700">S{c.stage}</span>}</td>
+                      <td className="border-b border-r border-slate-200 px-3 py-2">{c.unitId?.name.replace(' (test)', '')}</td>
+                      <td className="border-b border-r border-slate-200 px-3 py-2">{c.caseType}</td>
+                      <td className="border-b border-r border-slate-200 px-3 py-2">{c.courtName}</td>
+                      <td className="border-b border-r border-slate-200 px-3 py-2 text-xs" dir="auto">{c.applicants[0]}{c.applicants.length > 1 && ` +${c.applicants.length - 1}`} <span className="text-slate-400">v.</span> {c.respondents[0]}{c.respondents.length > 1 && ` +${c.respondents.length - 1}`}</td>
+                      <td className={clsx('whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 text-center', overdue && 'font-semibold text-rose-700')}>{c.status === 'decided' ? <span className="text-slate-400">Decided {fmt(c.decision?.date)}</span> : fmt(c.nextHearing)}</td>
+                      <td className="border-b border-slate-200 px-3 py-2 text-center"><StatusBadge s={c.status} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Card>
+          <div className="mt-2 flex items-center justify-between text-sm text-slate-500">
+            <span>{list.data.total.toLocaleString()} case(s)</span>
+            {pages > 1 && <div className="flex gap-2"><Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button><span className="self-center">Page {page} of {pages}</span><Button size="sm" variant="ghost" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</Button></div>}
+          </div>
+        </>
+      )}
+      {creating && <CaseForm onClose={() => setCreating(false)} />}
+    </>
+  );
+}
+
+/* ---------- New / edit case ---------- */
+interface FormState {
+  unitId: string; mouzaName: string; caseType: string; caseTypeOther: string; institutedOn: string; court: string; courtOther?: string; bench: string; courtCaseNo: string;
+  applicants: string[]; respondents: string[]; kanal: string; marla: string; sarsai: string; khasraNos: string; khewat: string; khatauni: string; landSpec: string;
+  governmentParty: boolean; nextHearing: string; note: string;
+}
+function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void }) {
+  const meta = useMeta();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [mq, setMq] = useState('');
+  const mterm = useDeferredValue(mq);
+  const mouzas = useQuery({ queryKey: ['lit', 'mouzas', mterm], queryFn: () => get<{ _id: string; name: string; tehsil?: string }[]>(`/litigation/mouzas?search=${encodeURIComponent(mterm)}`), enabled: !initial });
+  const known = meta.data?.caseTypes ?? [];
+  const [f, setF] = useState<FormState>(() => ({
+    unitId: initial?.unitId._id ?? '', mouzaName: initial?.unitId.name ?? '',
+    caseType: initial ? (known.includes(initial.caseType) ? initial.caseType : 'Other') : '', caseTypeOther: initial && !known.includes(initial.caseType) ? initial.caseType : '',
+    institutedOn: iso(initial?.institutedOn), court: initial?.court ?? '', courtOther: initial?.courtOther, bench: initial?.bench ?? '', courtCaseNo: initial?.courtCaseNo ?? '',
+    applicants: initial?.applicants ?? [''], respondents: initial?.respondents ?? [''],
+    kanal: String(initial?.land.kanal ?? ''), marla: String(initial?.land.marla ?? ''), sarsai: String(initial?.land.sarsai ?? ''), khasraNos: (initial?.land.khasraNos ?? []).join(', '),
+    khewat: initial?.land.khewat ?? '', khatauni: initial?.land.khatauni ?? '', landSpec: initial?.landSpec ?? '', governmentParty: initial?.governmentParty ?? false,
+    nextHearing: iso(initial?.nextHearing), note: initial?.note ?? '',
+  }));
+  const [error, setError] = useState<unknown>(null);
+  const [dup, setDup] = useState<{ caseId: string; id: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((x) => ({ ...x, [k]: v }));
+  const num = (s: string) => (s.trim() ? Number(s) : undefined);
+  const save = async (force = false) => {
+    setBusy(true); setError(null);
+    const body = {
+      ...(initial ? {} : { unitId: f.unitId }),
+      caseType: f.caseType === 'Other' ? f.caseTypeOther || 'Other' : f.caseType, institutedOn: f.institutedOn, court: f.court, courtOther: f.courtOther || undefined, bench: f.bench || undefined, courtCaseNo: f.courtCaseNo || undefined,
+      applicants: f.applicants.map((x) => x.trim()).filter(Boolean), respondents: f.respondents.map((x) => x.trim()).filter(Boolean),
+      land: { kanal: num(f.kanal), marla: num(f.marla), sarsai: num(f.sarsai), khasraNos: f.khasraNos.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean), khewat: f.khewat || undefined, khatauni: f.khatauni || undefined },
+      landSpec: f.landSpec || undefined, governmentParty: f.governmentParty, nextHearing: f.nextHearing || null, note: f.note || undefined,
+    };
+    try {
+      const r = initial ? await patch<Case>(`/litigation/${initial._id}`, body) : await post<Case>(`/litigation${force ? '?force=true' : ''}`, body);
+      qc.invalidateQueries({ queryKey: ['lit'] });
+      toast(initial ? 'Case updated' : `Case ${r.caseId} created`);
+      onClose();
+      if (!initial) navigate(`/litigation/${r._id}`);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'POSSIBLE_DUPLICATE') setDup(e.body?.error?.details ?? null);
+      else setError(e);
+    } finally { setBusy(false); }
+  };
+  return (
+    <Sheet open onClose={onClose} title={initial ? `Edit ${initial.caseId}` : 'New Case'} footer={<Button form="case-form" type="submit" block loading={busy}>{initial ? 'Save' : 'Create Case'}</Button>}>
+      <form id="case-form" onSubmit={(e: FormEvent) => { e.preventDefault(); save(); }} className="space-y-4">
+        {!initial && (
+          <Field label="Mouza">
+            {(id) => f.unitId ? (
+              <Card className="flex items-center justify-between p-2.5 text-sm"><b>{f.mouzaName}</b><Button type="button" size="sm" variant="ghost" onClick={() => set('unitId', '')}>Change</Button></Card>
+            ) : (
+              <div className="space-y-1.5">
+                <Input id={id} placeholder="Search your mouzas…" value={mq} onChange={(e) => setMq(e.target.value)} />
+                <div className="max-h-48 overflow-y-auto rounded-lg ring-1 ring-slate-200 dark:ring-slate-700">
+                  {mouzas.data?.map((m) => <button type="button" key={m._id} onClick={() => setF((x) => ({ ...x, unitId: m._id, mouzaName: m.name }))} className="block w-full border-b border-slate-100 px-3 py-2 text-left text-sm hover:bg-brand-50 dark:border-slate-800">{m.name} <span className="text-xs text-slate-500">{m.tehsil}</span></button>)}
+                  {mouzas.data && !mouzas.data.length && <div className="p-3 text-sm text-slate-500">No mouza found in your charge.</div>}
+                </div>
+              </div>
+            )}
+          </Field>
+        )}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Type of case">{(id) => <Select id={id} required value={f.caseType} onChange={(e) => set('caseType', e.target.value)}><option value="">Choose…</option>{[...new Set([...known, 'Other'])].map((t) => <option key={t}>{t}</option>)}</Select>}</Field>
+          {f.caseType === 'Other' && <Field label="Type (write)">{(id) => <Input id={id} value={f.caseTypeOther} onChange={(e) => set('caseTypeOther', e.target.value)} />}</Field>}
+          <Field label="Date of institution">{(id) => <Input id={id} type="date" required value={f.institutedOn} onChange={(e) => set('institutedOn', e.target.value)} />}</Field>
+        </div>
+        <Field label="Name of the court">{(id) => <CourtSelect id={id} meta={meta.data} value={f.court} other={f.courtOther} onChange={(c, o) => setF((x) => ({ ...x, court: c, courtOther: o }))} />}</Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Bench / station (optional)">{(id) => <Input id={id} value={f.bench} onChange={(e) => set('bench', e.target.value)} placeholder="e.g. Bahawalpur Bench" />}</Field>
+          <Field label="Court case no. (optional)">{(id) => <Input id={id} value={f.courtCaseNo} onChange={(e) => set('courtCaseNo', e.target.value)} />}</Field>
+        </div>
+        <Field label="Name of applicant(s)" hint="One name per line">{(id) => <Names id={id} value={f.applicants} onChange={(v) => set('applicants', v)} />}</Field>
+        <Field label="Name of respondent(s)" hint="One name per line">{(id) => <Names id={id} value={f.respondents} onChange={(v) => set('respondents', v)} />}</Field>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-brand-600" checked={f.governmentParty} onChange={(e) => set('governmentParty', e.target.checked)} />Government / Board of Revenue is a party</label>
+        <Field label="Land measuring">
+          {() => (
+            <div className="grid grid-cols-3 gap-2">
+              <Input type="number" min={0} placeholder="Kanal" value={f.kanal} onChange={(e) => set('kanal', e.target.value)} />
+              <Input type="number" min={0} placeholder="Marla" value={f.marla} onChange={(e) => set('marla', e.target.value)} />
+              <Input type="number" min={0} placeholder="Sarsai" value={f.sarsai} onChange={(e) => set('sarsai', e.target.value)} />
+            </div>
+          )}
+        </Field>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Khasra nos." hint="Separate with commas">{(id) => <Input id={id} value={f.khasraNos} onChange={(e) => set('khasraNos', e.target.value)} />}</Field>
+          <Field label="Khewat">{(id) => <Input id={id} value={f.khewat} onChange={(e) => set('khewat', e.target.value)} />}</Field>
+          <Field label="Khatauni">{(id) => <Input id={id} value={f.khatauni} onChange={(e) => set('khatauni', e.target.value)} />}</Field>
+        </div>
+        <Field label="Land specification">{(id) => <Textarea id={id} rows={2} dir="auto" value={f.landSpec} onChange={(e) => set('landSpec', e.target.value)} placeholder="State land / private / evacuee…, nature (barani, nehri…)" />}</Field>
+        {!initial && <Field label="Next date of hearing (optional)">{(id) => <Input id={id} type="date" value={f.nextHearing} onChange={(e) => set('nextHearing', e.target.value)} />}</Field>}
+        <Field label="Note for information">{(id) => <Textarea id={id} rows={2} dir="auto" value={f.note} onChange={(e) => set('note', e.target.value)} />}</Field>
+        {dup && (
+          <Card className="space-y-2 border-l-4 border-amber-500 p-3 text-sm">
+            <div>A similar case already exists: <Link to={`/litigation/${dup.id}`} className="font-semibold underline">{dup.caseId}</Link>. Is this a different case?</div>
+            <Button type="button" size="sm" variant="secondary" onClick={() => save(true)}>Yes, create a new case</Button>
+          </Card>
+        )}
+        <FormError error={error} />
+      </form>
+    </Sheet>
+  );
+}
+
+/* ================================================================== *
+ *  Case page
+ * ================================================================== */
+export function LitigationCasePage() {
+  const { id } = useParams();
+  const meta = useMeta();
+  const caps = useCaps();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const key = ['lit', 'case', id];
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: key, queryFn: () => get<{ case: Case; courtName: string; tehsil?: string; docs: Doc[]; canEdit: boolean; appealDeadline?: string }>(`/litigation/${id}`) });
+  const [sheet, setSheet] = useState<'edit' | 'hearing' | 'decision' | 'stage' | 'doc' | null>(null);
+  const [note, setNote] = useState('');
+  if (isLoading) return <Loading />;
+  if (error) return <ErrorState error={error} retry={refetch} />;
+  const { case: c, canEdit, docs, appealDeadline } = data!;
+  const refresh = () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ['lit', 'list'] }); qc.invalidateQueries({ queryKey: ['lit', 'dash'] }); };
+  const addNote = async () => { if (!note.trim()) return; await post(`/litigation/${c._id}/notes`, { text: note }); setNote(''); refresh(); };
+  const removeHearing = async (h: Hearing) => { if (!confirm('Remove this hearing?')) return; await del(`/litigation/${c._id}/hearings/${h._id}`); refresh(); };
+  const removeDoc = async (d: Doc) => { if (!confirm('Remove this document?')) return; await del(`/litigation/${c._id}/docs/${d._id}`); refresh(); toast('Document removed'); };
+  const removeCase = async () => { if (!confirm(`Remove case ${c.caseId}? It can be restored by the administrator.`)) return; await del(`/litigation/${c._id}`); qc.invalidateQueries({ queryKey: ['lit'] }); history.back(); };
+  const l = c.land;
+  const row = (k: string, v: React.ReactNode) => (
+    <div className="grid grid-cols-[9rem_1fr] gap-2 border-b border-slate-100 py-1.5 text-sm last:border-0 dark:border-slate-800 sm:grid-cols-[12rem_1fr]">
+      <div className="text-slate-500">{k}</div><div className="min-w-0 break-words" dir="auto">{v || '—'}</div>
+    </div>
+  );
+  const days = c.nextHearing && c.status === 'pending' ? Math.ceil((+new Date(c.nextHearing) - Date.now()) / 86_400_000) : null;
+
+  return (
+    <>
+      <PageHeader title={c.caseId} back="/litigation" subtitle={<span className="flex flex-wrap items-center gap-2"><StatusBadge s={c.status} />{c.stage > 1 && <Badge tone="bg-violet-100 text-violet-800">Stage {c.stage}</Badge>}{c.unitId.name} · {data!.tehsil}</span>}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => download(`/litigation/${c._id}/pdf`, `Case ${c.caseId}.pdf`)}><FileText className="size-4" />Case File PDF</Button>
+            {canEdit && <Button size="sm" variant="secondary" onClick={() => setSheet('edit')}>Edit</Button>}
+            {caps.isAdmin && <Button size="sm" variant="ghost" className="text-rose-600" onClick={removeCase}><Trash2 className="size-4" /></Button>}
+          </div>
+        } />
+
+      {c.status === 'pending' && (
+        <Card className={clsx('mb-3 flex flex-wrap items-center gap-3 p-3', days != null && days < 0 ? 'border-l-4 border-rose-500' : 'border-l-4 border-sky-500')}>
+          <Gavel className="size-5 text-slate-500" />
+          <div className="flex-1 text-sm">
+            <b>Next hearing: {fmt(c.nextHearing)}</b>{days != null && <span className={clsx('ml-2', days < 0 ? 'text-rose-700' : 'text-slate-500')}>{days < 0 ? `${-days} day(s) ago — record the proceedings` : days === 0 ? 'today' : `in ${days} day(s)`}</span>}
+            {c.nextAction && <div className="text-xs text-slate-600 dark:text-slate-300">To be done: {c.nextAction}</div>}
+          </div>
+          {canEdit && <Button size="sm" onClick={() => setSheet('hearing')}><Plus className="size-4" />Record Hearing</Button>}
+        </Card>
+      )}
+      {appealDeadline && c.appeal.filed === 'undecided' && <Card className="mb-3 border-l-4 border-rose-500 p-3 text-sm"><AlarmClock className="mr-1 inline size-4 text-rose-600" />Appeal period ends on <b>{fmt(appealDeadline)}</b>. Record whether an appeal is filed.</Card>}
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div>
+          <SectionTitle>Case Details</SectionTitle>
+          <Card className="px-4 py-2">
+            {row('Mouza', c.unitId.name)}
+            {row('Type of case', c.caseType)}
+            {row('Date of institution', fmt(c.institutedOn))}
+            {row('Court', `${data!.courtName}${c.bench ? `, ${c.bench}` : ''}`)}
+            {row('Court case no.', c.courtCaseNo)}
+            {row('Applicant(s)', c.applicants.join('; '))}
+            {row('Respondent(s)', c.respondents.join('; '))}
+            {row('Land measuring', [l.kanal ? `${l.kanal} K` : '', l.marla ? `${l.marla} M` : '', l.sarsai ? `${l.sarsai} S` : ''].filter(Boolean).join(' – '))}
+            {row('Khasra / Khewat / Khatauni', [l.khasraNos.join(', '), l.khewat, l.khatauni].filter(Boolean).join(' · '))}
+            {row('Land specification', c.landSpec)}
+            {row('Government a party', c.governmentParty ? 'Yes' : 'No')}
+            {row('Last hearing', fmt(c.lastHearing))}
+            {row('Proceedings (last date)', c.lastProceedings)}
+            {row('Note', c.note)}
+          </Card>
+
+          <SectionTitle action={canEdit && <Button size="sm" variant="ghost" onClick={() => setSheet('decision')}>Update</Button>}>Status, Decision & Appeal</SectionTitle>
+          <Card className="px-4 py-2">
+            {row('Status', <StatusBadge s={c.status} />)}
+            {c.status === 'decided' && row('Date of decision', fmt(c.decision?.date))}
+            {c.status === 'decided' && row('Decision', [c.decision?.result, c.decision?.summary].filter(Boolean).join(' — '))}
+            {row('Appeal', c.appeal.filed === 'yes' ? `Filed — ${courtLabel(meta.data, c.appeal.court, c.appeal.courtOther)}${c.appeal.filedOn ? `, ${fmt(c.appeal.filedOn)}` : ''}${c.appeal.appealNo ? ` (No. ${c.appeal.appealNo})` : ''}` : c.appeal.filed === 'no' ? `Not filed — ${c.appeal.reasonNotFiled}` : 'Not yet decided')}
+            {canEdit && c.status === 'decided' && c.appeal.filed === 'yes' && (
+              <div className="py-2"><Button size="sm" variant="secondary" onClick={() => setSheet('stage')}><Scale className="size-4" />Continue in Appellate Court</Button><p className="mt-1 text-[11px] text-slate-500">The case keeps the same ID; the appeal becomes stage {c.stage + 1}.</p></div>
+            )}
+          </Card>
+          {!!c.stages.length && (
+            <>
+              <SectionTitle>Court History</SectionTitle>
+              <Card className="divide-y divide-slate-100 dark:divide-slate-800">
+                {c.stages.map((s) => <div key={s.stage} className="px-4 py-2 text-sm"><b>Stage {s.stage}:</b> {courtLabel(meta.data, s.court, s.courtOther)}{s.courtCaseNo && ` (${s.courtCaseNo})`}<div className="text-xs text-slate-500">Instituted {fmt(s.institutedOn)} · decided {fmt(s.decidedOn)}{s.result && ` · ${s.result}`}</div></div>)}
+                <div className="px-4 py-2 text-sm"><b>Stage {c.stage} (current):</b> {data!.courtName}</div>
+              </Card>
+            </>
+          )}
+        </div>
+
+        <div>
+          <SectionTitle action={canEdit && c.status === 'pending' && <Button size="sm" variant="ghost" onClick={() => setSheet('hearing')}><Plus className="size-4" />Hearing</Button>}>Hearings ({c.hearings.length})</SectionTitle>
+          <Card className="divide-y divide-slate-100 dark:divide-slate-800">
+            {!c.hearings.length && <div className="p-4 text-sm text-slate-500">No hearing recorded yet.</div>}
+            {[...c.hearings].sort((a, b) => +new Date(b.date) - +new Date(a.date)).map((h) => (
+              <div key={h._id} className="px-4 py-2.5 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <b>{fmt(h.date)}</b>
+                  <span className="text-xs text-slate-500">{h.nextDate && `next ${fmt(h.nextDate)}`}{canEdit && <button className="ml-2 text-rose-500" onClick={() => removeHearing(h)}><Trash2 className="inline size-3.5" /></button>}</span>
+                </div>
+                {h.proceedingsDone && <div dir="auto"><span className="text-slate-500">Proceedings:</span> {h.proceedingsDone}</div>}
+                {h.nextAction && <div dir="auto"><span className="text-slate-500">For next date:</span> {h.nextAction}</div>}
+                {h.by && <div className="text-[11px] text-slate-400">by {h.by.name}{h.attendedBy && ` · attended by ${h.attendedBy}`}</div>}
+              </div>
+            ))}
+          </Card>
+
+          <SectionTitle action={canEdit && <Button size="sm" variant="ghost" onClick={() => setSheet('doc')}><Upload className="size-4" />Attach</Button>}>Documents ({docs.length})</SectionTitle>
+          <Card className="divide-y divide-slate-100 dark:divide-slate-800">
+            {!docs.length && <div className="p-4 text-sm text-slate-500">No documents attached yet.</div>}
+            {meta.data?.categories.filter((cat) => docs.some((d) => d.category === cat.key)).map((cat) => (
+              <div key={cat.key} className="px-4 py-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{cat.label}</div>
+                {docs.filter((d) => d.category === cat.key).map((d) => (
+                  <div key={d._id} className="flex items-center gap-2 py-1 text-sm">
+                    <FileText className="size-4 shrink-0 text-rose-600" />
+                    <button className="min-w-0 flex-1 truncate text-left hover:underline" onClick={() => download(`/litigation/${c._id}/docs/${d._id}`, `${c.caseId} ${d.title ?? cat.label}.pdf`)}>{d.title || cat.label}{d.docDate && ` · ${fmt(d.docDate)}`}</button>
+                    <span className="shrink-0 text-[11px] text-slate-400">{d.pages ?? '?'} p · {Math.round(d.size / 1024)} KB</span>
+                    {canEdit && <button className="text-rose-500" onClick={() => removeDoc(d)}><Trash2 className="size-3.5" /></button>}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </Card>
+
+          <SectionTitle>Notes</SectionTitle>
+          <Card className="space-y-2 p-3">
+            {c.notes.map((n, i) => <div key={i} className="text-sm" dir="auto">{n.text}<div className="text-[11px] text-slate-400">{n.by?.name} · {new Date(n.at).toLocaleString()}</div></div>)}
+            <div className="flex gap-2"><Input dir="auto" placeholder="Add a note…" value={note} onChange={(e) => setNote(e.target.value)} /><Button variant="secondary" onClick={addNote}>Add</Button></div>
+          </Card>
+          <p className="mt-2 text-[11px] text-slate-400">History: {c.history.slice(-6).reverse().map((h) => `${h.action} (${h.by?.name ?? ''}, ${new Date(h.at).toLocaleDateString()})`).join(' · ')}</p>
+        </div>
+      </div>
+
+      {sheet === 'edit' && <CaseForm initial={c} onClose={() => { setSheet(null); refresh(); }} />}
+      {sheet === 'hearing' && <HearingSheet c={c} onDone={() => { setSheet(null); refresh(); }} />}
+      {sheet === 'decision' && <DecisionSheet c={c} meta={meta.data} onDone={() => { setSheet(null); refresh(); }} />}
+      {sheet === 'stage' && <StageSheet c={c} meta={meta.data} onDone={() => { setSheet(null); refresh(); }} />}
+      {sheet === 'doc' && <DocSheet c={c} meta={meta.data} onDone={() => { setSheet(null); refresh(); }} />}
+    </>
+  );
+}
+
+function HearingSheet({ c, onDone }: { c: Case; onDone: () => void }) {
+  const [f, setF] = useState({ date: iso(c.nextHearing) || new Date().toISOString().slice(0, 10), proceedingsDone: '', nextAction: '', nextDate: '', attendedBy: '' });
+  const [error, setError] = useState<unknown>(null);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    try { await post(`/litigation/${c._id}/hearings`, { ...f, nextDate: f.nextDate || null }); onDone(); } catch (err) { setError(err); }
+  };
+  return (
+    <Sheet open onClose={onDone} title={`Record Hearing · ${c.caseId}`} footer={<Button form="h-form" type="submit" block>Save Hearing</Button>}>
+      <form id="h-form" onSubmit={save} className="space-y-4">
+        <Field label="Date of hearing">{(id) => <Input id={id} type="date" required value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />}</Field>
+        <Field label="Proceedings of this date">{(id) => <Textarea id={id} rows={3} dir="auto" value={f.proceedingsDone} onChange={(e) => setF({ ...f, proceedingsDone: e.target.value })} placeholder="What happened in court…" />}</Field>
+        <Field label="Next date of hearing">{(id) => <Input id={id} type="date" value={f.nextDate} onChange={(e) => setF({ ...f, nextDate: e.target.value })} />}</Field>
+        <Field label="Proceedings to be done for next date">{(id) => <Textarea id={id} rows={2} dir="auto" value={f.nextAction} onChange={(e) => setF({ ...f, nextAction: e.target.value })} placeholder="e.g. File reply, produce record…" />}</Field>
+        <Field label="Attended by (optional)">{(id) => <Input id={id} value={f.attendedBy} onChange={(e) => setF({ ...f, attendedBy: e.target.value })} />}</Field>
+        <FormError error={error} />
+      </form>
+    </Sheet>
+  );
+}
+
+function DecisionSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => void }) {
+  const [status, setStatus] = useState(c.status);
+  const [dec, setDec] = useState({ date: iso(c.decision?.date), result: c.decision?.result ?? '', summary: c.decision?.summary ?? '' });
+  const [ap, setAp] = useState({ ...c.appeal, filedOn: iso(c.appeal.filedOn) });
+  const [error, setError] = useState<unknown>(null);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await patch(`/litigation/${c._id}`, { status, decision: status === 'decided' ? { ...dec, date: dec.date || null } : undefined, appeal: status === 'decided' ? { ...ap, filedOn: ap.filedOn || null } : { filed: 'undecided' } });
+      onDone();
+    } catch (err) { setError(err); }
+  };
+  return (
+    <Sheet open onClose={onDone} title="Status, Decision & Appeal" footer={<Button form="d-form" type="submit" block>Save</Button>}>
+      <form id="d-form" onSubmit={save} className="space-y-4">
+        <Segmented value={status} onChange={setStatus} options={[{ value: 'pending', label: 'Not Decided Yet' }, { value: 'decided', label: 'Decided' }]} />
+        {status === 'decided' && (
+          <>
+            <Field label="Date of decision">{(id) => <Input id={id} type="date" required value={dec.date} onChange={(e) => setDec({ ...dec, date: e.target.value })} />}</Field>
+            <Field label="Result">{(id) => <Select id={id} value={dec.result} onChange={(e) => setDec({ ...dec, result: e.target.value })}><option value="">Choose…</option><option>In favour of government</option><option>Against government</option><option>In favour of applicant</option><option>In favour of respondent</option><option>Dismissed</option><option>Withdrawn</option><option>Remanded</option><option>Other</option></Select>}</Field>
+            <Field label="Summary (optional)">{(id) => <Textarea id={id} rows={2} dir="auto" value={dec.summary} onChange={(e) => setDec({ ...dec, summary: e.target.value })} />}</Field>
+            <Field label="Appeal filed?">{() => <Segmented value={ap.filed} onChange={(v) => setAp({ ...ap, filed: v })} options={[{ value: 'undecided', label: 'Not Yet' }, { value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} />}</Field>
+            {ap.filed === 'yes' && (
+              <>
+                <Field label="Appellate court">{(id) => <CourtSelect id={id} meta={meta} value={ap.court ?? ''} other={ap.courtOther} onChange={(court, other) => setAp({ ...ap, court, courtOther: other })} />}</Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Date filed">{(id) => <Input id={id} type="date" value={ap.filedOn} onChange={(e) => setAp({ ...ap, filedOn: e.target.value })} />}</Field>
+                  <Field label="Appeal no.">{(id) => <Input id={id} value={ap.appealNo ?? ''} onChange={(e) => setAp({ ...ap, appealNo: e.target.value })} />}</Field>
+                </div>
+              </>
+            )}
+            {ap.filed === 'no' && <Field label="Reason for not filing an appeal">{(id) => <Textarea id={id} rows={2} required dir="auto" value={ap.reasonNotFiled ?? ''} onChange={(e) => setAp({ ...ap, reasonNotFiled: e.target.value })} />}</Field>}
+          </>
+        )}
+        <FormError error={error} />
+      </form>
+    </Sheet>
+  );
+}
+
+function StageSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => void }) {
+  const [f, setF] = useState({ court: c.appeal.court ?? '', courtOther: c.appeal.courtOther, courtCaseNo: c.appeal.appealNo ?? '', bench: '', filedOn: iso(c.appeal.filedOn) || new Date().toISOString().slice(0, 10), nextHearing: '' });
+  const [error, setError] = useState<unknown>(null);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    try { await post(`/litigation/${c._id}/appeal-stage`, { ...f, nextHearing: f.nextHearing || null }); onDone(); } catch (err) { setError(err); }
+  };
+  return (
+    <Sheet open onClose={onDone} title={`Appeal — Stage ${c.stage + 1}`} footer={<Button form="s-form" type="submit" block>Start Appeal Stage</Button>}>
+      <form id="s-form" onSubmit={save} className="space-y-4">
+        <p className="text-sm text-slate-600 dark:text-slate-300">The decision of the current court is kept in the court history. The case continues under <b>{c.caseId}</b> in the appellate court.</p>
+        <Field label="Appellate court">{(id) => <CourtSelect id={id} meta={meta} value={f.court} other={f.courtOther} onChange={(court, other) => setF({ ...f, court, courtOther: other })} />}</Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Appeal / case no.">{(id) => <Input id={id} value={f.courtCaseNo} onChange={(e) => setF({ ...f, courtCaseNo: e.target.value })} />}</Field>
+          <Field label="Date filed">{(id) => <Input id={id} type="date" required value={f.filedOn} onChange={(e) => setF({ ...f, filedOn: e.target.value })} />}</Field>
+        </div>
+        <Field label="Bench / station (optional)">{(id) => <Input id={id} value={f.bench} onChange={(e) => setF({ ...f, bench: e.target.value })} />}</Field>
+        <Field label="Next hearing (optional)">{(id) => <Input id={id} type="date" value={f.nextHearing} onChange={(e) => setF({ ...f, nextHearing: e.target.value })} />}</Field>
+        <FormError error={error} />
+      </form>
+    </Sheet>
+  );
+}
+
+/* ---------- Attach: camera pages (compressed on the phone) or a PDF / image file ---------- */
+const readB64 = (blob: Blob) => new Promise<string>((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] ?? ''); r.readAsDataURL(blob); });
+
+/** Resize to ≤1600 px, grayscale unless colour is kept, JPEG ~0.6 → about 120–250 KB per page. */
+async function compress(file: File, colour: boolean): Promise<{ blob: Blob; url: string }> {
+  const img = await createImageBitmap(file);
+  const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext('2d')!;
+  if (!colour) ctx.filter = 'grayscale(1) contrast(1.15)';
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise<Blob>((ok) => canvas.toBlob((b) => ok(b!), 'image/jpeg', 0.6));
+  return { blob, url: URL.createObjectURL(blob) };
+}
+
+function DocSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => void }) {
+  const toast = useToast();
+  const cam = useRef<HTMLInputElement>(null);
+  const [category, setCategory] = useState('plaint');
+  const [title, setTitle] = useState('');
+  const [docDate, setDocDate] = useState('');
+  const [colour, setColour] = useState(false);
+  const [pages, setPages] = useState<{ blob: Blob; url: string }[]>([]);
+  const [pdf, setPdf] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const addPhotos = async (files: FileList | null) => {
+    if (!files) return;
+    const out: { blob: Blob; url: string }[] = [];
+    for (const f of Array.from(files)) if (f.type.startsWith('image/')) out.push(await compress(f, colour));
+    setPages((p) => [...p, ...out]);
+    setPdf(null);
+  };
+  const move = (i: number, d: -1 | 1) => setPages((p) => { const n = [...p]; const j = i + d; if (j < 0 || j >= n.length) return p; [n[i], n[j]] = [n[j], n[i]]; return n; });
+  const total = pdf ? pdf.size : pages.reduce((s, p) => s + p.blob.size, 0);
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      const files = pdf ? [{ name: pdf.name, mime: 'application/pdf', data: await readB64(pdf) }] : await Promise.all(pages.map(async (p, i) => ({ name: `page-${i + 1}.jpg`, mime: 'image/jpeg', data: await readB64(p.blob) })));
+      await post(`/litigation/${c._id}/docs`, { category, title: title || undefined, docDate: docDate || null, files });
+      toast('Document attached');
+      onDone();
+    } catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  return (
+    <Sheet open onClose={onDone} title={`Attach Document · ${c.caseId}`} footer={<Button block disabled={!pages.length && !pdf} loading={busy} onClick={save}><Upload className="size-4" />Attach{pages.length > 1 ? ` (${pages.length} pages)` : ''}</Button>}>
+      <div className="space-y-4">
+        <Field label="Document">{(id) => <Select id={id} value={category} onChange={(e) => setCategory(e.target.value)}>{meta?.categories.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</Select>}</Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Title (optional)">{(id) => <Input id={id} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Order dated…" />}</Field>
+          <Field label="Date (optional)">{(id) => <Input id={id} type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} />}</Field>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Button type="button" variant="secondary" onClick={() => cam.current?.click()}><Camera className="size-4" />Camera / Photos</Button>
+          <label className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-lg text-sm font-medium ring-1 ring-slate-200 hover:bg-slate-50 dark:ring-slate-700">
+            <FileText className="size-4" />PDF File<input type="file" accept="application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setPdf(f); setPages([]); } }} />
+          </label>
+        </div>
+        <input ref={cam} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ''; }} />
+        <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" className="size-4 accent-brand-600" checked={colour} onChange={(e) => setColour(e.target.checked)} />Keep colour (for maps / coloured documents)</label>
+        {pdf && <Card className="flex items-center gap-2 p-3 text-sm"><FileText className="size-4 text-rose-600" />{pdf.name}<span className="ml-auto text-xs text-slate-500">{Math.round(pdf.size / 1024)} KB</span></Card>}
+        {!!pages.length && (
+          <div>
+            <div className="mb-1 text-xs text-slate-500">{pages.length} page(s) · {Math.round(total / 1024)} KB total — take more photos to add pages; arrange the order below</div>
+            <div className="grid grid-cols-3 gap-2">
+              {pages.map((p, i) => (
+                <div key={p.url} className="relative overflow-hidden rounded-lg ring-1 ring-slate-200">
+                  <img src={p.url} alt={`Page ${i + 1}`} className="h-28 w-full object-cover" />
+                  <div className="absolute inset-x-0 bottom-0 flex justify-between bg-black/55 px-1 text-[11px] text-white">
+                    <button onClick={() => move(i, -1)}>◀</button><span>{i + 1}</span><button onClick={() => move(i, 1)}>▶</button>
+                  </div>
+                  <button className="absolute right-1 top-1 rounded bg-black/55 p-0.5 text-white" onClick={() => setPages((x) => x.filter((_, j) => j !== i))}><X className="size-3" /></button>
+                </div>
+              ))}
+              <button onClick={() => cam.current?.click()} className="grid h-28 place-items-center rounded-lg border-2 border-dashed border-slate-300 text-slate-400"><ImageIcon className="size-6" /></button>
+            </div>
+          </div>
+        )}
+        <FormError error={error} />
+      </div>
+    </Sheet>
+  );
+}
