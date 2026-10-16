@@ -11,7 +11,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PageHeader } from '../components/AppShell';
 import { UnitField } from '../components/rev';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, Sheet, Textarea, useToast } from '../components/ui';
-import { ApiError, del, download, get, patch, post } from '../lib/api';
+import { ApiError, del, download, get, patch, post, put } from '../lib/api';
 import { useCaps, type UnitRef } from '../lib/rev';
 
 interface Meta { courts: { group: string; items: [string, string][] }[]; caseTypes: string[]; categories: { key: string; label: string }[]; canEnter: boolean }
@@ -19,7 +19,7 @@ interface ListRow { _id: string; caseId: string; unitId: { name: string } | null
 interface Hearing { _id: string; date: string; court?: string; proceedingsDone?: string; nextAction?: string; nextDate?: string; attendedBy?: string; by?: { name: string } }
 interface Case {
   _id: string; caseId: string; unitId: { _id: string; name: string }; caseType: string; institutedOn: string; court: string; courtOther?: string; bench?: string; courtCaseNo?: string;
-  applicants: string[]; respondents: string[]; land: { kanal?: number; marla?: number; sarsai?: number; khasraNos: string[]; khewat?: string; khatauni?: string }; landSpec?: string; governmentParty: boolean;
+  applicants: string[]; respondents: string[]; land: { kanal?: number; marla?: number; sarsai?: number; murabba?: string; khasraNos: string[]; khewat?: string; khatauni?: string }; landSpec?: string; governmentParty: boolean;
   hearings: Hearing[]; lastHearing?: string; nextHearing?: string; lastProceedings?: string; nextAction?: string; status: 'pending' | 'decided';
   decision?: { date?: string; result?: string; summary?: string }; appeal: { filed: 'yes' | 'no' | 'undecided'; court?: string; courtOther?: string; filedOn?: string; appealNo?: string; reasonNotFiled?: string };
   stage: number; stages: { stage: number; court: string; courtOther?: string; courtCaseNo?: string; institutedOn?: string; decidedOn?: string; result?: string }[];
@@ -63,6 +63,10 @@ export function LitigationList() {
   const [week, setWeek] = useState(false);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [view, setView] = useState<'register' | 'causelist'>('register');
+  const [importing, setImporting] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const caps = useCaps();
   const today = new Date().toISOString().slice(0, 10);
   const in7 = new Date(Date.now() + 6 * 86_400_000).toISOString().slice(0, 10);
   const params = new URLSearchParams({ page: String(page), ...(term ? { search: term } : {}), ...(status ? { status } : {}), ...(court ? { court } : {}), ...(area ? { unitId: area._id } : {}), ...(week ? { hearingFrom: today, hearingTo: in7 } : {}) });
@@ -75,11 +79,17 @@ export function LitigationList() {
   return (
     <>
       <PageHeader title="Litigation" subtitle="Court cases in your jurisdiction" actions={
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => download(`/litigation/export/xlsx?${params}`, 'litigation.xlsx')}><Download className="size-4" />Excel</Button>
+          {meta.data?.canEnter && <Button size="sm" variant="secondary" onClick={() => setImporting(true)}><Upload className="size-4" />Import</Button>}
+          {caps.isAdmin && <Button size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>Settings</Button>}
           {meta.data?.canEnter && <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />New Case</Button>}
         </div>
       } />
+      <div className="mb-3"><Segmented value={view} onChange={setView} options={[{ value: 'register', label: 'Register' }, { value: 'causelist', label: 'Cause List' }]} /></div>
+      {importing && <ImportSheet onClose={() => setImporting(false)} />}
+      {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} />}
+      {view === 'causelist' ? <CauseList area={area} /> : <>
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {[
           { l: 'Total Cases', v: d?.total, on: () => { setStatus(''); setWeek(false); } },
@@ -101,7 +111,7 @@ export function LitigationList() {
         </Card>
       )}
       <Card className="mb-3 grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input className="pl-9" placeholder="Case ID, party, court no., khasra…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+        <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input className="pl-9" placeholder="Case ID, party, court no., khasra, murabba…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
         <UnitField value={area} onChange={setArea} placeholder="Any area" />
         <Select value={court} onChange={(e) => setCourt(e.target.value)}><option value="">Any court</option>{meta.data?.courts.map((g) => <optgroup key={g.group} label={g.group}>{g.items.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</optgroup>)}</Select>
         <div className="flex gap-2">
@@ -143,15 +153,148 @@ export function LitigationList() {
           </div>
         </>
       )}
+      </>}
       {creating && <CaseForm onClose={() => setCreating(false)} />}
     </>
+  );
+}
+
+/* ---------- Cause list: hearings by date, printable ---------- */
+function CauseList({ area }: { area: UnitRef | null }) {
+  const [from, setFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [to, setTo] = useState(new Date(Date.now() + 13 * 86_400_000).toISOString().slice(0, 10));
+  const { data, isLoading } = useQuery({
+    queryKey: ['lit', 'causelist', from, to, area?._id],
+    queryFn: () => get<{ items: { _id: string; caseId: string; unitId: { name: string } | null; tehsilId: { name: string } | null; courtName: string; bench?: string; courtCaseNo?: string; applicants: string[]; respondents: string[]; nextHearing: string; nextAction?: string; caseType: string }[] }>(`/litigation/causelist?from=${from}&to=${to}${area ? `&unitId=${area._id}` : ''}`),
+  });
+  const days = [...new Set((data?.items ?? []).map((c) => c.nextHearing.slice(0, 10)))];
+  return (
+    <>
+      <Card className="mb-3 flex flex-wrap items-end gap-3 p-3 print:hidden">
+        <Field label="From">{(id) => <Input id={id} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />}</Field>
+        <Field label="To">{(id) => <Input id={id} type="date" value={to} onChange={(e) => setTo(e.target.value)} />}</Field>
+        <Button variant="secondary" onClick={() => window.print()}><FileText className="size-4" />Print Cause List</Button>
+      </Card>
+      <div className="hidden print:block print:mb-2"><b>Cause List</b> · {fmt(from)} to {fmt(to)}{area && ` · ${area.name}`}</div>
+      {isLoading ? <Loading /> : !days.length ? <Card><Empty title="No hearings in these dates" /></Card> : days.map((d) => {
+        const rows = data!.items.filter((c) => c.nextHearing.slice(0, 10) === d);
+        return (
+          <div key={d} className="mb-3 break-inside-avoid">
+            <SectionTitle>{new Date(d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {rows.length} case(s)</SectionTitle>
+            <Card className="overflow-x-auto">
+              <table className="w-full min-w-[720px] border-separate border-spacing-0 text-[13px]">
+                <thead className="bg-brand-700 text-center text-[12.5px] text-white print:bg-slate-200 print:text-black">
+                  <tr>{['#', 'Case ID', 'Court', 'Tehsil / Mouza', 'Parties', 'Type', 'To Be Done'].map((h) => <th key={h} className="border-b border-r border-white/50 px-2 py-1.5">{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {rows.map((c, i) => (
+                    <tr key={c._id}>
+                      <td className="border-b border-r border-slate-200 px-2 py-1.5 text-center text-xs">{i + 1}</td>
+                      <td className="whitespace-nowrap border-b border-r border-slate-200 px-2 py-1.5 font-mono text-[12px]"><Link to={`/litigation/${c._id}`} className="hover:underline">{c.caseId}</Link></td>
+                      <td className="border-b border-r border-slate-200 px-2 py-1.5">{c.courtName}{c.bench && `, ${c.bench}`}{c.courtCaseNo && <div className="text-[11px] text-slate-500">{c.courtCaseNo}</div>}</td>
+                      <td className="border-b border-r border-slate-200 px-2 py-1.5">{c.tehsilId?.name} / {c.unitId?.name.replace(' (test)', '')}</td>
+                      <td className="border-b border-r border-slate-200 px-2 py-1.5 text-xs" dir="auto">{c.applicants.join('; ')} <span className="text-slate-400">v.</span> {c.respondents.join('; ')}</td>
+                      <td className="border-b border-r border-slate-200 px-2 py-1.5">{c.caseType}</td>
+                      <td className="border-b border-slate-200 px-2 py-1.5 text-xs" dir="auto">{c.nextAction || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/* ---------- Import existing registers from Excel ---------- */
+function ImportSheet({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [file, setFile] = useState<{ name: string; data: string } | null>(null);
+  const [result, setResult] = useState<{ dryRun: boolean; valid: number; errors: { row: number; message: string }[]; imported: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const run = async (dryRun: boolean) => {
+    if (!file) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await post<typeof result>('/litigation/import', { file: file.data, dryRun });
+      setResult(r);
+      if (!dryRun && r) { toast(`${r.imported} case(s) imported`); qc.invalidateQueries({ queryKey: ['lit'] }); }
+    } catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  const ready = result?.dryRun && !result.errors.length && result.valid > 0;
+  return (
+    <Sheet open onClose={onClose} title="Import Cases from Excel" footer={<Button block disabled={!ready} loading={busy} onClick={() => run(false)}><Upload className="size-4" />Import {result?.valid ?? ''} Case(s)</Button>}>
+      <div className="space-y-4">
+        <p className="text-sm text-slate-600 dark:text-slate-300">Fill the template with your existing litigation register (one case per row), then check it. Case IDs are given automatically.</p>
+        <Button variant="secondary" onClick={() => download('/litigation/import/template', 'litigation-import-template.xlsx')}><Download className="size-4" />Download Template</Button>
+        <label className="flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-slate-300 p-3 hover:border-brand-400">
+          <Upload className="size-5 text-brand-600" /><span className="text-sm">{file?.name ?? 'Choose the filled Excel file'}</span>
+          <input type="file" accept=".xlsx" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) { setFile({ name: f.name, data: await readB64(f) }); setResult(null); } }} />
+        </label>
+        <Button block variant="secondary" disabled={!file} loading={busy} onClick={() => run(true)}>Check File</Button>
+        {result && (
+          <Card className="space-y-2 p-3 text-sm">
+            {result.dryRun ? <div><b>{result.valid}</b> case(s) ready · <b className={result.errors.length ? 'text-rose-700' : ''}>{result.errors.length}</b> problem(s)</div> : <div className="text-emerald-700"><b>{result.imported}</b> case(s) imported.</div>}
+            {!!result.errors.length && <div className="max-h-60 overflow-auto text-xs">{result.errors.map((e, i) => <div key={i}>Row {e.row}: {e.message}</div>)}</div>}
+            {result.dryRun && !!result.errors.length && <p className="text-xs text-slate-500">Correct these rows in the Excel file and check again. Nothing has been saved.</p>}
+          </Card>
+        )}
+        <FormError error={error} />
+      </div>
+    </Sheet>
+  );
+}
+
+/* ---------- Admin settings: case types and appeal periods per court ---------- */
+function SettingsSheet({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data } = useQuery({ queryKey: ['lit', 'settings'], queryFn: () => get<{ caseTypes: string[]; appealDays: Record<string, number>; courts: Meta['courts'] }>('/litigation/settings') });
+  const [types, setTypes] = useState<string | null>(null);
+  const [days, setDays] = useState<Record<string, string> | null>(null);
+  const t = types ?? data?.caseTypes.join('\n') ?? '';
+  const d = days ?? Object.fromEntries(Object.entries(data?.appealDays ?? {}).map(([k, v]) => [k, String(v)]));
+  const save = async () => {
+    await put('/litigation/settings', {
+      caseTypes: t.split('\n').map((x) => x.trim()).filter(Boolean),
+      appealDays: Object.fromEntries(Object.entries(d).filter(([, v]) => v.trim()).map(([k, v]) => [k, Number(v)])),
+    });
+    qc.invalidateQueries({ queryKey: ['lit'] });
+    toast('Litigation settings saved');
+    onClose();
+  };
+  return (
+    <Sheet open onClose={onClose} title="Litigation Settings" footer={<Button block onClick={save}>Save</Button>}>
+      <div className="space-y-4">
+        <Field label="Types of case" hint="One per line">{(id) => <Textarea id={id} rows={8} value={t} onChange={(e) => setTypes(e.target.value)} />}</Field>
+        <div>
+          <div className="mb-1 text-sm font-medium">Appeal period (days) after a decision, by court</div>
+          <p className="mb-2 text-xs text-slate-500">Leave blank where not applicable. Reminders go out 15 and 5 days before the period ends when no appeal decision is recorded.</p>
+          {data?.courts.map((g) => (
+            <div key={g.group} className="mb-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{g.group}</div>
+              {g.items.filter(([k]) => k !== 'other').map(([k, l]) => (
+                <div key={k} className="flex items-center justify-between gap-2 py-0.5 text-sm">
+                  <span>{l}</span>
+                  <Input type="number" min={0} className="w-24" value={d[k] ?? ''} onChange={(e) => setDays({ ...d, [k]: e.target.value })} placeholder="days" />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </Sheet>
   );
 }
 
 /* ---------- New / edit case ---------- */
 interface FormState {
   unitId: string; mouzaName: string; caseType: string; caseTypeOther: string; institutedOn: string; court: string; courtOther?: string; bench: string; courtCaseNo: string;
-  applicants: string[]; respondents: string[]; kanal: string; marla: string; sarsai: string; khasraNos: string; khewat: string; khatauni: string; landSpec: string;
+  applicants: string[]; respondents: string[]; kanal: string; marla: string; sarsai: string; murabba: string; khasraNos: string; khewat: string; khatauni: string; landSpec: string;
   governmentParty: boolean; nextHearing: string; note: string;
 }
 function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void }) {
@@ -168,7 +311,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
     caseType: initial ? (known.includes(initial.caseType) ? initial.caseType : 'Other') : '', caseTypeOther: initial && !known.includes(initial.caseType) ? initial.caseType : '',
     institutedOn: iso(initial?.institutedOn), court: initial?.court ?? '', courtOther: initial?.courtOther, bench: initial?.bench ?? '', courtCaseNo: initial?.courtCaseNo ?? '',
     applicants: initial?.applicants ?? [''], respondents: initial?.respondents ?? [''],
-    kanal: String(initial?.land.kanal ?? ''), marla: String(initial?.land.marla ?? ''), sarsai: String(initial?.land.sarsai ?? ''), khasraNos: (initial?.land.khasraNos ?? []).join(', '),
+    kanal: String(initial?.land.kanal ?? ''), marla: String(initial?.land.marla ?? ''), sarsai: String(initial?.land.sarsai ?? ''), murabba: initial?.land.murabba ?? '', khasraNos: (initial?.land.khasraNos ?? []).join(', '),
     khewat: initial?.land.khewat ?? '', khatauni: initial?.land.khatauni ?? '', landSpec: initial?.landSpec ?? '', governmentParty: initial?.governmentParty ?? false,
     nextHearing: iso(initial?.nextHearing), note: initial?.note ?? '',
   }));
@@ -183,7 +326,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
       ...(initial ? {} : { unitId: f.unitId }),
       caseType: f.caseType === 'Other' ? f.caseTypeOther || 'Other' : f.caseType, institutedOn: f.institutedOn, court: f.court, courtOther: f.courtOther || undefined, bench: f.bench || undefined, courtCaseNo: f.courtCaseNo || undefined,
       applicants: f.applicants.map((x) => x.trim()).filter(Boolean), respondents: f.respondents.map((x) => x.trim()).filter(Boolean),
-      land: { kanal: num(f.kanal), marla: num(f.marla), sarsai: num(f.sarsai), khasraNos: f.khasraNos.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean), khewat: f.khewat || undefined, khatauni: f.khatauni || undefined },
+      land: { kanal: num(f.kanal), marla: num(f.marla), sarsai: num(f.sarsai), murabba: f.murabba || undefined, khasraNos: f.khasraNos.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean), khewat: f.khewat || undefined, khatauni: f.khatauni || undefined },
       landSpec: f.landSpec || undefined, governmentParty: f.governmentParty, nextHearing: f.nextHearing || null, note: f.note || undefined,
     };
     try {
@@ -237,6 +380,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
             </div>
           )}
         </Field>
+        <Field label="Mustateel / Murabba no.">{(id) => <Input id={id} dir="auto" value={f.murabba} onChange={(e) => set('murabba', e.target.value)} placeholder="e.g. 45 (killa 12, 13)" />}</Field>
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Khasra nos." hint="Separate with commas">{(id) => <Input id={id} value={f.khasraNos} onChange={(e) => set('khasraNos', e.target.value)} />}</Field>
           <Field label="Khewat">{(id) => <Input id={id} value={f.khewat} onChange={(e) => set('khewat', e.target.value)} />}</Field>
@@ -292,6 +436,7 @@ export function LitigationCasePage() {
         actions={
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => download(`/litigation/${c._id}/pdf`, `Case ${c.caseId}.pdf`)}><FileText className="size-4" />Case File PDF</Button>
+            {docs.length > 0 && <Button size="sm" variant="secondary" onClick={() => download(`/litigation/${c._id}/zip`, `Case ${c.caseId} documents.zip`)}><Download className="size-4" />Documents ZIP</Button>}
             {canEdit && <Button size="sm" variant="secondary" onClick={() => setSheet('edit')}>Edit</Button>}
             {caps.isAdmin && <Button size="sm" variant="ghost" className="text-rose-600" onClick={removeCase}><Trash2 className="size-4" /></Button>}
           </div>
@@ -321,6 +466,7 @@ export function LitigationCasePage() {
             {row('Applicant(s)', c.applicants.join('; '))}
             {row('Respondent(s)', c.respondents.join('; '))}
             {row('Land measuring', [l.kanal ? `${l.kanal} K` : '', l.marla ? `${l.marla} M` : '', l.sarsai ? `${l.sarsai} S` : ''].filter(Boolean).join(' – '))}
+            {row('Mustateel / Murabba', l.murabba)}
             {row('Khasra / Khewat / Khatauni', [l.khasraNos.join(', '), l.khewat, l.khatauni].filter(Boolean).join(' · '))}
             {row('Land specification', c.landSpec)}
             {row('Government a party', c.governmentParty ? 'Yes' : 'No')}

@@ -655,7 +655,7 @@ const litigationCaseSchema = new Schema(
     courtCaseNo: { type: String, maxlength: 100 },
     applicants: { type: [String], default: [] },
     respondents: { type: [String], default: [] },
-    land: { kanal: Number, marla: Number, sarsai: Number, khasraNos: { type: [String], default: [] }, khewat: String, khatauni: String },
+    land: { kanal: Number, marla: Number, sarsai: Number, murabba: String, khasraNos: { type: [String], default: [] }, khewat: String, khatauni: String },
     landSpec: { type: String, maxlength: 1000 },
     governmentParty: { type: Boolean, default: false },
     hearings: [hearingSchema],

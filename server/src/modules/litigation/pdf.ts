@@ -1,9 +1,59 @@
 /** PDF helpers for litigation: photos → one PDF document, and the structured case file. */
+import fontkit from '@pdf-lib/fontkit';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { shapeUrdu } from './urdu.js';
 
 const A4: [number, number] = [595.28, 841.89];
-/** Standard PDF fonts only cover Latin-1; replace anything else (e.g. Urdu) so the file still builds. */
-const latin = (s: unknown) => String(s ?? '').replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '?');
+/** Amiri (SIL OFL) for Urdu text; Latin text keeps the standard Helvetica. */
+const FONT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../assets/fonts');
+let fontCache: { regular: Buffer; bold: Buffer } | null = null;
+const fontBytes = () => (fontCache ??= { regular: readFileSync(resolve(FONT_DIR, 'Amiri-Regular.ttf')), bold: readFileSync(resolve(FONT_DIR, 'Amiri-Bold.ttf')) });
+/** Text is pre-shaped, so the font's own substitutions and kerning are switched off (they misplace glyphs in PDF). */
+const NO_FEATURES = { liga: false, clig: false, dlig: false, calt: false, kern: false, rlig: false, init: false, medi: false, fina: false, isol: false, ccmp: false, mark: false, mkmk: false, curs: false };
+const latin = (s: unknown) => String(s ?? '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+const ARABIC = '؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿';
+const RTL = new RegExp(`[${ARABIC}]`);
+const FIRST_STRONG = new RegExp(`[A-Za-z${ARABIC}]`);
+const RUNS = new RegExp(`[${ARABIC}][${ARABIC}\\s]*|[^${ARABIC}]+`, 'g');
+
+/**
+ * Draw one line. Lines containing Urdu are right-to-left: Urdu runs and Latin / number runs are placed
+ * from the right edge in reading order, each run shaped by the font.
+ */
+/** Width of mixed Latin / Urdu text. */
+const measure = (text: string, size: number, latinFont: PDFFont, urdu: PDFFont) =>
+  (text.match(RUNS) ?? [text]).reduce((s, r) => s + (RTL.test(r) ? urdu.widthOfTextAtSize(shapeUrdu(r), size) : latinFont.widthOfTextAtSize(r.replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '?'), size)), 0);
+
+/** Latin text uses the standard font (o.font); Urdu runs use the Urdu font (o.urdu), shaped and laid out right-to-left. */
+function drawLine(page: PDFPage, text: string, o: { x: number; y: number; size: number; font: PDFFont; urdu?: PDFFont; width?: number; color?: [number, number, number] }) {
+  const color = rgb(...(o.color ?? [0.1, 0.1, 0.1]));
+  const safe = (s: string) => s.replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF–—‘’“”•…·]/g, '?');
+  if (!RTL.test(text) || !o.urdu) {
+    page.drawText(safe(text), { x: o.x, y: o.y, size: o.size, font: o.font, color });
+    return;
+  }
+  const urdu = o.urdu;
+  const runs = (text.match(RUNS) ?? [text]).map((r) => (RTL.test(r) ? { t: shapeUrdu(r.trim()), f: urdu, pad: true } : { t: safe(r), f: o.font, pad: false }));
+  const w = (r: (typeof runs)[number]) => r.f.widthOfTextAtSize(r.t, o.size) + (r.pad ? o.font.widthOfTextAtSize(' ', o.size) : 0);
+  const rtl = RTL.test(text.match(FIRST_STRONG)?.[0] ?? '');
+  if (rtl) {
+    // Right-to-left line: runs placed from the right edge in reading order
+    let cursor = o.x + (o.width ?? A4[0] - o.x - 50);
+    for (const r of runs) {
+      cursor -= w(r);
+      page.drawText(r.t, { x: cursor, y: o.y, size: o.size, font: r.f, color });
+    }
+  } else {
+    let cursor = o.x;
+    for (const r of runs) {
+      page.drawText(r.t, { x: cursor, y: o.y, size: o.size, font: r.f, color });
+      cursor += w(r);
+    }
+  }
+}
 
 /** Several page photos (JPEG / PNG) → one A4 PDF, one photo per page, scaled to fit. */
 export async function imagesToPdf(images: { data: Buffer; mime: string }[]) {
@@ -26,7 +76,7 @@ export const pdfPages = async (data: Buffer) => (await PDFDocument.load(data, { 
 class Writer {
   page!: PDFPage;
   y = 0;
-  constructor(public pdf: PDFDocument, public font: PDFFont, public bold: PDFFont) { this.newPage(); }
+  constructor(public pdf: PDFDocument, public font: PDFFont, public bold: PDFFont, public urdu: PDFFont, public urduBold: PDFFont) { this.newPage(); }
   newPage() { this.page = this.pdf.addPage(A4); this.y = A4[1] - 50; }
   ensure(h: number) { if (this.y - h < 50) this.newPage(); }
   text(t: string, o: { size?: number; bold?: boolean; color?: [number, number, number]; x?: number; width?: number } = {}) {
@@ -39,13 +89,13 @@ class Writer {
       const lines: string[] = [];
       for (const w of para.split(' ')) {
         const test = line ? `${line} ${w}` : w;
-        if (f.widthOfTextAtSize(test, size) > width && line) { lines.push(line); line = w; } else line = test;
+        if (measure(test, size, f, o.bold ? this.urduBold : this.urdu) > width && line) { lines.push(line); line = w; } else line = test;
       }
       lines.push(line);
       for (const l of lines) {
-        this.ensure(size + 4);
-        this.page.drawText(l, { x, y: this.y, size, font: f, color: rgb(...(o.color ?? [0.1, 0.1, 0.1])) });
-        this.y -= size + 4;
+        this.ensure(size + 5);
+        drawLine(this.page, l, { x, y: this.y, size, font: f, urdu: o.bold ? this.urduBold : this.urdu, width, color: o.color });
+        this.y -= size + 5;
       }
     }
   }
@@ -54,7 +104,7 @@ class Writer {
   pair(k: string, v: string) {
     const before = this.y;
     this.ensure(14);
-    this.page.drawText(latin(k), { x: 50, y: this.y, size: 9.5, font: this.bold, color: rgb(0.3, 0.3, 0.3) });
+    drawLine(this.page, latin(k), { x: 50, y: this.y, size: 9.5, font: this.bold, urdu: this.urduBold, color: [0.3, 0.3, 0.3] });
     const y0 = this.y;
     this.text(v || '—', { x: 200, size: 9.5 });
     if (this.y === y0) this.y -= 13;
@@ -78,11 +128,15 @@ export const CATEGORY_ORDER: [string, string][] = [
 export async function caseFilePdf(c: any, ctx: { mouza?: string; tehsil?: string; courtName: (code: string, other?: string) => string }, docs: { category: string; title?: string; docDate?: Date; data: Buffer }[]) {
   const pdf = await PDFDocument.create();
   pdf.setTitle(`Case file ${c.caseId}`);
+  pdf.registerFontkit(fontkit);
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const w = new Writer(pdf, font, bold);
+  const urdu = await pdf.embedFont(fontBytes().regular, { subset: false, features: NO_FEATURES });
+  const urduBold = await pdf.embedFont(fontBytes().bold, { subset: false, features: NO_FEATURES });
+  const w = new Writer(pdf, font, bold, urdu, urduBold);
 
   w.text('LITIGATION CASE FILE', { size: 9, bold: true, color: [0.09, 0.48, 0.26] });
+  w.gap(6);
   w.text(c.caseId, { size: 20, bold: true });
   w.text(`${c.status === 'decided' ? 'DECIDED' : 'PENDING (SUB JUDICE)'}${c.stage > 1 ? ` · Stage ${c.stage}` : ''}`, { size: 10, bold: true, color: c.status === 'decided' ? [0.1, 0.45, 0.2] : [0.7, 0.4, 0] });
   w.gap(6);
@@ -96,6 +150,7 @@ export async function caseFilePdf(c: any, ctx: { mouza?: string; tehsil?: string
   w.pair('Respondent(s)', (c.respondents ?? []).join('; '));
   const l = c.land ?? {};
   w.pair('Land measuring', [l.kanal ? `${l.kanal} Kanal` : '', l.marla ? `${l.marla} Marla` : '', l.sarsai ? `${l.sarsai} Sarsai` : ''].filter(Boolean).join(' ') || '—');
+  w.pair('Mustateel / Murabba', l.murabba ?? '');
   w.pair('Khasra / Khewat / Khatauni', [(l.khasraNos ?? []).join(', '), l.khewat, l.khatauni].filter(Boolean).join(' · '));
   w.pair('Land specification', c.landSpec ?? '');
   w.pair('Last hearing', fmt(c.lastHearing));
@@ -137,9 +192,9 @@ export async function caseFilePdf(c: any, ctx: { mouza?: string; tehsil?: string
     const list = docs.filter((d) => d.category === cat);
     if (!list.length) continue;
     const div = pdf.addPage(A4);
-    div.drawText(latin(label), { x: 50, y: A4[1] / 2 + 20, size: 22, font: bold, color: rgb(0.09, 0.48, 0.26) });
-    div.drawText(latin(`${c.caseId} · ${list.length} document(s)`), { x: 50, y: A4[1] / 2 - 6, size: 11, font });
-    list.forEach((d, i) => div.drawText(latin(`${i + 1}. ${d.title ?? label}${d.docDate ? ` (${fmt(d.docDate)})` : ''}`), { x: 50, y: A4[1] / 2 - 32 - i * 15, size: 10, font }));
+    drawLine(div, latin(label), { x: 50, y: A4[1] / 2 + 20, size: 22, font: bold, urdu: urduBold, color: [0.09, 0.48, 0.26] });
+    drawLine(div, latin(`${c.caseId} · ${list.length} document(s)`), { x: 50, y: A4[1] / 2 - 6, size: 11, font, urdu });
+    list.forEach((d, i) => drawLine(div, latin(`${i + 1}. ${d.title ?? label}${d.docDate ? ` (${fmt(d.docDate)})` : ''}`), { x: 50, y: A4[1] / 2 - 32 - i * 15, size: 10, font, urdu }));
     for (const d of list) {
       try {
         const src = await PDFDocument.load(d.data, { ignoreEncryption: true });
@@ -147,7 +202,7 @@ export async function caseFilePdf(c: any, ctx: { mouza?: string; tehsil?: string
         pages.forEach((p) => pdf.addPage(p));
       } catch {
         const p = pdf.addPage(A4);
-        p.drawText(latin(`[${d.title ?? label}: could not be included — download it separately]`), { x: 50, y: A4[1] / 2, size: 11, font });
+        drawLine(p, latin(`[${d.title ?? label}: could not be included — download it separately]`), { x: 50, y: A4[1] / 2, size: 11, font, urdu });
       }
     }
   }

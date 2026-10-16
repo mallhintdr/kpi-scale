@@ -62,6 +62,33 @@ const x = await call(tsd, 'GET', '/litigation/export/xlsx');
 const wb = new ExcelJS.Workbook(); await wb.xlsx.load(x.b);
 check(wb.worksheets[0].getRow(1).values.includes('Case ID') && wb.worksheets[0].rowCount >= 3, 'the list exports to Excel');
 
+console.log('Phase 2');
+const urduCase = await call(p1, 'POST', '/litigation', { ...body, courtCaseNo: 'CS-T-URDU', applicants: ['محمد اسلم ولد غلام رسول'], respondents: ['حکومت پنجاب'], land: { kanal: 2, murabba: 'مربع نمبر 45', khasraNos: ['7'] }, nextHearing: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10) });
+check(urduCase.s === 201 && urduCase.b.land.murabba === 'مربع نمبر 45', 'Mustateel / Murabba is saved');
+const upd = await call(tsd, 'GET', `/litigation/${urduCase.b._id}/pdf`);
+check(upd.s === 200 && (await PDFDocument.load(upd.b)).getPageCount() >= 1, 'a case file with Urdu names builds as a PDF');
+const cl = (await call(tsd, 'GET', '/litigation/causelist')).b;
+check(cl.items.some((x) => x._id === urduCase.b._id), 'the cause list shows tomorrow\'s hearing');
+const zip = await call(tsd, 'GET', `/litigation/${id}/zip`);
+check(zip.s === 200 && zip.b.subarray(0, 2).toString() === 'PK', 'documents download as a ZIP');
+const rem = (await call(adm, 'POST', '/litigation/reminders/run')).b;
+check(rem.hearings >= 1 && rem.sent >= 1, `reminders sent for hearings today / tomorrow (${rem.sent} message(s))`);
+check((await call(adm, 'PUT', '/litigation/settings', { appealDays: { civil_court: 30 } })).b.appealDays.civil_court === 30, 'admin sets the appeal period for a court');
+const tpl = await call(p1, 'GET', '/litigation/import/template');
+const twb = new ExcelJS.Workbook(); await twb.xlsx.load(tpl.b);
+const sheet = twb.worksheets[0];
+const mz = mouzas[0].name.replace(/^Mouza\s+/i, '').replace(/\s*\(test\)$/, '');
+sheet.getRow(2).values = ['Hasilpur', mz, 'Partition', '2024-05-10', 'Civil Court', 'CS-T-IMP1', 'Ali Ahmad; Bashir', 'Province of Punjab', 4, 10, '', '45', '45/2', 'State land', '', '2026-12-01', '', 'Arguments', 'Pending'];
+sheet.getRow(3).values = ['Hasilpur', 'No Such Mouza', 'Partition', '2024-05-10', 'Civil Court', 'CS-T-IMP2', 'X', 'Y'];
+const bad = Buffer.from(await twb.xlsx.writeBuffer()).toString('base64');
+const dry = (await call(p1, 'POST', '/litigation/import', { file: bad, dryRun: true })).b;
+check(dry.valid === 1 && dry.errors.length === 1 && dry.errors[0].row === 3, `import check: 1 valid, 1 problem ("${dry.errors[0]?.message}")`);
+sheet.spliceRows(3, 1);
+const good = Buffer.from(await twb.xlsx.writeBuffer()).toString('base64');
+const imp = (await call(p1, 'POST', '/litigation/import', { file: good, dryRun: false })).b;
+check(imp.imported === 1, 'the corrected file imports 1 case with an automatic ID');
+await call(adm, 'PUT', '/litigation/settings', { appealDays: {} });
+
 // Clean up: remove test cases completely
 for (const cid of [id, second.b._id]) await call(adm, 'DELETE', `/litigation/${cid}`);
 console.log(`\n${ok} checks passed`);

@@ -33,11 +33,11 @@ export const COURTS: { group: string; items: [string, string][] }[] = [
   { group: 'Other', items: [['ombudsman', 'Ombudsman'], ['other', 'Other']] },
 ];
 const COURT_LABEL = new Map(COURTS.flatMap((g) => g.items));
-const courtName = (code?: string | null, other?: string | null) => (code === 'other' ? other || 'Other' : COURT_LABEL.get(code ?? '') ?? code ?? '');
+export const courtName = (code?: string | null, other?: string | null) => (code === 'other' ? other || 'Other' : COURT_LABEL.get(code ?? '') ?? code ?? '');
 const DEFAULT_TYPES = ['Partition', 'Correction of record (Fard Badar)', 'Mutation / review of mutation', 'Demarcation', 'Possession / ejectment', 'Declaration', 'Injunction', 'Encroachment / state land', 'Colony / allotment', 'Consolidation', 'Inheritance', 'Lease', 'Writ petition', 'Revision', 'Review', 'Appeal', 'Execution', 'Contempt', 'Other'];
 const CATS = CATEGORY_ORDER.map((c) => c[0]) as [string, ...string[]];
 
-async function settings(tenantId: string) {
+export async function settings(tenantId: string) {
   const t = await Tenant.findById(tenantId).select('litigation').lean();
   const l: any = t?.litigation ?? {};
   return { caseTypes: (l.caseTypes?.length ? l.caseTypes : DEFAULT_TYPES) as string[], appealDays: (l.appealDays ?? {}) as Record<string, number> };
@@ -54,7 +54,7 @@ function abbreviate(name: string, type: 'tehsil' | 'mouza') {
   return (w[0] + w.slice(1).replace(/[AEIOU]/g, '')).slice(0, 3).padEnd(3, w[1] ?? 'X');
 }
 /** The unit's own code if set, otherwise a generated abbreviation saved on the unit (kept unique per level). */
-async function codeOf(unit: { _id: Types.ObjectId; name: string; type: string; code?: string | null }, kind: 'tehsil' | 'mouza') {
+export async function codeOf(unit: { _id: Types.ObjectId; name: string; type: string; code?: string | null }, kind: 'tehsil' | 'mouza') {
   const own = (unit.code ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   if (own.length >= 2) return own; // a one-letter code is too vague for a case ID
   if (own) return abbreviate(unit.name, kind);
@@ -66,12 +66,12 @@ async function codeOf(unit: { _id: Types.ObjectId; name: string; type: string; c
 }
 
 /* ---------- access ---------- */
-const canEnterOn = (me: AuthUser, bp: BP, unit: { anc: Types.ObjectId[] }) => (isAdmin(me) ? Promise.resolve(true) : hasCap(me, bp, 'litigation', unit));
-async function scopeFilter(me: AuthUser, bp: BP) {
+export const canEnterOn = (me: AuthUser, bp: BP, unit: { anc: Types.ObjectId[] }) => (isAdmin(me) ? Promise.resolve(true) : hasCap(me, bp, 'litigation', unit));
+export async function scopeFilter(me: AuthUser, bp: BP) {
   if (isAdmin(me)) return {};
   return { anc: { $in: await scopeRoots(me, bp) } };
 }
-async function loadCase(me: AuthUser, bp: BP, id: string) {
+export async function loadCase(me: AuthUser, bp: BP, id: string) {
   const c = await LitigationCase.findOne({ _id: id, deleted: { $ne: true } });
   if (!c) throw notFound('Case');
   if (!isAdmin(me)) {
@@ -144,7 +144,7 @@ async function listFilter(me: AuthUser, bp: BP, f: z.infer<typeof listQuery>) {
   if (f.hearingFrom || f.hearingTo) filter.nextHearing = { ...(f.hearingFrom ? { $gte: new Date(f.hearingFrom) } : {}), ...(f.hearingTo ? { $lte: new Date(`${f.hearingTo}T23:59:59`) } : {}) };
   if (f.search) {
     const rx = new RegExp(f.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    filter.$or = [{ caseId: rx }, { applicants: rx }, { respondents: rx }, { courtCaseNo: rx }, { 'land.khasraNos': rx }];
+    filter.$or = [{ caseId: rx }, { applicants: rx }, { respondents: rx }, { courtCaseNo: rx }, { 'land.khasraNos': rx }, { 'land.murabba': rx }];
   }
   return filter;
 }
@@ -194,13 +194,13 @@ const caseBody = z.object({
   courtCaseNo: z.string().trim().max(100).optional(),
   applicants: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
   respondents: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
-  land: z.object({ kanal: z.number().min(0).max(1e7).optional(), marla: z.number().min(0).max(1e7).optional(), sarsai: z.number().min(0).max(1e7).optional(), khasraNos: z.array(z.string().trim().max(40)).max(200).default([]), khewat: z.string().max(60).optional(), khatauni: z.string().max(60).optional() }).default({ khasraNos: [] }),
+  land: z.object({ kanal: z.number().min(0).max(1e7).optional(), marla: z.number().min(0).max(1e7).optional(), sarsai: z.number().min(0).max(1e7).optional(), murabba: z.string().trim().max(120).optional(), khasraNos: z.array(z.string().trim().max(40)).max(200).default([]), khewat: z.string().max(60).optional(), khatauni: z.string().max(60).optional() }).default({ khasraNos: [] }),
   landSpec: z.string().trim().max(1000).optional(),
   governmentParty: z.boolean().default(false),
   nextHearing: z.coerce.date().nullish(),
   note: z.string().trim().max(3000).optional(),
 });
-const checkCourt = (court: string, other?: string) => {
+export const checkCourt = (court: string, other?: string) => {
   if (!COURT_LABEL.has(court)) throw badRequest('Choose a court from the list');
   if (court === 'other' && !other) throw badRequest('Write the name of the court');
 };
@@ -440,12 +440,12 @@ router.get('/export/xlsx', validate({ query: listQuery }), async (req, res) => {
   const rows = await LitigationCase.find(filter).populate('unitId', 'name').populate('tehsilId', 'name').sort({ caseId: 1 }).limit(20000).lean();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Litigation');
-  const head = ['S.No', 'Case ID', 'Tehsil', 'Mouza', 'Type of Case', 'Date of Institution', 'Court', 'Court Case No.', 'Applicant(s)', 'Respondent(s)', 'Kanal', 'Marla', 'Sarsai', 'Khasra Nos.', 'Land Specification', 'Last Hearing', 'Next Hearing', 'Proceedings (Last Date)', 'To Be Done (Next Date)', 'Status', 'Date of Decision', 'Appeal', 'Appellate Court', 'Reason Appeal Not Filed', 'Note'];
+  const head = ['S.No', 'Case ID', 'Tehsil', 'Mouza', 'Type of Case', 'Date of Institution', 'Court', 'Court Case No.', 'Applicant(s)', 'Respondent(s)', 'Kanal', 'Marla', 'Sarsai', 'Mustateel / Murabba', 'Khasra Nos.', 'Land Specification', 'Last Hearing', 'Next Hearing', 'Proceedings (Last Date)', 'To Be Done (Next Date)', 'Status', 'Date of Decision', 'Appeal', 'Appellate Court', 'Reason Appeal Not Filed', 'Note'];
   const h = ws.addRow(head);
   h.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   h.eachCell((cl) => { cl.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF187A43' } }; });
   const d = (x?: Date | null) => (x ? new Date(x) : '');
-  rows.forEach((c: any, i) => ws.addRow([i + 1, c.caseId, c.tehsilId?.name, c.unitId?.name, c.caseType, d(c.institutedOn), courtName(c.court, c.courtOther), c.courtCaseNo, c.applicants.join('; '), c.respondents.join('; '), c.land?.kanal, c.land?.marla, c.land?.sarsai, (c.land?.khasraNos ?? []).join(', '), c.landSpec, d(c.lastHearing), d(c.nextHearing), c.lastProceedings, c.nextAction, c.status === 'decided' ? 'Decided' : 'Pending', d(c.decision?.date), c.appeal?.filed === 'yes' ? 'Filed' : c.appeal?.filed === 'no' ? 'Not filed' : '', c.appeal?.filed === 'yes' ? courtName(c.appeal.court, c.appeal.courtOther) : '', c.appeal?.reasonNotFiled, c.note]));
+  rows.forEach((c: any, i) => ws.addRow([i + 1, c.caseId, c.tehsilId?.name, c.unitId?.name, c.caseType, d(c.institutedOn), courtName(c.court, c.courtOther), c.courtCaseNo, c.applicants.join('; '), c.respondents.join('; '), c.land?.kanal, c.land?.marla, c.land?.sarsai, c.land?.murabba, (c.land?.khasraNos ?? []).join(', '), c.landSpec, d(c.lastHearing), d(c.nextHearing), c.lastProceedings, c.nextAction, c.status === 'decided' ? 'Decided' : 'Pending', d(c.decision?.date), c.appeal?.filed === 'yes' ? 'Filed' : c.appeal?.filed === 'no' ? 'Not filed' : '', c.appeal?.filed === 'yes' ? courtName(c.appeal.court, c.appeal.courtOther) : '', c.appeal?.reasonNotFiled, c.note]));
   ws.columns.forEach((col) => { col.width = 16; });
   ws.views = [{ state: 'frozen', ySplit: 1 }];
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
