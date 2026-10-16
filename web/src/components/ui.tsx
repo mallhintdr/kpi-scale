@@ -219,7 +219,11 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
 }
 
 /* ---------- Sheet: bottom sheet on mobile, centred dialog on desktop ---------- */
-export function Sheet({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode }) {
+/** `tone="form"`: data-entry dialog — green title bar, wider, compact fields with darker outlines. */
+const formBody =
+  'space-y-3 pt-3 [&_input:not([type=checkbox]):not([type=file])]:h-9 [&_select]:h-9 [&_input]:rounded-lg [&_select]:rounded-lg [&_textarea]:rounded-lg [&_textarea]:min-h-16 [&_textarea]:py-1.5 [&_input]:px-2.5 [&_textarea]:px-2.5 [&_input]:text-sm [&_select]:text-sm [&_textarea]:text-sm [&_input]:ring-slate-400 [&_select]:ring-slate-400 [&_textarea]:ring-slate-400 dark:[&_input]:ring-slate-500 dark:[&_select]:ring-slate-500 dark:[&_textarea]:ring-slate-500 [&_label]:text-[13px] [&_label]:font-semibold';
+export function Sheet({ open, onClose, title, children, footer, tone }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; tone?: 'form' }) {
+  const form = tone === 'form';
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -235,13 +239,13 @@ export function Sheet({ open, onClose, title, children, footer }: { open: boolea
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label={titleCase(title)}>
       <div className="animate-fade absolute inset-0 bg-slate-950/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="animate-sheet relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-white shadow-2xl sm:max-w-lg sm:rounded-3xl dark:bg-slate-900">
-        <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-slate-200 sm:hidden dark:bg-slate-700" />
-        <div className="flex items-center justify-between px-5 pb-2 pt-3">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <IconButton label="Close" onClick={onClose} className="-mr-2"><X className="size-5" /></IconButton>
+      <div className={clsx('animate-sheet relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl dark:bg-slate-900', form ? 'sm:max-w-2xl sm:rounded-2xl' : 'sm:max-w-lg')}>
+        {!form && <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-slate-200 sm:hidden dark:bg-slate-700" />}
+        <div className={clsx('flex items-center justify-between', form ? 'bg-brand-700 px-4 py-2.5 text-white' : 'px-5 pb-2 pt-3')}>
+          <h2 className={clsx('font-semibold', form ? 'text-base' : 'text-lg')}>{title}</h2>
+          <IconButton label="Close" onClick={onClose} className={clsx('-mr-2', form && 'text-white hover:bg-white/15 hover:text-white')}><X className="size-5" /></IconButton>
         </div>
-        <div className="flex-1 space-y-4 overflow-y-auto px-5 pb-4">{children}</div>
+        <div className={clsx('flex-1 overflow-y-auto pb-4', form ? clsx('px-4', formBody) : 'space-y-4 px-5')}>{children}</div>
         {footer && <div className="pb-safe border-t border-slate-100 px-5 pt-3 dark:border-slate-800"><div className="pb-3">{footer}</div></div>}
       </div>
     </div>,

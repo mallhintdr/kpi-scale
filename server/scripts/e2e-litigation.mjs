@@ -90,6 +90,8 @@ check(imp.imported === 1, 'the corrected file imports 1 case with an automatic I
 await call(adm, 'PUT', '/litigation/settings', { appealDays: {} });
 
 console.log('Phase 3');
+const sg = (await call(p1, 'GET', '/litigation/suggest')).b;
+check(sg.respondents.includes('Province of Punjab through Collector') && sg.caseType.includes('Encroachment / state land'), 'earlier entries are offered as suggestions (parties, case types)');
 await call(p1, 'PATCH', `/litigation/${second.b._id}`, { nextHearing: null });
 const st = (await call(tsd, 'GET', '/litigation/stats')).b;
 check(st.byCourt.some((g) => g.label && g.total >= 1) && st.byType.length && st.byTehsil.some((t) => t.label === 'Hasilpur'), 'monitoring groups cases by court, type and tehsil');

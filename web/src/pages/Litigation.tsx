@@ -36,19 +36,82 @@ const StatusBadge = ({ s }: { s: string }) => <Badge tone={s === 'decided' ? 'bg
 function CourtSelect({ meta, value, other, onChange, id }: { meta?: Meta; value: string; other?: string; onChange: (court: string, other?: string) => void; id?: string }) {
   return (
     <div className="space-y-1.5">
-      <Select id={id} value={value} onChange={(e) => onChange(e.target.value, other)}>
-        <option value="">Choose court…</option>
-        {meta?.courts.map((g) => <optgroup key={g.group} label={g.group}>{g.items.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</optgroup>)}
-      </Select>
+      <AutoInput id={id} strict options={courtOpts(meta)} value={value} onChange={(v) => onChange(v, other)} placeholder="Type to search courts…" />
       {value === 'other' && <Input placeholder="Name of the court" value={other ?? ''} onChange={(e) => onChange(value, e.target.value)} />}
     </div>
   );
 }
 
-/** Names entered one per line (several applicants / respondents). */
-const Names = ({ value, onChange, id, placeholder }: { value: string[]; onChange: (v: string[]) => void; id?: string; placeholder?: string }) => (
-  <Textarea id={id} rows={2} dir="auto" placeholder={placeholder} value={value.join('\n')} onChange={(e) => onChange(e.target.value.split('\n'))} />
-);
+/** Entry dialogs share the green-titled compact form style. */
+const LSheet = (p: Parameters<typeof Sheet>[0]) => <Sheet {...p} tone="form" />;
+
+/** Values already used in this jurisdiction (types, benches, parties…), for suggestions while typing. */
+type Suggest = Record<string, string[]>;
+const useSuggest = () => useQuery({ queryKey: ['lit', 'suggest'], queryFn: () => get<Suggest>('/litigation/suggest'), staleTime: 120_000 });
+
+interface Opt { value: string; label: string; hint?: string }
+/**
+ * Text box that suggests matching items as the user types.
+ * Free mode: whatever is typed is the value (suggestions only help keep entries uniform).
+ * `strict`: the value must be picked from the list (court, mouza).
+ */
+function AutoInput({ id, options, value, onChange, strict, placeholder, onQuery, required, dir }: {
+  id?: string; options: (Opt | string)[]; value: string; onChange: (v: string) => void; strict?: boolean; placeholder?: string; onQuery?: (q: string) => void; required?: boolean; dir?: string;
+}) {
+  const opts = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
+  const labelOf = (v: string) => opts.find((o) => o.value === v)?.label ?? v;
+  const [text, setText] = useState(strict ? labelOf(value) : value);
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  useEffect(() => { if (!open) setText(strict ? labelOf(value) : value); }, [value, open, options.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const q = text.trim().toLowerCase();
+  const matches = (q && !(strict && labelOf(value) === text) ? opts.filter((o) => o.label.toLowerCase().includes(q)).sort((a, b) => +!a.label.toLowerCase().startsWith(q) - +!b.label.toLowerCase().startsWith(q)) : opts).filter((o) => strict || o.label !== text).slice(0, 12);
+  const pick = (o: Opt) => { onChange(o.value); setText(o.label); setOpen(false); };
+  return (
+    <div className="relative">
+      <Input id={id} dir={dir} autoComplete="off" required={required} placeholder={placeholder} value={text}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => { setOpen(false); if (strict && labelOf(value) !== text) setText(labelOf(value)); }, 150)}
+        onChange={(e) => { setText(e.target.value); setOpen(true); setHi(0); onQuery?.(e.target.value); if (!strict) onChange(e.target.value); }}
+        onKeyDown={(e) => {
+          if (!open || !matches.length) return;
+          if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(h + 1, matches.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+          else if (e.key === 'Enter' && (strict || q)) { e.preventDefault(); pick(matches[hi]); }
+          else if (e.key === 'Escape') setOpen(false);
+        }} />
+      {open && matches.length > 0 && (
+        <div className="absolute z-20 mt-1 max-h-56 w-max min-w-full max-w-[min(26rem,90vw)] overflow-y-auto rounded-lg bg-white py-1 text-sm shadow-lg ring-1 ring-slate-300 dark:bg-slate-900 dark:ring-slate-600">
+          {matches.map((o, i) => (
+            <button type="button" key={o.value + i} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(o)} onMouseEnter={() => setHi(i)}
+              className={clsx('flex w-full justify-between gap-2 px-2.5 py-1.5 text-left', i === hi && 'bg-brand-50 dark:bg-brand-900/40')} dir="auto">
+              <span>{o.label}</span>{o.hint && <span className="shrink-0 whitespace-nowrap text-xs text-slate-500">{o.hint}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Several applicants / respondents: one box each, with suggestions from earlier cases. */
+const Names = ({ value, onChange, id, suggestions }: { value: string[]; onChange: (v: string[]) => void; id?: string; suggestions: string[] }) => {
+  const rows = value.length ? value : [''];
+  return (
+    <div className="space-y-1.5">
+      {rows.map((v, i) => (
+        <div key={i} className="flex gap-1.5">
+          <div className="flex-1"><AutoInput id={i === 0 ? id : undefined} dir="auto" options={suggestions} value={v} onChange={(x) => onChange(rows.map((r, j) => (j === i ? x : r)))} placeholder={i ? 'Another name' : 'Name, s/o or d/o…'} /></div>
+          {rows.length > 1 && <Button type="button" size="sm" variant="ghost" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label="Remove"><X className="size-4" /></Button>}
+        </div>
+      ))}
+      <button type="button" className="text-xs font-semibold text-brand-700 hover:underline" onClick={() => onChange([...rows, ''])}>+ Add another</button>
+    </div>
+  );
+};
+
+/** Court picker: type to search the court list (strict), plus a name when "Other". */
+const courtOpts = (m?: Meta): Opt[] => m?.courts.flatMap((g) => g.items.map(([k, l]) => ({ value: k, label: l, hint: g.group }))) ?? [];
 
 /* ================================================================== *
  *  Register
@@ -291,7 +354,7 @@ function Monitoring() {
     </div>
   );
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="grid gap-4 lg:grid-cols-3">
         <GroupTable title="By Court" rows={data.byCourt} />
         <GroupTable title="By Case Type" rows={data.byType} />
@@ -325,8 +388,8 @@ function ImportSheet({ onClose }: { onClose: () => void }) {
   };
   const ready = result?.dryRun && !result.errors.length && result.valid > 0;
   return (
-    <Sheet open onClose={onClose} title="Import Cases from Excel" footer={<Button block disabled={!ready} loading={busy} onClick={() => run(false)}><Upload className="size-4" />Import {result?.valid ?? ''} Case(s)</Button>}>
-      <div className="space-y-4">
+    <LSheet open onClose={onClose} title="Import Cases from Excel" footer={<Button block disabled={!ready} loading={busy} onClick={() => run(false)}><Upload className="size-4" />Import {result?.valid ?? ''} Case(s)</Button>}>
+      <div className="space-y-3">
         <p className="text-sm text-slate-600 dark:text-slate-300">Fill the template with your existing litigation register (one case per row), then check it. Case IDs are given automatically.</p>
         <Button variant="secondary" onClick={() => download('/litigation/import/template', 'litigation-import-template.xlsx')}><Download className="size-4" />Download Template</Button>
         <label className="flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-slate-300 p-3 hover:border-brand-400">
@@ -343,7 +406,7 @@ function ImportSheet({ onClose }: { onClose: () => void }) {
         )}
         <FormError error={error} />
       </div>
-    </Sheet>
+    </LSheet>
   );
 }
 
@@ -366,8 +429,8 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
     onClose();
   };
   return (
-    <Sheet open onClose={onClose} title="Litigation Settings" footer={<Button block onClick={save}>Save</Button>}>
-      <div className="space-y-4">
+    <LSheet open onClose={onClose} title="Litigation Settings" footer={<Button block onClick={save}>Save</Button>}>
+      <div className="space-y-3">
         <Field label="Types of case" hint="One per line">{(id) => <Textarea id={id} rows={8} value={t} onChange={(e) => setTypes(e.target.value)} />}</Field>
         <div>
           <div className="mb-1 text-sm font-medium">Appeal period (days) after a decision, by court</div>
@@ -385,7 +448,7 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
           ))}
         </div>
       </div>
-    </Sheet>
+    </LSheet>
   );
 }
 
@@ -404,9 +467,10 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
   const mterm = useDeferredValue(mq);
   const mouzas = useQuery({ queryKey: ['lit', 'mouzas', mterm], queryFn: () => get<{ _id: string; name: string; tehsil?: string }[]>(`/litigation/mouzas?search=${encodeURIComponent(mterm)}`), enabled: !initial });
   const known = meta.data?.caseTypes ?? [];
+  const sug = useSuggest().data;
   const [f, setF] = useState<FormState>(() => ({
     unitId: initial?.unitId._id ?? '', mouzaName: initial?.unitId.name ?? '',
-    caseType: initial ? (known.includes(initial.caseType) ? initial.caseType : 'Other') : '', caseTypeOther: initial && !known.includes(initial.caseType) ? initial.caseType : '',
+    caseType: initial?.caseType ?? '', caseTypeOther: '',
     institutedOn: iso(initial?.institutedOn), court: initial?.court ?? '', courtOther: initial?.courtOther, bench: initial?.bench ?? '', courtCaseNo: initial?.courtCaseNo ?? '',
     applicants: initial?.applicants ?? [''], respondents: initial?.respondents ?? [''],
     kanal: String(initial?.land.kanal ?? ''), marla: String(initial?.land.marla ?? ''), sarsai: String(initial?.land.sarsai ?? ''), murabba: initial?.land.murabba ?? '', khasraNos: (initial?.land.khasraNos ?? []).join(', '),
@@ -439,54 +503,48 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
     } finally { setBusy(false); }
   };
   return (
-    <Sheet open onClose={onClose} title={initial ? `Edit ${initial.caseId}` : 'New Case'} footer={<Button form="case-form" type="submit" block loading={busy}>{initial ? 'Save' : 'Create Case'}</Button>}>
-      <form id="case-form" onSubmit={(e: FormEvent) => { e.preventDefault(); save(); }} className="space-y-4">
-        {!initial && (
-          <Field label="Mouza">
-            {(id) => f.unitId ? (
-              <Card className="flex items-center justify-between p-2.5 text-sm"><b>{f.mouzaName}</b><Button type="button" size="sm" variant="ghost" onClick={() => set('unitId', '')}>Change</Button></Card>
-            ) : (
-              <div className="space-y-1.5">
-                <Input id={id} placeholder="Search your mouzas…" value={mq} onChange={(e) => setMq(e.target.value)} />
-                <div className="max-h-48 overflow-y-auto rounded-lg ring-1 ring-slate-200 dark:ring-slate-700">
-                  {mouzas.data?.map((m) => <button type="button" key={m._id} onClick={() => setF((x) => ({ ...x, unitId: m._id, mouzaName: m.name }))} className="block w-full border-b border-slate-100 px-3 py-2 text-left text-sm hover:bg-brand-50 dark:border-slate-800">{m.name} <span className="text-xs text-slate-500">{m.tehsil}</span></button>)}
-                  {mouzas.data && !mouzas.data.length && <div className="p-3 text-sm text-slate-500">No mouza found in your charge.</div>}
-                </div>
-              </div>
-            )}
-          </Field>
-        )}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Type of case">{(id) => <Select id={id} required value={f.caseType} onChange={(e) => set('caseType', e.target.value)}><option value="">Choose…</option>{[...new Set([...known, 'Other'])].map((t) => <option key={t}>{t}</option>)}</Select>}</Field>
-          {f.caseType === 'Other' && <Field label="Type (write)">{(id) => <Input id={id} value={f.caseTypeOther} onChange={(e) => set('caseTypeOther', e.target.value)} />}</Field>}
+    <LSheet open onClose={onClose} title={initial ? `Edit ${initial.caseId}` : 'New Case'} footer={<Button form="case-form" type="submit" block loading={busy}>{initial ? 'Save' : 'Create Case'}</Button>}>
+      <form id="case-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (!initial && !f.unitId) return setError(new Error('Choose the mouza from the list')); if (!f.court) return setError(new Error('Choose the court from the list')); save(); }} className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-3">
+          {!initial && (
+            <Field label="Mouza">
+              {(id) => <AutoInput id={id} strict required placeholder="Type mouza name…" onQuery={setMq} value={f.unitId}
+                options={[...(f.unitId ? [{ value: f.unitId, label: f.mouzaName }] : []), ...(mouzas.data ?? []).filter((m) => m._id !== f.unitId).map((m) => ({ value: m._id, label: m.name, hint: m.tehsil }))]}
+                onChange={(v) => setF((x) => ({ ...x, unitId: v, mouzaName: mouzas.data?.find((m) => m._id === v)?.name ?? x.mouzaName }))} />}
+            </Field>
+          )}
+          <Field label="Type of case">{(id) => <AutoInput id={id} required placeholder="Type or pick…" options={[...new Set([...known, ...(sug?.caseType ?? [])])]} value={f.caseType} onChange={(v) => set('caseType', v)} />}</Field>
           <Field label="Date of institution">{(id) => <Input id={id} type="date" required value={f.institutedOn} onChange={(e) => set('institutedOn', e.target.value)} />}</Field>
         </div>
-        <Field label="Name of the court">{(id) => <CourtSelect id={id} meta={meta.data} value={f.court} other={f.courtOther} onChange={(c, o) => setF((x) => ({ ...x, court: c, courtOther: o }))} />}</Field>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Bench / station (optional)">{(id) => <Input id={id} value={f.bench} onChange={(e) => set('bench', e.target.value)} placeholder="e.g. Bahawalpur Bench" />}</Field>
-          <Field label="Court case no. (optional)">{(id) => <Input id={id} value={f.courtCaseNo} onChange={(e) => set('courtCaseNo', e.target.value)} />}</Field>
-        </div>
-        <Field label="Name of applicant(s)" hint="One name per line">{(id) => <Names id={id} value={f.applicants} onChange={(v) => set('applicants', v)} />}</Field>
-        <Field label="Name of respondent(s)" hint="One name per line">{(id) => <Names id={id} value={f.respondents} onChange={(v) => set('respondents', v)} />}</Field>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-brand-600" checked={f.governmentParty} onChange={(e) => set('governmentParty', e.target.checked)} />Government / Board of Revenue is a party</label>
-        <Field label="Land measuring">
-          {() => (
-            <div className="grid grid-cols-3 gap-2">
-              <Input type="number" min={0} placeholder="Kanal" value={f.kanal} onChange={(e) => set('kanal', e.target.value)} />
-              <Input type="number" min={0} placeholder="Marla" value={f.marla} onChange={(e) => set('marla', e.target.value)} />
-              <Input type="number" min={0} placeholder="Sarsai" value={f.sarsai} onChange={(e) => set('sarsai', e.target.value)} />
-            </div>
-          )}
-        </Field>
-        <Field label="Mustateel / Murabba no.">{(id) => <Input id={id} dir="auto" value={f.murabba} onChange={(e) => set('murabba', e.target.value)} placeholder="e.g. 45 (killa 12, 13)" />}</Field>
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Khasra nos." hint="Separate with commas">{(id) => <Input id={id} value={f.khasraNos} onChange={(e) => set('khasraNos', e.target.value)} />}</Field>
-          <Field label="Khewat">{(id) => <Input id={id} value={f.khewat} onChange={(e) => set('khewat', e.target.value)} />}</Field>
-          <Field label="Khatauni">{(id) => <Input id={id} value={f.khatauni} onChange={(e) => set('khatauni', e.target.value)} />}</Field>
+          <Field label="Name of the court">{(id) => <CourtSelect id={id} meta={meta.data} value={f.court} other={f.courtOther} onChange={(c, o) => setF((x) => ({ ...x, court: c, courtOther: o }))} />}</Field>
+          <Field label="Bench / station">{(id) => <AutoInput id={id} options={sug?.bench ?? []} value={f.bench} onChange={(v) => set('bench', v)} placeholder="e.g. Bahawalpur Bench" />}</Field>
+          <Field label="Court case no.">{(id) => <Input id={id} value={f.courtCaseNo} onChange={(e) => set('courtCaseNo', e.target.value)} />}</Field>
         </div>
-        <Field label="Land specification">{(id) => <Textarea id={id} rows={2} dir="auto" value={f.landSpec} onChange={(e) => set('landSpec', e.target.value)} placeholder="State land / private / evacuee…, nature (barani, nehri…)" />}</Field>
-        {!initial && <Field label="Next date of hearing (optional)">{(id) => <Input id={id} type="date" value={f.nextHearing} onChange={(e) => set('nextHearing', e.target.value)} />}</Field>}
-        <Field label="Note for information">{(id) => <Textarea id={id} rows={2} dir="auto" value={f.note} onChange={(e) => set('note', e.target.value)} />}</Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Applicant(s)">{(id) => <Names id={id} value={f.applicants} onChange={(v) => set('applicants', v)} suggestions={sug?.applicants ?? []} />}</Field>
+          <Field label="Respondent(s)">{(id) => <Names id={id} value={f.respondents} onChange={(v) => set('respondents', v)} suggestions={sug?.respondents ?? []} />}</Field>
+        </div>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-brand-600" checked={f.governmentParty} onChange={(e) => set('governmentParty', e.target.checked)} />Government / Board of Revenue is a party</label>
+        <div className="rounded-lg border border-slate-300 p-2.5 dark:border-slate-600">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-brand-700">Land</div>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+            <Field label="Kanal">{(id) => <Input id={id} type="number" min={0} value={f.kanal} onChange={(e) => set('kanal', e.target.value)} />}</Field>
+            <Field label="Marla">{(id) => <Input id={id} type="number" min={0} value={f.marla} onChange={(e) => set('marla', e.target.value)} />}</Field>
+            <Field label="Sarsai">{(id) => <Input id={id} type="number" min={0} value={f.sarsai} onChange={(e) => set('sarsai', e.target.value)} />}</Field>
+            <Field label="Khasra nos.">{(id) => <Input id={id} value={f.khasraNos} onChange={(e) => set('khasraNos', e.target.value)} placeholder="45/2, 46" />}</Field>
+            <Field label="Khewat">{(id) => <Input id={id} value={f.khewat} onChange={(e) => set('khewat', e.target.value)} />}</Field>
+            <Field label="Khatauni">{(id) => <Input id={id} value={f.khatauni} onChange={(e) => set('khatauni', e.target.value)} />}</Field>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <Field label="Mustateel / Murabba no.">{(id) => <AutoInput id={id} dir="auto" options={sug?.['land.murabba'] ?? []} value={f.murabba} onChange={(v) => set('murabba', v)} placeholder="e.g. 45 (killa 12, 13)" />}</Field>
+            <Field label="Land specification">{(id) => <AutoInput id={id} dir="auto" options={[...new Set([...(sug?.landSpec ?? []), 'State land', 'Private land', 'Evacuee property', 'Nehri', 'Barani', 'Chahi'])]} value={f.landSpec} onChange={(v) => set('landSpec', v)} placeholder="State land, nehri…" />}</Field>
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {!initial && <Field label="Next date of hearing">{(id) => <Input id={id} type="date" value={f.nextHearing} onChange={(e) => set('nextHearing', e.target.value)} />}</Field>}
+          <div className={initial ? 'sm:col-span-3' : 'sm:col-span-2'}><Field label="Note for information">{(id) => <Textarea id={id} rows={1} dir="auto" value={f.note} onChange={(e) => set('note', e.target.value)} />}</Field></div>
+        </div>
         {dup && (
           <Card className="space-y-2 border-l-4 border-amber-500 p-3 text-sm">
             <div>A similar case already exists: <Link to={`/litigation/${dup.id}`} className="font-semibold underline">{dup.caseId}</Link>. Is this a different case?</div>
@@ -495,7 +553,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
         )}
         <FormError error={error} />
       </form>
-    </Sheet>
+    </LSheet>
   );
 }
 
@@ -648,6 +706,7 @@ export function LitigationCasePage() {
 }
 
 function HearingSheet({ c, onDone }: { c: Case; onDone: () => void }) {
+  const sug = useSuggest().data;
   const [f, setF] = useState({ date: iso(c.nextHearing) || new Date().toISOString().slice(0, 10), proceedingsDone: '', nextAction: '', nextDate: '', attendedBy: '' });
   const [error, setError] = useState<unknown>(null);
   const save = async (e: FormEvent) => {
@@ -655,20 +714,21 @@ function HearingSheet({ c, onDone }: { c: Case; onDone: () => void }) {
     try { await post(`/litigation/${c._id}/hearings`, { ...f, nextDate: f.nextDate || null }); onDone(); } catch (err) { setError(err); }
   };
   return (
-    <Sheet open onClose={onDone} title={`Record Hearing · ${c.caseId}`} footer={<Button form="h-form" type="submit" block>Save Hearing</Button>}>
-      <form id="h-form" onSubmit={save} className="space-y-4">
+    <LSheet open onClose={onDone} title={`Record Hearing · ${c.caseId}`} footer={<Button form="h-form" type="submit" block>Save Hearing</Button>}>
+      <form id="h-form" onSubmit={save} className="space-y-3">
         <Field label="Date of hearing">{(id) => <Input id={id} type="date" required value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />}</Field>
-        <Field label="Proceedings of this date">{(id) => <Textarea id={id} rows={3} dir="auto" value={f.proceedingsDone} onChange={(e) => setF({ ...f, proceedingsDone: e.target.value })} placeholder="What happened in court…" />}</Field>
+        <Field label="Proceedings of this date">{(id) => <AutoInput id={id} dir="auto" options={sug?.['hearings.proceedingsDone'] ?? []} value={f.proceedingsDone} onChange={(v) => setF({ ...f, proceedingsDone: v })} placeholder="What happened in court…" />}</Field>
         <Field label="Next date of hearing">{(id) => <Input id={id} type="date" value={f.nextDate} onChange={(e) => setF({ ...f, nextDate: e.target.value })} />}</Field>
-        <Field label="Proceedings to be done for next date">{(id) => <Textarea id={id} rows={2} dir="auto" value={f.nextAction} onChange={(e) => setF({ ...f, nextAction: e.target.value })} placeholder="e.g. File reply, produce record…" />}</Field>
-        <Field label="Attended by (optional)">{(id) => <Input id={id} value={f.attendedBy} onChange={(e) => setF({ ...f, attendedBy: e.target.value })} />}</Field>
+        <Field label="Proceedings to be done for next date">{(id) => <AutoInput id={id} dir="auto" options={[...new Set([...(sug?.['hearings.nextAction'] ?? []), 'File reply', 'Produce record', 'Arguments', 'Evidence', 'Report of Patwari'])]} value={f.nextAction} onChange={(v) => setF({ ...f, nextAction: v })} placeholder="e.g. File reply, produce record…" />}</Field>
+        <Field label="Attended by (optional)">{(id) => <AutoInput id={id} options={sug?.['hearings.attendedBy'] ?? []} value={f.attendedBy} onChange={(v) => setF({ ...f, attendedBy: v })} />}</Field>
         <FormError error={error} />
       </form>
-    </Sheet>
+    </LSheet>
   );
 }
 
 function DecisionSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => void }) {
+  const sug = useSuggest().data;
   const [status, setStatus] = useState(c.status);
   const [dec, setDec] = useState({ date: iso(c.decision?.date), result: c.decision?.result ?? '', summary: c.decision?.summary ?? '' });
   const [ap, setAp] = useState({ ...c.appeal, filedOn: iso(c.appeal.filedOn) });
@@ -681,13 +741,13 @@ function DecisionSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () =
     } catch (err) { setError(err); }
   };
   return (
-    <Sheet open onClose={onDone} title="Status, Decision & Appeal" footer={<Button form="d-form" type="submit" block>Save</Button>}>
-      <form id="d-form" onSubmit={save} className="space-y-4">
+    <LSheet open onClose={onDone} title="Status, Decision & Appeal" footer={<Button form="d-form" type="submit" block>Save</Button>}>
+      <form id="d-form" onSubmit={save} className="space-y-3">
         <Segmented value={status} onChange={setStatus} options={[{ value: 'pending', label: 'Not Decided Yet' }, { value: 'decided', label: 'Decided' }]} />
         {status === 'decided' && (
           <>
             <Field label="Date of decision">{(id) => <Input id={id} type="date" required value={dec.date} onChange={(e) => setDec({ ...dec, date: e.target.value })} />}</Field>
-            <Field label="Result">{(id) => <Select id={id} value={dec.result} onChange={(e) => setDec({ ...dec, result: e.target.value })}><option value="">Choose…</option><option>In favour of government</option><option>Against government</option><option>In favour of applicant</option><option>In favour of respondent</option><option>Dismissed</option><option>Withdrawn</option><option>Remanded</option><option>Other</option></Select>}</Field>
+            <Field label="Result">{(id) => <AutoInput id={id} placeholder="Type or pick…" options={[...new Set(['In favour of government', 'Against government', 'In favour of applicant', 'In favour of respondent', 'Dismissed', 'Withdrawn', 'Remanded', ...(sug?.['decision.result'] ?? [])])]} value={dec.result} onChange={(v) => setDec({ ...dec, result: v })} />}</Field>
             <Field label="Summary (optional)">{(id) => <Textarea id={id} rows={2} dir="auto" value={dec.summary} onChange={(e) => setDec({ ...dec, summary: e.target.value })} />}</Field>
             <Field label="Appeal filed?">{() => <Segmented value={ap.filed} onChange={(v) => setAp({ ...ap, filed: v })} options={[{ value: 'undecided', label: 'Not Yet' }, { value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} />}</Field>
             {ap.filed === 'yes' && (
@@ -704,11 +764,12 @@ function DecisionSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () =
         )}
         <FormError error={error} />
       </form>
-    </Sheet>
+    </LSheet>
   );
 }
 
 function StageSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => void }) {
+  const sug = useSuggest().data;
   const [f, setF] = useState({ court: c.appeal.court ?? '', courtOther: c.appeal.courtOther, courtCaseNo: c.appeal.appealNo ?? '', bench: '', filedOn: iso(c.appeal.filedOn) || new Date().toISOString().slice(0, 10), nextHearing: '' });
   const [error, setError] = useState<unknown>(null);
   const save = async (e: FormEvent) => {
@@ -716,19 +777,19 @@ function StageSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => v
     try { await post(`/litigation/${c._id}/appeal-stage`, { ...f, nextHearing: f.nextHearing || null }); onDone(); } catch (err) { setError(err); }
   };
   return (
-    <Sheet open onClose={onDone} title={`Appeal — Stage ${c.stage + 1}`} footer={<Button form="s-form" type="submit" block>Start Appeal Stage</Button>}>
-      <form id="s-form" onSubmit={save} className="space-y-4">
+    <LSheet open onClose={onDone} title={`Appeal — Stage ${c.stage + 1}`} footer={<Button form="s-form" type="submit" block>Start Appeal Stage</Button>}>
+      <form id="s-form" onSubmit={save} className="space-y-3">
         <p className="text-sm text-slate-600 dark:text-slate-300">The decision of the current court is kept in the court history. The case continues under <b>{c.caseId}</b> in the appellate court.</p>
         <Field label="Appellate court">{(id) => <CourtSelect id={id} meta={meta} value={f.court} other={f.courtOther} onChange={(court, other) => setF({ ...f, court, courtOther: other })} />}</Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Appeal / case no.">{(id) => <Input id={id} value={f.courtCaseNo} onChange={(e) => setF({ ...f, courtCaseNo: e.target.value })} />}</Field>
           <Field label="Date filed">{(id) => <Input id={id} type="date" required value={f.filedOn} onChange={(e) => setF({ ...f, filedOn: e.target.value })} />}</Field>
         </div>
-        <Field label="Bench / station (optional)">{(id) => <Input id={id} value={f.bench} onChange={(e) => setF({ ...f, bench: e.target.value })} />}</Field>
+        <Field label="Bench / station (optional)">{(id) => <AutoInput id={id} options={sug?.bench ?? []} value={f.bench} onChange={(v) => setF({ ...f, bench: v })} />}</Field>
         <Field label="Next hearing (optional)">{(id) => <Input id={id} type="date" value={f.nextHearing} onChange={(e) => setF({ ...f, nextHearing: e.target.value })} />}</Field>
         <FormError error={error} />
       </form>
-    </Sheet>
+    </LSheet>
   );
 }
 
@@ -779,8 +840,8 @@ function DocSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => voi
     } catch (e) { setError(e); } finally { setBusy(false); }
   };
   return (
-    <Sheet open onClose={onDone} title={`Attach Document · ${c.caseId}`} footer={<Button block disabled={!pages.length && !pdf} loading={busy} onClick={save}><Upload className="size-4" />Attach{pages.length > 1 ? ` (${pages.length} pages)` : ''}</Button>}>
-      <div className="space-y-4">
+    <LSheet open onClose={onDone} title={`Attach Document · ${c.caseId}`} footer={<Button block disabled={!pages.length && !pdf} loading={busy} onClick={save}><Upload className="size-4" />Attach{pages.length > 1 ? ` (${pages.length} pages)` : ''}</Button>}>
+      <div className="space-y-3">
         <Field label="Document">{(id) => <Select id={id} value={category} onChange={(e) => setCategory(e.target.value)}>{meta?.categories.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</Select>}</Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Title (optional)">{(id) => <Input id={id} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Order dated…" />}</Field>
@@ -814,6 +875,6 @@ function DocSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => voi
         )}
         <FormError error={error} />
       </div>
-    </Sheet>
+    </LSheet>
   );
 }

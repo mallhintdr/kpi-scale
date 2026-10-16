@@ -43,6 +43,27 @@ router.get('/causelist', validate({ query: z.object({ from: z.string().optional(
 });
 
 /* ================================================================== *
+ *  Suggestions: values already used in the user's jurisdiction, so entries stay uniform
+ * ================================================================== */
+router.get('/suggest', async (req, res) => {
+  const base = { deleted: { $ne: true }, ...(await scopeFilter(req.user!, bpOf(req))) };
+  const fields = ['caseType', 'bench', 'landSpec', 'applicants', 'respondents', 'land.murabba', 'decision.result', 'hearings.nextAction', 'hearings.proceedingsDone', 'hearings.attendedBy'] as const;
+  const top = (f: string) => LitigationCase.aggregate([
+    { $match: base },
+    { $sort: { updatedAt: -1 } },
+    { $limit: 2000 },
+    ...(f.includes('.') && f.split('.')[0] === 'hearings' ? [{ $unwind: '$hearings' }] : []),
+    ...(['applicants', 'respondents'].includes(f) ? [{ $unwind: `$${f}` }] : []),
+    { $group: { _id: `$${f}`, n: { $sum: 1 } } },
+    { $match: { _id: { $nin: [null, ''] } } },
+    { $sort: { n: -1 } },
+    { $limit: 200 },
+  ]);
+  const out = await Promise.all(fields.map(top));
+  res.json(Object.fromEntries(fields.map((f, i) => [f, out[i].map((x) => String(x._id))])));
+});
+
+/* ================================================================== *
  *  Monitoring: where the cases are and what needs attention
  * ================================================================== */
 router.get('/stats', async (req, res) => {
