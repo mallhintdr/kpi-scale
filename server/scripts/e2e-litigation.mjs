@@ -90,6 +90,11 @@ check(imp.imported === 1, 'the corrected file imports 1 case with an automatic I
 await call(adm, 'PUT', '/litigation/settings', { appealDays: {} });
 
 console.log('Phase 3');
+const lp = (await call(p1, 'PATCH', `/litigation/${second.b._id}`, { land: { kanal: 8, parcels: [{ murabba: '45', khasras: ['12', '13'] }, { murabba: '46', khasras: ['7'] }] } })).b;
+check(lp.land.parcels.length === 2 && lp.land.murabba === '45 (12, 13); 46 (7)' && lp.land.khasraNos.join() === '12,13,7', 'several murabbas, each with its own killa / khasra nos.');
+const ko = (await call(p1, 'PATCH', `/litigation/${second.b._id}`, { land: { parcels: [{ khasras: ['112', '113/2'] }] } })).b;
+check(!ko.land.murabba && ko.land.khasraNos.join() === '112,113/2', 'khasra-only land (tehsils without murabbas)');
+check((await call(p1, 'GET', '/litigation?search=113/2')).b.items.some((x) => x._id === second.b._id), 'search finds the case by khasra no.');
 const sg = (await call(p1, 'GET', '/litigation/suggest')).b;
 check(sg.respondents.includes('Province of Punjab through Collector') && sg.caseType.includes('Encroachment / state land'), 'earlier entries are offered as suggestions (parties, case types)');
 await call(p1, 'PATCH', `/litigation/${second.b._id}`, { nextHearing: null });

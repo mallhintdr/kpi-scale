@@ -40,7 +40,7 @@ Run these from `server`, with the API running:
 | `node scripts/e2e-access.mjs` | 17 checks passed |
 | `node scripts/check-rollups.mjs` | 10 checks passed |
 | `node scripts/e2e-whatsapp.mjs` | 17 checks passed |
-| `node scripts/e2e-litigation.mjs` | 32 checks passed |
+| `node scripts/e2e-litigation.mjs` | 36 checks passed |
 
 ### 0.4 Test accounts — one per role
 | Role | Email (`@bwp.test`) | Works on |
@@ -201,6 +201,8 @@ Use the **current month**; future months are refused.
 | L-10 | Calendar tab: move between months | Each day shows its hearings; today outlined | ☐ |
 | L-11 | Monitoring tab | Counts by court, type and tehsil; oldest pending; pending with no hearing; decided against government with appeal undecided | ☐ |
 | L-12 | As `admin` › Settings: appeal period for a court | Cases decided in that court show "Appeal period ending" alerts | ☐ |
+| L-13 | New Case › Land: Murabba + Killa / Khasra, add 2 murabbas with their killas; then switch to Khasra Only | Each murabba keeps its own killas on the case page and PDF; khasra-only saves khasras without murabba | ☐ |
+| L-14 | As `admin` › Settings › tick a tehsil under "Tehsils without murabbas"; open New Case for a mouza there | The form opens with Khasra Only | ☐ |
 
 ## 13. Officer profile
 | ID | Steps | Expected | ☐ |
@@ -334,3 +336,4 @@ Test on **one Android and one iPhone**, plus Chrome device mode at 320 px and 39
 | Phones (§20) | | | |
 | Performance and data (§22–§23) | | | |
 | **Approved for deployment** | | | |
+1

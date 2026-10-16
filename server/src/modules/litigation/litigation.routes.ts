@@ -40,7 +40,7 @@ const CATS = CATEGORY_ORDER.map((c) => c[0]) as [string, ...string[]];
 export async function settings(tenantId: string) {
   const t = await Tenant.findById(tenantId).select('litigation').lean();
   const l: any = t?.litigation ?? {};
-  return { caseTypes: (l.caseTypes?.length ? l.caseTypes : DEFAULT_TYPES) as string[], appealDays: (l.appealDays ?? {}) as Record<string, number> };
+  return { caseTypes: (l.caseTypes?.length ? l.caseTypes : DEFAULT_TYPES) as string[], appealDays: (l.appealDays ?? {}) as Record<string, number>, khasraOnly: (l.khasraOnly ?? []) as string[] };
 }
 
 /* ---------- abbreviations for the case ID ---------- */
@@ -100,14 +100,15 @@ function syncHearings(c: any) {
  * ================================================================== */
 router.get('/meta', async (req, res) => {
   const s = await settings(req.user!.tenantId);
-  res.json({ courts: COURTS, caseTypes: s.caseTypes, appealDays: s.appealDays, categories: CATEGORY_ORDER.map(([key, label]) => ({ key, label })), canEnter: isAdmin(req.user!) || (await hasCap(req.user!, bpOf(req), 'litigation')) });
+  res.json({ courts: COURTS, caseTypes: s.caseTypes, appealDays: s.appealDays, khasraOnly: s.khasraOnly, categories: CATEGORY_ORDER.map(([key, label]) => ({ key, label })), canEnter: isAdmin(req.user!) || (await hasCap(req.user!, bpOf(req), 'litigation')) });
 });
 
-router.put('/settings', validate({ body: z.object({ caseTypes: z.array(z.string().trim().min(1).max(120)).max(100).optional(), appealDays: z.record(z.string(), z.number().int().min(0).max(3650)).optional() }) }), async (req, res) => {
+router.put('/settings', validate({ body: z.object({ caseTypes: z.array(z.string().trim().min(1).max(120)).max(100).optional(), appealDays: z.record(z.string(), z.number().int().min(0).max(3650)).optional(), khasraOnly: z.array(objectId).max(500).optional() }) }), async (req, res) => {
   if (!isAdmin(req.user!)) throw forbidden();
   const set: Record<string, unknown> = {};
   if (req.body.caseTypes) set['litigation.caseTypes'] = req.body.caseTypes;
   if (req.body.appealDays) set['litigation.appealDays'] = req.body.appealDays;
+  if (req.body.khasraOnly) set['litigation.khasraOnly'] = req.body.khasraOnly;
   await Tenant.updateOne({ _id: req.user!.tenantId }, { $set: set });
   res.json(await settings(req.user!.tenantId));
 });
@@ -124,7 +125,7 @@ router.get('/mouzas', validate({ query: z.object({ search: z.string().max(60).op
   const out = [];
   for (const m of mouzas) if (await canEnterOn(me, bp, m as any)) out.push(m);
   const tehsils = new Map((await Unit.find({ _id: { $in: out.map((m) => ancestorAt(bp, m as any, 'tehsil')).filter(Boolean) } }).select('name').lean()).map((t) => [String(t._id), t.name]));
-  res.json(out.map((m) => ({ _id: m._id, name: m.name, tehsil: tehsils.get(String(ancestorAt(bp, m as any, 'tehsil'))) })));
+  res.json(out.map((m) => ({ _id: m._id, name: m.name, tehsilId: ancestorAt(bp, m as any, 'tehsil'), tehsil: tehsils.get(String(ancestorAt(bp, m as any, 'tehsil'))) })));
 });
 
 /* ================================================================== *
@@ -184,6 +185,20 @@ router.get('/dashboard', async (req, res) => {
   res.json({ total, pending, decided, thisWeek, overdue, appealDue, decidedNoAppeal: decidedNoAppeal.length });
 });
 
+/**
+ * Land: parcels of (Mustateel / Murabba no. → its khasra / killa nos.); tehsils without murabbas use one parcel
+ * with khasra nos. only. The flat `murabba` summary and `khasraNos` are derived for search, PDF and Excel.
+ */
+const parcelBody = z.object({ murabba: z.string().trim().max(40).optional(), khasras: z.array(z.string().trim().max(40)).max(200).default([]) });
+export const landBody = z.object({ kanal: z.number().min(0).max(1e7).optional(), marla: z.number().min(0).max(1e7).optional(), sarsai: z.number().min(0).max(1e7).optional(), murabba: z.string().trim().max(400).optional(), khasraNos: z.array(z.string().trim().max(40)).max(400).default([]), parcels: z.array(parcelBody).max(100).optional(), khewat: z.string().max(60).optional(), khatauni: z.string().max(60).optional() })
+  .default({ khasraNos: [] })
+  .transform((l) => {
+    if (!l.parcels) return l;
+    const parcels = l.parcels.map((p) => ({ murabba: p.murabba || undefined, khasras: p.khasras.filter(Boolean) })).filter((p) => p.murabba || p.khasras.length);
+    const summary = parcels.filter((p) => p.murabba).map((p) => (p.khasras.length ? `${p.murabba} (${p.khasras.join(', ')})` : p.murabba)).join('; ');
+    return { ...l, parcels, murabba: summary || undefined, khasraNos: parcels.flatMap((p) => p.khasras) };
+  });
+
 const caseBody = z.object({
   unitId: objectId,
   caseType: z.string().trim().min(1).max(120),
@@ -194,7 +209,7 @@ const caseBody = z.object({
   courtCaseNo: z.string().trim().max(100).optional(),
   applicants: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
   respondents: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
-  land: z.object({ kanal: z.number().min(0).max(1e7).optional(), marla: z.number().min(0).max(1e7).optional(), sarsai: z.number().min(0).max(1e7).optional(), murabba: z.string().trim().max(120).optional(), khasraNos: z.array(z.string().trim().max(40)).max(200).default([]), khewat: z.string().max(60).optional(), khatauni: z.string().max(60).optional() }).default({ khasraNos: [] }),
+  land: landBody,
   landSpec: z.string().trim().max(1000).optional(),
   governmentParty: z.boolean().default(false),
   nextHearing: z.coerce.date().nullish(),

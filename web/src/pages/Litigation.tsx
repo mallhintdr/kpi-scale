@@ -14,12 +14,12 @@ import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loadin
 import { ApiError, del, download, get, patch, post, put } from '../lib/api';
 import { useCaps, type UnitRef } from '../lib/rev';
 
-interface Meta { courts: { group: string; items: [string, string][] }[]; caseTypes: string[]; categories: { key: string; label: string }[]; canEnter: boolean }
+interface Meta { courts: { group: string; items: [string, string][] }[]; caseTypes: string[]; khasraOnly: string[]; categories: { key: string; label: string }[]; canEnter: boolean }
 interface ListRow { _id: string; caseId: string; unitId: { name: string } | null; caseType: string; courtName: string; applicants: string[]; respondents: string[]; nextHearing?: string; lastHearing?: string; status: 'pending' | 'decided'; stage: number; decision?: { date?: string } }
 interface Hearing { _id: string; date: string; court?: string; proceedingsDone?: string; nextAction?: string; nextDate?: string; attendedBy?: string; by?: { name: string } }
 interface Case {
   _id: string; caseId: string; unitId: { _id: string; name: string }; caseType: string; institutedOn: string; court: string; courtOther?: string; bench?: string; courtCaseNo?: string;
-  applicants: string[]; respondents: string[]; land: { kanal?: number; marla?: number; sarsai?: number; murabba?: string; khasraNos: string[]; khewat?: string; khatauni?: string }; landSpec?: string; governmentParty: boolean;
+  applicants: string[]; respondents: string[]; land: { kanal?: number; marla?: number; sarsai?: number; murabba?: string; khasraNos: string[]; parcels?: { murabba?: string; khasras: string[] }[]; khewat?: string; khatauni?: string }; landSpec?: string; governmentParty: boolean;
   hearings: Hearing[]; lastHearing?: string; nextHearing?: string; lastProceedings?: string; nextAction?: string; status: 'pending' | 'decided';
   decision?: { date?: string; result?: string; summary?: string }; appeal: { filed: 'yes' | 'no' | 'undecided'; court?: string; courtOther?: string; filedOn?: string; appealNo?: string; reasonNotFiled?: string };
   stage: number; stages: { stage: number; court: string; courtOther?: string; courtCaseNo?: string; institutedOn?: string; decidedOn?: string; result?: string }[];
@@ -414,14 +414,17 @@ function ImportSheet({ onClose }: { onClose: () => void }) {
 function SettingsSheet({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const { data } = useQuery({ queryKey: ['lit', 'settings'], queryFn: () => get<{ caseTypes: string[]; appealDays: Record<string, number>; courts: Meta['courts'] }>('/litigation/settings') });
+  const { data } = useQuery({ queryKey: ['lit', 'settings'], queryFn: () => get<{ caseTypes: string[]; appealDays: Record<string, number>; khasraOnly: string[]; tehsils: { _id: string; name: string }[]; courts: Meta['courts'] }>('/litigation/settings') });
   const [types, setTypes] = useState<string | null>(null);
   const [days, setDays] = useState<Record<string, string> | null>(null);
+  const [ko, setKo] = useState<string[] | null>(null);
+  const kOnly = ko ?? data?.khasraOnly ?? [];
   const t = types ?? data?.caseTypes.join('\n') ?? '';
   const d = days ?? Object.fromEntries(Object.entries(data?.appealDays ?? {}).map(([k, v]) => [k, String(v)]));
   const save = async () => {
     await put('/litigation/settings', {
       caseTypes: t.split('\n').map((x) => x.trim()).filter(Boolean),
+      khasraOnly: kOnly,
       appealDays: Object.fromEntries(Object.entries(d).filter(([, v]) => v.trim()).map(([k, v]) => [k, Number(v)])),
     });
     qc.invalidateQueries({ queryKey: ['lit'] });
@@ -432,6 +435,15 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
     <LSheet open onClose={onClose} title="Litigation Settings" footer={<Button block onClick={save}>Save</Button>}>
       <div className="space-y-3">
         <Field label="Types of case" hint="One per line">{(id) => <Textarea id={id} rows={8} value={t} onChange={(e) => setTypes(e.target.value)} />}</Field>
+        <div>
+          <div className="mb-1 text-sm font-medium">Tehsils without murabbas (khasra / killa only)</div>
+          <p className="mb-2 text-xs text-slate-500">New cases in these tehsils open with the Khasra Only layout. Others open with Murabba + Killa / Khasra.</p>
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+            {data?.tehsils.map((x) => (
+              <label key={x._id} className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-brand-600" checked={kOnly.includes(x._id)} onChange={(e) => setKo(e.target.checked ? [...kOnly, x._id] : kOnly.filter((y) => y !== x._id))} />{x.name.replace(' (test)', '')}</label>
+            ))}
+          </div>
+        </div>
         <div>
           <div className="mb-1 text-sm font-medium">Appeal period (days) after a decision, by court</div>
           <p className="mb-2 text-xs text-slate-500">Leave blank where not applicable. Reminders go out 15 and 5 days before the period ends when no appeal decision is recorded.</p>
@@ -453,9 +465,19 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
 }
 
 /* ---------- New / edit case ---------- */
+const splitNos = (x: string) => x.split(/[,;\n]+/).map((y) => y.trim()).filter(Boolean);
+/** Land layout of an existing case: its parcels, or (older entries) the single murabba + khasras. */
+function landInit(c?: Case): Pick<FormState, 'landMode' | 'parcels' | 'khasraNos'> {
+  const l = c?.land;
+  const parcels = l?.parcels?.length ? l.parcels : l?.murabba ? [{ murabba: l.murabba, khasras: l.khasraNos }] : [];
+  const withM = parcels.filter((p) => p.murabba);
+  return withM.length
+    ? { landMode: 'murabba', parcels: withM.map((p) => ({ murabba: p.murabba ?? '', khasras: p.khasras.join(', ') })), khasraNos: '' }
+    : { landMode: l?.khasraNos.length ? 'khasra' : 'murabba', parcels: [{ murabba: '', khasras: '' }], khasraNos: (l?.khasraNos ?? []).join(', ') };
+}
 interface FormState {
   unitId: string; mouzaName: string; caseType: string; caseTypeOther: string; institutedOn: string; court: string; courtOther?: string; bench: string; courtCaseNo: string;
-  applicants: string[]; respondents: string[]; kanal: string; marla: string; sarsai: string; murabba: string; khasraNos: string; khewat: string; khatauni: string; landSpec: string;
+  applicants: string[]; respondents: string[]; kanal: string; marla: string; sarsai: string; landMode: 'murabba' | 'khasra'; parcels: { murabba: string; khasras: string }[]; khasraNos: string; khewat: string; khatauni: string; landSpec: string;
   governmentParty: boolean; nextHearing: string; note: string;
 }
 function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void }) {
@@ -465,7 +487,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
   const navigate = useNavigate();
   const [mq, setMq] = useState('');
   const mterm = useDeferredValue(mq);
-  const mouzas = useQuery({ queryKey: ['lit', 'mouzas', mterm], queryFn: () => get<{ _id: string; name: string; tehsil?: string }[]>(`/litigation/mouzas?search=${encodeURIComponent(mterm)}`), enabled: !initial });
+  const mouzas = useQuery({ queryKey: ['lit', 'mouzas', mterm], queryFn: () => get<{ _id: string; name: string; tehsil?: string; tehsilId?: string }[]>(`/litigation/mouzas?search=${encodeURIComponent(mterm)}`), enabled: !initial });
   const known = meta.data?.caseTypes ?? [];
   const sug = useSuggest().data;
   const [f, setF] = useState<FormState>(() => ({
@@ -473,7 +495,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
     caseType: initial?.caseType ?? '', caseTypeOther: '',
     institutedOn: iso(initial?.institutedOn), court: initial?.court ?? '', courtOther: initial?.courtOther, bench: initial?.bench ?? '', courtCaseNo: initial?.courtCaseNo ?? '',
     applicants: initial?.applicants ?? [''], respondents: initial?.respondents ?? [''],
-    kanal: String(initial?.land.kanal ?? ''), marla: String(initial?.land.marla ?? ''), sarsai: String(initial?.land.sarsai ?? ''), murabba: initial?.land.murabba ?? '', khasraNos: (initial?.land.khasraNos ?? []).join(', '),
+    kanal: String(initial?.land.kanal ?? ''), marla: String(initial?.land.marla ?? ''), sarsai: String(initial?.land.sarsai ?? ''), ...landInit(initial),
     khewat: initial?.land.khewat ?? '', khatauni: initial?.land.khatauni ?? '', landSpec: initial?.landSpec ?? '', governmentParty: initial?.governmentParty ?? false,
     nextHearing: iso(initial?.nextHearing), note: initial?.note ?? '',
   }));
@@ -488,7 +510,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
       ...(initial ? {} : { unitId: f.unitId }),
       caseType: f.caseType === 'Other' ? f.caseTypeOther || 'Other' : f.caseType, institutedOn: f.institutedOn, court: f.court, courtOther: f.courtOther || undefined, bench: f.bench || undefined, courtCaseNo: f.courtCaseNo || undefined,
       applicants: f.applicants.map((x) => x.trim()).filter(Boolean), respondents: f.respondents.map((x) => x.trim()).filter(Boolean),
-      land: { kanal: num(f.kanal), marla: num(f.marla), sarsai: num(f.sarsai), murabba: f.murabba || undefined, khasraNos: f.khasraNos.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean), khewat: f.khewat || undefined, khatauni: f.khatauni || undefined },
+      land: { kanal: num(f.kanal), marla: num(f.marla), sarsai: num(f.sarsai), parcels: f.landMode === 'murabba' ? f.parcels.map((x) => ({ murabba: x.murabba.trim(), khasras: splitNos(x.khasras) })) : [{ khasras: splitNos(f.khasraNos) }], khewat: f.khewat || undefined, khatauni: f.khatauni || undefined },
       landSpec: f.landSpec || undefined, governmentParty: f.governmentParty, nextHearing: f.nextHearing || null, note: f.note || undefined,
     };
     try {
@@ -510,7 +532,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
             <Field label="Mouza">
               {(id) => <AutoInput id={id} strict required placeholder="Type mouza name…" onQuery={setMq} value={f.unitId}
                 options={[...(f.unitId ? [{ value: f.unitId, label: f.mouzaName }] : []), ...(mouzas.data ?? []).filter((m) => m._id !== f.unitId).map((m) => ({ value: m._id, label: m.name, hint: m.tehsil }))]}
-                onChange={(v) => setF((x) => ({ ...x, unitId: v, mouzaName: mouzas.data?.find((m) => m._id === v)?.name ?? x.mouzaName }))} />}
+                onChange={(v) => setF((x) => { const m = mouzas.data?.find((y) => y._id === v); return { ...x, unitId: v, mouzaName: m?.name ?? x.mouzaName, landMode: m?.tehsilId && meta.data?.khasraOnly.includes(m.tehsilId) ? 'khasra' : 'murabba' }; })} />}
             </Field>
           )}
           <Field label="Type of case">{(id) => <AutoInput id={id} required placeholder="Type or pick…" options={[...new Set([...known, ...(sug?.caseType ?? [])])]} value={f.caseType} onChange={(v) => set('caseType', v)} />}</Field>
@@ -528,16 +550,33 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-brand-600" checked={f.governmentParty} onChange={(e) => set('governmentParty', e.target.checked)} />Government / Board of Revenue is a party</label>
         <div className="rounded-lg border border-slate-300 p-2.5 dark:border-slate-600">
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-brand-700">Land</div>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-slate-500">How land is recorded in this tehsil</span>
+            <Segmented value={f.landMode} onChange={(v) => set('landMode', v)} options={[{ value: 'murabba', label: 'Murabba + Killa / Khasra' }, { value: 'khasra', label: 'Khasra Only' }]} />
+          </div>
+          {f.landMode === 'murabba' ? (
+            <div className="mb-2 space-y-1.5">
+              <div className="grid grid-cols-[8rem_1fr_2rem] gap-1.5 text-[12px] font-semibold text-slate-600 dark:text-slate-300"><span>Murabba / Mustateel No.</span><span>Killa / Khasra Nos. (comma separated)</span><span /></div>
+              {f.parcels.map((x, i) => (
+                <div key={i} className="grid grid-cols-[8rem_1fr_2rem] items-center gap-1.5">
+                  <AutoInput dir="auto" options={sug?.['land.parcels.murabba'] ?? []} value={x.murabba} placeholder="e.g. 45" onChange={(v) => set('parcels', f.parcels.map((y, j) => (j === i ? { ...y, murabba: v } : y)))} />
+                  <Input value={x.khasras} placeholder="e.g. 12, 13, 18/1" onChange={(e) => set('parcels', f.parcels.map((y, j) => (j === i ? { ...y, khasras: e.target.value } : y)))} />
+                  {f.parcels.length > 1 ? <Button type="button" size="sm" variant="ghost" aria-label="Remove murabba" onClick={() => set('parcels', f.parcels.filter((_, j) => j !== i))}><X className="size-4" /></Button> : <span />}
+                </div>
+              ))}
+              <button type="button" className="text-xs font-semibold text-brand-700 hover:underline" onClick={() => set('parcels', [...f.parcels, { murabba: '', khasras: '' }])}>+ Add another murabba</button>
+            </div>
+          ) : (
+            <div className="mb-2"><Field label="Khasra / Killa Nos.">{(id) => <Input id={id} value={f.khasraNos} onChange={(e) => set('khasraNos', e.target.value)} placeholder="e.g. 45/2, 46, 112" />}</Field></div>
+          )}
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
             <Field label="Kanal">{(id) => <Input id={id} type="number" min={0} value={f.kanal} onChange={(e) => set('kanal', e.target.value)} />}</Field>
             <Field label="Marla">{(id) => <Input id={id} type="number" min={0} value={f.marla} onChange={(e) => set('marla', e.target.value)} />}</Field>
             <Field label="Sarsai">{(id) => <Input id={id} type="number" min={0} value={f.sarsai} onChange={(e) => set('sarsai', e.target.value)} />}</Field>
-            <Field label="Khasra nos.">{(id) => <Input id={id} value={f.khasraNos} onChange={(e) => set('khasraNos', e.target.value)} placeholder="45/2, 46" />}</Field>
             <Field label="Khewat">{(id) => <Input id={id} value={f.khewat} onChange={(e) => set('khewat', e.target.value)} />}</Field>
             <Field label="Khatauni">{(id) => <Input id={id} value={f.khatauni} onChange={(e) => set('khatauni', e.target.value)} />}</Field>
           </div>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <Field label="Mustateel / Murabba no.">{(id) => <AutoInput id={id} dir="auto" options={sug?.['land.murabba'] ?? []} value={f.murabba} onChange={(v) => set('murabba', v)} placeholder="e.g. 45 (killa 12, 13)" />}</Field>
+          <div className="mt-2">
             <Field label="Land specification">{(id) => <AutoInput id={id} dir="auto" options={[...new Set([...(sug?.landSpec ?? []), 'State land', 'Private land', 'Evacuee property', 'Nehri', 'Barani', 'Chahi'])]} value={f.landSpec} onChange={(v) => set('landSpec', v)} placeholder="State land, nehri…" />}</Field>
           </div>
         </div>
@@ -622,8 +661,8 @@ export function LitigationCasePage() {
             {row('Applicant(s)', c.applicants.join('; '))}
             {row('Respondent(s)', c.respondents.join('; '))}
             {row('Land measuring', [l.kanal ? `${l.kanal} K` : '', l.marla ? `${l.marla} M` : '', l.sarsai ? `${l.sarsai} S` : ''].filter(Boolean).join(' – '))}
-            {row('Mustateel / Murabba', l.murabba)}
-            {row('Khasra / Khewat / Khatauni', [l.khasraNos.join(', '), l.khewat, l.khatauni].filter(Boolean).join(' · '))}
+            {(l.parcels ?? []).some((p) => p.murabba) ? row('Murabba → Killa / Khasra', (l.parcels ?? []).filter((p) => p.murabba).map((p) => `${p.murabba}: ${p.khasras.join(', ') || '—'}`).join('  |  ')) : l.murabba && row('Mustateel / Murabba', l.murabba)}
+            {row('Khasra / Khewat / Khatauni', [((l.parcels ?? []).some((p) => p.murabba) ? (l.parcels ?? []).filter((p) => !p.murabba).flatMap((p) => p.khasras) : l.khasraNos).join(', '), l.khewat, l.khatauni].filter(Boolean).join(' · '))}
             {row('Land specification', c.landSpec)}
             {row('Government a party', c.governmentParty ? 'Yes' : 'No')}
             {row('Last hearing', fmt(c.lastHearing))}

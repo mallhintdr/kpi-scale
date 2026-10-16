@@ -150,8 +150,10 @@ export async function caseFilePdf(c: any, ctx: { mouza?: string; tehsil?: string
   w.pair('Respondent(s)', (c.respondents ?? []).join('; '));
   const l = c.land ?? {};
   w.pair('Land measuring', [l.kanal ? `${l.kanal} Kanal` : '', l.marla ? `${l.marla} Marla` : '', l.sarsai ? `${l.sarsai} Sarsai` : ''].filter(Boolean).join(' ') || '—');
-  w.pair('Mustateel / Murabba', l.murabba ?? '');
-  w.pair('Khasra / Khewat / Khatauni', [(l.khasraNos ?? []).join(', '), l.khewat, l.khatauni].filter(Boolean).join(' · '));
+  // With murabbas the khasras are listed under each murabba; otherwise (khasra-only tehsils) on their own line
+  const loose = (l.parcels?.length ? l.parcels.filter((p: any) => !p.murabba).flatMap((p: any) => p.khasras) : l.murabba ? [] : l.khasraNos) ?? [];
+  if (l.murabba) w.pair('Murabba (Killa / Khasra)', l.murabba);
+  w.pair('Khasra / Khewat / Khatauni', [loose.join(', '), l.khewat, l.khatauni].filter(Boolean).join(' · '));
   w.pair('Land specification', c.landSpec ?? '');
   w.pair('Last hearing', fmt(c.lastHearing));
   w.pair('Next hearing', fmt(c.nextHearing));

@@ -20,7 +20,7 @@ import { Charge, Counter, LitigationCase, LitigationDoc, Tenant, Unit, User } fr
 import { bpOf, getBlueprint } from '../org/service.js';
 import { activeFilter, ancestorAt, hasCap } from '../revenue/access.js';
 import { queueMessage } from '../whatsapp/engine.js';
-import { COURTS, canEnterOn, codeOf, courtName, loadCase, scopeFilter, settings } from './litigation.routes.js';
+import { COURTS, canEnterOn, codeOf, courtName, landBody, loadCase, scopeFilter, settings } from './litigation.routes.js';
 import { CATEGORY_ORDER } from './pdf.js';
 
 const router = Router();
@@ -45,14 +45,26 @@ router.get('/causelist', validate({ query: z.object({ from: z.string().optional(
 /* ================================================================== *
  *  Suggestions: values already used in the user's jurisdiction, so entries stay uniform
  * ================================================================== */
+/**
+ * Excel land columns → parcels. "45: 12, 13 | 46: 7" gives two murabbas with their khasras;
+ * a plain murabba with plain khasras is one parcel; khasras alone (no murabba tehsils) are one parcel too.
+ */
+function landFrom(murabba: string, khasras: string) {
+  const list = (x: string) => x.split(/[,;]/).map((y) => y.trim()).filter(Boolean);
+  const parcels = /[:|]/.test(murabba)
+    ? murabba.split('|').map((part) => { const [m, k = ''] = part.split(':'); return { murabba: m.trim() || undefined, khasras: list(k) }; })
+    : [{ murabba: murabba.trim() || undefined, khasras: list(khasras) }];
+  return landBody.parse({ parcels });
+}
+
 router.get('/suggest', async (req, res) => {
   const base = { deleted: { $ne: true }, ...(await scopeFilter(req.user!, bpOf(req))) };
-  const fields = ['caseType', 'bench', 'landSpec', 'applicants', 'respondents', 'land.murabba', 'decision.result', 'hearings.nextAction', 'hearings.proceedingsDone', 'hearings.attendedBy'] as const;
+  const fields = ['caseType', 'bench', 'landSpec', 'applicants', 'respondents', 'land.parcels.murabba', 'decision.result', 'hearings.nextAction', 'hearings.proceedingsDone', 'hearings.attendedBy'] as const;
   const top = (f: string) => LitigationCase.aggregate([
     { $match: base },
     { $sort: { updatedAt: -1 } },
     { $limit: 2000 },
-    ...(f.includes('.') && f.split('.')[0] === 'hearings' ? [{ $unwind: '$hearings' }] : []),
+    ...(f.startsWith('hearings.') ? [{ $unwind: '$hearings' }] : f.startsWith('land.parcels.') ? [{ $unwind: '$land.parcels' }] : []),
     ...(['applicants', 'respondents'].includes(f) ? [{ $unwind: `$${f}` }] : []),
     { $group: { _id: `$${f}`, n: { $sum: 1 } } },
     { $match: { _id: { $nin: [null, ''] } } },
@@ -100,7 +112,8 @@ router.get('/stats', async (req, res) => {
  * ================================================================== */
 router.get('/settings', async (req, res) => {
   const s = await settings(req.user!.tenantId);
-  res.json({ ...s, courts: COURTS });
+  const tehsils = await Unit.find({ type: 'tehsil' }).select('name').sort({ name: 1 }).lean();
+  res.json({ ...s, courts: COURTS, tehsils: tehsils.map((t) => ({ _id: t._id, name: t.name })) });
 });
 
 /* ================================================================== *
@@ -184,7 +197,7 @@ router.post('/import', express.json({ limit: '15mb' }), validate({ body: z.objec
         unitId: mouza._id, anc: mouza.anc, tehsilId: ancestorAt(bp, mouza as any, 'tehsil'),
         caseType: v('Type of Case') || 'Other', institutedOn: inst, court, courtOther: court === 'other' ? courtTxt || 'Other' : undefined, courtCaseNo: v('Court Case No.') || undefined,
         applicants, respondents,
-        land: { kanal: num(v('Kanal')), marla: num(v('Marla')), sarsai: num(v('Sarsai')), murabba: v('Mustateel / Murabba') || undefined, khasraNos: v('Khasra Nos.').split(/[,;]/).map((x) => x.trim()).filter(Boolean) },
+        land: { kanal: num(v('Kanal')), marla: num(v('Marla')), sarsai: num(v('Sarsai')), ...landFrom(v('Mustateel / Murabba'), v('Khasra Nos.')) },
         landSpec: v('Land Specification') || undefined,
         lastHearing: last ?? undefined, nextHearing: decided ? undefined : next ?? undefined,
         lastProceedings: v('Proceedings (Last Date)') || undefined, nextAction: v('To Be Done (Next Date)') || undefined,
