@@ -89,6 +89,16 @@ const imp = (await call(p1, 'POST', '/litigation/import', { file: good, dryRun: 
 check(imp.imported === 1, 'the corrected file imports 1 case with an automatic ID');
 await call(adm, 'PUT', '/litigation/settings', { appealDays: {} });
 
+console.log('Phase 3');
+await call(p1, 'PATCH', `/litigation/${second.b._id}`, { nextHearing: null });
+const st = (await call(tsd, 'GET', '/litigation/stats')).b;
+check(st.byCourt.some((g) => g.label && g.total >= 1) && st.byType.length && st.byTehsil.some((t) => t.label === 'Hasilpur'), 'monitoring groups cases by court, type and tehsil');
+check(st.oldest.length >= 1 && typeof st.oldest[0].years === 'number', 'oldest pending cases are listed with their age');
+check(st.noHearing.some((x) => x._id === second.b._id), 'a pending case with no next hearing is flagged');
+await call(p1, 'PATCH', `/litigation/${urduCase.b._id}`, { status: 'decided', decision: { date: '2026-10-01', result: 'Against government' }, appeal: { filed: 'undecided' } });
+check((await call(tsd, 'GET', '/litigation/stats')).b.againstGovt.some((x) => x._id === urduCase.b._id), 'decided against government with no appeal decision is flagged');
+
 // Clean up: remove test cases completely
-for (const cid of [id, second.b._id]) await call(adm, 'DELETE', `/litigation/${cid}`);
+const imported = (await call(adm, 'GET', '/litigation?search=CS-T-IMP1')).b.items.map((x) => x._id);
+for (const cid of [id, second.b._id, urduCase.b._id, ...imported]) await call(adm, 'DELETE', `/litigation/${cid}`);
 console.log(`\n${ok} checks passed`);

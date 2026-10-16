@@ -40,6 +40,7 @@ Run these from `server`, with the API running:
 | `node scripts/e2e-access.mjs` | 17 checks passed |
 | `node scripts/check-rollups.mjs` | 10 checks passed |
 | `node scripts/e2e-whatsapp.mjs` | 17 checks passed |
+| `node scripts/e2e-litigation.mjs` | 32 checks passed |
 
 ### 0.4 Test accounts — one per role
 | Role | Email (`@bwp.test`) | Works on |
@@ -184,6 +185,22 @@ Use the **current month**; future months are refused.
 | K-05 | Mark the para Settled | Settled count rises | ☐ |
 | K-06 | As `patwari1` try to delete a para | Not allowed (Wasil Baqi or admin only) | ☐ |
 | K-07 | The bell icon | Unread count; opening the list marks items read | ☐ |
+
+### 12A. Litigation
+| ID | Steps | Expected | ☐ |
+|---|---|---|---|
+| L-01 | As `patwari1.hasilpur` › Litigation › New Case: mouza, type, court, parties, land (incl. Murabba), next hearing | Saved with an ID like `HSL-<MOUZA>-0001`; the serial runs per tehsil | ☐ |
+| L-02 | Enter the same court case no. again | Duplicate warning; can save anyway | ☐ |
+| L-03 | As `tehsildar.hasilpur` open the case; try New Case | Sees it; cannot enter cases. A Yazman patwari cannot see it | ☐ |
+| L-04 | Record a hearing with the next date | Next hearing moves forward; shown in Cause List and Calendar | ☐ |
+| L-05 | Mark Decided without a date; then Appeal "No" without a reason | Both refused | ☐ |
+| L-06 | Decide, appeal Yes, then Start Appeal Stage | Same Case ID, stage 2, status Pending | ☐ |
+| L-07 | Attach 2 camera photos, then a PDF; try a non-PDF file | Photos become one small PDF; PDF kept; other file refused | ☐ |
+| L-08 | Case File PDF and Documents ZIP buttons; names in Urdu | PDF has cover, hearings, dividers, documents; Urdu joined and right-to-left | ☐ |
+| L-09 | Import: download the template, fill a row with a wrong mouza, Check | Row-level problem shown; nothing saved until corrected | ☐ |
+| L-10 | Calendar tab: move between months | Each day shows its hearings; today outlined | ☐ |
+| L-11 | Monitoring tab | Counts by court, type and tehsil; oldest pending; pending with no hearing; decided against government with appeal undecided | ☐ |
+| L-12 | As `admin` › Settings: appeal period for a court | Cases decided in that court show "Appeal period ending" alerts | ☐ |
 
 ## 13. Officer profile
 | ID | Steps | Expected | ☐ |

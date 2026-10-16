@@ -63,7 +63,7 @@ export function LitigationList() {
   const [week, setWeek] = useState(false);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
-  const [view, setView] = useState<'register' | 'causelist'>('register');
+  const [view, setView] = useState<'register' | 'causelist' | 'calendar' | 'monitor'>('register');
   const [importing, setImporting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const caps = useCaps();
@@ -86,10 +86,10 @@ export function LitigationList() {
           {meta.data?.canEnter && <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />New Case</Button>}
         </div>
       } />
-      <div className="mb-3"><Segmented value={view} onChange={setView} options={[{ value: 'register', label: 'Register' }, { value: 'causelist', label: 'Cause List' }]} /></div>
+      <div className="mb-3"><Segmented value={view} onChange={setView} options={[{ value: 'register', label: 'Register' }, { value: 'causelist', label: 'Cause List' }, { value: 'calendar', label: 'Calendar' }, { value: 'monitor', label: 'Monitoring' }]} /></div>
       {importing && <ImportSheet onClose={() => setImporting(false)} />}
       {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} />}
-      {view === 'causelist' ? <CauseList area={area} /> : <>
+      {view === 'causelist' ? <CauseList area={area} /> : view === 'calendar' ? <HearingCalendar area={area} /> : view === 'monitor' ? <Monitoring /> : <>
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {[
           { l: 'Total Cases', v: d?.total, on: () => { setStatus(''); setWeek(false); } },
@@ -205,6 +205,104 @@ function CauseList({ area }: { area: UnitRef | null }) {
         );
       })}
     </>
+  );
+}
+
+/* ---------- Calendar: a month of hearings ---------- */
+function HearingCalendar({ area }: { area: UnitRef | null }) {
+  const [month, setMonth] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
+  const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const last = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+  const { data, isLoading } = useQuery({
+    queryKey: ['lit', 'calendar', ymd(month), area?._id],
+    queryFn: () => get<{ items: { _id: string; caseId: string; courtName: string; nextHearing: string }[] }>(`/litigation/causelist?from=${ymd(month)}&to=${ymd(last)}${area ? `&unitId=${area._id}` : ''}`),
+  });
+  const byDay = new Map<string, { _id: string; caseId: string; courtName: string }[]>();
+  for (const c of data?.items ?? []) { const k = c.nextHearing.slice(0, 10); byDay.set(k, [...(byDay.get(k) ?? []), c]); }
+  const lead = (month.getDay() + 6) % 7; // weeks start on Monday
+  const cells = [...Array(lead).fill(null), ...Array.from({ length: last.getDate() }, (_, i) => new Date(month.getFullYear(), month.getMonth(), i + 1))];
+  const today = ymd(new Date());
+  const shift = (n: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + n, 1));
+  return (
+    <Card className="p-3">
+      <div className="mb-3 flex items-center justify-between">
+        <Button size="sm" variant="ghost" onClick={() => shift(-1)}>‹ Previous</Button>
+        <b>{month.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}{isLoading && ' …'}</b>
+        <Button size="sm" variant="ghost" onClick={() => shift(1)}>Next ›</Button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-[12px]">
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((w) => <div key={w} className="rounded bg-brand-700 py-1 text-center font-semibold text-white">{w}</div>)}
+        {cells.map((d, i) => {
+          if (!d) return <div key={`x${i}`} />;
+          const k = ymd(d); const rows = byDay.get(k) ?? [];
+          return (
+            <div key={k} className={clsx('min-h-20 rounded border border-slate-200 p-1', k === today && 'ring-2 ring-brand-500', rows.length && 'bg-sky-50 dark:bg-sky-950/30')}>
+              <div className="flex justify-between text-[11px] text-slate-500"><span>{d.getDate()}</span>{rows.length > 0 && <b className="text-sky-700">{rows.length}</b>}</div>
+              {rows.slice(0, 3).map((c) => <Link key={c._id} to={`/litigation/${c._id}`} title={c.courtName} className="block truncate font-mono text-[10.5px] text-sky-800 hover:underline">{c.caseId}</Link>)}
+              {rows.length > 3 && <div className="text-[10px] text-slate-500">+{rows.length - 3} more</div>}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+/* ---------- Monitoring: where the cases are, what needs attention ---------- */
+type Grp = { _id: string; label: string; total: number; pending: number; decided: number };
+type MonCase = { _id: string; caseId: string; unitId: { name: string } | null; courtName: string; institutedOn?: string; years?: number; decision?: { date?: string; result?: string } };
+function Monitoring() {
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['lit', 'stats'], queryFn: () => get<{ byCourt: Grp[]; byType: Grp[]; byTehsil: Grp[]; oldest: MonCase[]; noHearing: MonCase[]; againstGovt: MonCase[] }>('/litigation/stats') });
+  if (isLoading) return <Loading />;
+  if (error || !data) return <ErrorState error={error} retry={refetch} />;
+  const th = 'border-b border-r border-white/50 px-2 py-1.5';
+  const td = 'border-b border-r border-slate-200 px-2 py-1.5';
+  const GroupTable = ({ title, rows }: { title: string; rows: Grp[] }) => (
+    <div>
+      <SectionTitle>{title}</SectionTitle>
+      <Card className="overflow-x-auto">
+        <table className="w-full border-separate border-spacing-0 text-[13px]">
+          <thead className="bg-brand-700 text-center text-[12.5px] text-white"><tr>{['', 'Total', 'Pending', 'Decided'].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {rows.length ? rows.map((r) => <tr key={String(r._id)}><td className={td}>{r.label || '—'}</td>{[r.total, r.pending, r.decided].map((v, i) => <td key={i} className={clsx(td, 'text-center tabular-nums')}>{v}</td>)}</tr>) : <tr><td colSpan={4} className={clsx(td, 'text-center text-slate-500')}>No cases</td></tr>}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+  const CaseTable = ({ title, rows, extra }: { title: string; rows: MonCase[]; extra: [string, (c: MonCase) => string] }) => (
+    <div>
+      <SectionTitle>{title} · {rows.length}</SectionTitle>
+      <Card className="overflow-x-auto">
+        <table className="w-full border-separate border-spacing-0 text-[13px]">
+          <thead className="bg-brand-700 text-center text-[12.5px] text-white"><tr>{['Case ID', 'Mouza', 'Court', extra[0]].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {rows.length ? rows.map((c) => (
+              <tr key={c._id}>
+                <td className={clsx(td, 'whitespace-nowrap font-mono text-[12px]')}><Link to={`/litigation/${c._id}`} className="hover:underline">{c.caseId}</Link></td>
+                <td className={td}>{c.unitId?.name.replace(' (test)', '')}</td>
+                <td className={td}>{c.courtName}</td>
+                <td className={clsx(td, 'text-center')}>{extra[1](c)}</td>
+              </tr>
+            )) : <tr><td colSpan={4} className={clsx(td, 'text-center text-slate-500')}>None</td></tr>}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-3">
+        <GroupTable title="By Court" rows={data.byCourt} />
+        <GroupTable title="By Case Type" rows={data.byType} />
+        <GroupTable title="By Tehsil" rows={data.byTehsil} />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <CaseTable title="Decided Against Government, Appeal Not Decided" rows={data.againstGovt} extra={['Decided On', (c) => fmt(c.decision?.date)]} />
+        <CaseTable title="Pending With No Next Hearing" rows={data.noHearing} extra={['Instituted', (c) => fmt(c.institutedOn)]} />
+      </div>
+      <CaseTable title="Oldest Pending Cases" rows={data.oldest} extra={['Pending For', (c) => `${c.years} yr`]} />
+    </div>
   );
 }
 

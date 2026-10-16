@@ -43,6 +43,38 @@ router.get('/causelist', validate({ query: z.object({ from: z.string().optional(
 });
 
 /* ================================================================== *
+ *  Monitoring: where the cases are and what needs attention
+ * ================================================================== */
+router.get('/stats', async (req, res) => {
+  const me = req.user!;
+  const bp = bpOf(req);
+  const base = { deleted: { $ne: true }, ...(await scopeFilter(me, bp)) };
+  const group = (key: string) => LitigationCase.aggregate([
+    { $match: base },
+    { $group: { _id: key, total: { $sum: 1 }, pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } }, decided: { $sum: { $cond: [{ $eq: ['$status', 'decided'] }, 1, 0] } } } },
+    { $sort: { pending: -1, total: -1 } },
+  ]);
+  const [byCourt, byType, byTehsil, oldest, noHearing, againstGovt] = await Promise.all([
+    group('$court'),
+    group('$caseType'),
+    group('$tehsilId'),
+    LitigationCase.find({ ...base, status: 'pending' }).select('caseId institutedOn court courtOther unitId nextHearing').populate('unitId', 'name').sort({ institutedOn: 1 }).limit(10).lean(),
+    LitigationCase.find({ ...base, status: 'pending', $or: [{ nextHearing: null }, { nextHearing: { $exists: false } }] }).select('caseId unitId court courtOther institutedOn').populate('unitId', 'name').sort({ institutedOn: 1 }).limit(50).lean(),
+    LitigationCase.find({ ...base, status: 'decided', 'decision.result': /against government/i, 'appeal.filed': 'undecided' }).select('caseId unitId court courtOther decision').populate('unitId', 'name').sort({ 'decision.date': -1 }).limit(50).lean(),
+  ]);
+  const tehsils = new Map((await Unit.find({ _id: { $in: byTehsil.map((t) => t._id).filter(Boolean) } }).select('name').lean()).map((t) => [String(t._id), t.name]));
+  const now = Date.now();
+  res.json({
+    byCourt: byCourt.map((x) => ({ ...x, label: courtName(x._id) })),
+    byType: byType.map((x) => ({ ...x, label: x._id })),
+    byTehsil: byTehsil.map((x) => ({ ...x, label: tehsils.get(String(x._id)) ?? '—' })),
+    oldest: oldest.map((c: any) => ({ ...c, courtName: courtName(c.court, c.courtOther), years: Math.round(((now - +new Date(c.institutedOn)) / (365.25 * DAY)) * 10) / 10 })),
+    noHearing: noHearing.map((c: any) => ({ ...c, courtName: courtName(c.court, c.courtOther) })),
+    againstGovt: againstGovt.map((c: any) => ({ ...c, courtName: courtName(c.court, c.courtOther) })),
+  });
+});
+
+/* ================================================================== *
  *  Settings: case types and appeal periods (admins)
  * ================================================================== */
 router.get('/settings', async (req, res) => {
