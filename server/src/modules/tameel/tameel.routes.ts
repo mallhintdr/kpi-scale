@@ -22,7 +22,7 @@ const isAdmin = (me: AuthUser) => atLeast(me.role, 'admin');
 /** Admins, or the officer who issued this Tameel. */
 const canManage = (me: AuthUser, t: { createdBy?: unknown }) => isAdmin(me) || String((t.createdBy as any)?._id ?? t.createdBy) === me.id;
 /** Officers who may assign work (their posts have 'assign_targets'), or admins. */
-const canIssue = async (me: AuthUser, bp: BP, unit?: { anc: Types.ObjectId[] }) => isAdmin(me) || ((await hasCap(me, bp, 'assign_targets', unit)) && (!unit || (await canSeeUnit(me, unit, bp))));
+const canIssue = async (me: AuthUser, bp: BP, unit?: { anc: Types.ObjectId[] }) => isAdmin(me) || ((await hasCap(me, bp, 'assign_targets')) && (!unit || (await canSeeUnit(me, unit, bp))));
 const clean = (v: unknown) => (v == null ? '' : typeof v === 'object' && 'text' in (v as any) ? String((v as any).text) : typeof v === 'object' && 'result' in (v as any) ? String((v as any).result) : v instanceof Date ? v.toISOString().slice(0, 10) : String(v)).trim();
 
 /* ---------- Excel ---------- */
