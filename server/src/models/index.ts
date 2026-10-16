@@ -549,6 +549,8 @@ const tameelSchema = new Schema(
     description: { type: String, required: true, maxlength: 5000 },
     deadline: { type: Date, required: true },
     /** Columns from the uploaded Excel header row (key = stable id, label = header text). */
+    /** proforma: an Excel format filled in row by row · task: a to-do / directive marked Done with a note */
+    kind: { type: String, enum: ['proforma', 'task'], default: 'proforma' },
     columns: [{ key: { type: String, required: true }, label: { type: String, required: true }, _id: false }],
     sourceFile: String,
     /** Area covered, and the posts that must fill it in (one sheet per unit they hold inside the area). */
@@ -578,6 +580,8 @@ const tameelSheetSchema = new Schema(
     rows: [{ values: { type: Schema.Types.Mixed, default: {} }, updatedBy: ref('User'), updatedAt: Date }],
     status: { type: String, enum: ['draft', 'submitted', 'returned', 'accepted'], default: 'draft' },
     returnNote: { type: String, maxlength: 1000 },
+    /** To-do tasks: what was done (written when marking Done). */
+    doneNote: { type: String, maxlength: 2000 },
     submittedBy: ref('User'),
     submittedAt: Date,
     history: [{ at: Date, by: ref('User'), action: String, note: String, _id: false }],

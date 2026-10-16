@@ -15,10 +15,14 @@ import { objectId, q, validate } from '../../middleware/validate.js';
 import { Charge, Tameel, TameelFile, TameelSheet, Unit, User } from '../../models/index.js';
 import type { BP } from '../org/blueprint.js';
 import { bpOf } from '../org/service.js';
-import { activeFilter, ancestorAt, myCharges } from '../revenue/access.js';
+import { activeFilter, ancestorAt, canSeeUnit, hasCap, myCharges } from '../revenue/access.js';
 
 const router = Router();
 const isAdmin = (me: AuthUser) => atLeast(me.role, 'admin');
+/** Admins, or the officer who issued this Tameel. */
+const canManage = (me: AuthUser, t: { createdBy?: unknown }) => isAdmin(me) || String((t.createdBy as any)?._id ?? t.createdBy) === me.id;
+/** Officers who may assign work (their posts have 'assign_targets'), or admins. */
+const canIssue = async (me: AuthUser, bp: BP, unit?: { anc: Types.ObjectId[] }) => isAdmin(me) || ((await hasCap(me, bp, 'assign_targets', unit)) && (!unit || (await canSeeUnit(me, unit, bp))));
 const clean = (v: unknown) => (v == null ? '' : typeof v === 'object' && 'text' in (v as any) ? String((v as any).text) : typeof v === 'object' && 'result' in (v as any) ? String((v as any).result) : v instanceof Date ? v.toISOString().slice(0, 10) : String(v)).trim();
 
 /* ---------- Excel ---------- */
@@ -49,15 +53,21 @@ async function buildWorkbook(t: any, sheets: any[], units: Map<string, any>, use
   const wb = new ExcelJS.Workbook();
   wb.creator = 'KPI Dashboard';
   const ws = wb.addWorksheet((groupName ?? t.title).slice(0, 31).replace(/[\\/?*[\]:]/g, ' '));
+  const isTask = t.kind === 'task';
   const extra = ['Sr. No', 'Unit', 'Status', 'Submitted By', 'Submitted At'];
   ws.addRow([`${t.title}${groupName ? ` — ${groupName}` : ''}`]).font = { bold: true, size: 13 };
   ws.addRow([`Deadline: ${new Date(t.deadline).toLocaleDateString('en-GB')} · Generated: ${new Date().toLocaleString('en-GB')}`]);
-  const head = ws.addRow([...extra.slice(0, 2), ...t.columns.map((c: any) => c.label), ...extra.slice(2)]);
+  const head = ws.addRow([...extra.slice(0, 2), ...(isTask ? ['What Was Done'] : t.columns.map((c: any) => c.label)), ...extra.slice(2)]);
   head.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   head.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF187A43' } }; c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; });
   let n = 0;
   for (const s of sheets) {
     const unit = units.get(String(s.unitId))?.name ?? '';
+    if (isTask) {
+      n++;
+      ws.addRow([n, unit, s.doneNote ?? '', s.status, users.get(String(s.submittedBy)) ?? '', s.submittedAt ? new Date(s.submittedAt).toLocaleString('en-GB') : '']);
+      continue;
+    }
     for (const r of s.rows) {
       n++;
       ws.addRow([n, unit, ...t.columns.map((c: any) => r.values?.[c.key] ?? ''), s.status, users.get(String(s.submittedBy)) ?? '', s.submittedAt ? new Date(s.submittedAt).toLocaleString('en-GB') : '']);
@@ -106,7 +116,7 @@ async function loadTameel(id: string) {
 
 /** Sheet access: the holder of the unit (any post of the Tameel) edits until submitted; admins always. */
 async function sheetAccess(me: AuthUser, t: any, unitId: string) {
-  if (isAdmin(me)) return 'admin' as const;
+  if (canManage(me, t)) return 'admin' as const;
   const mine = await myUnits(me, t);
   if (mine.some((c) => String(c.unit._id) === unitId)) return 'holder' as const;
   return null;
@@ -127,7 +137,8 @@ const editable = (access: 'admin' | 'holder', status: string) => access === 'adm
 /* ================================================================== *
  *  Admin: create / list / manage
  * ================================================================== */
-router.post('/parse', requireRole('admin'), express.json({ limit: '12mb' }), validate({ body: z.object({ file: z.string().min(10).max(16_000_000), name: z.string().max(200).optional() }) }), async (req, res) => {
+router.post('/parse', express.json({ limit: '12mb' }), validate({ body: z.object({ file: z.string().min(10).max(16_000_000), name: z.string().max(200).optional() }) }), async (req, res) => {
+  if (!(await canIssue(req.user!, bpOf(req)))) throw forbidden('You cannot issue a Tameel');
   try {
     res.json(await readHeaders(req.body.file));
   } catch (e) {
@@ -140,40 +151,46 @@ const body = z.object({
   title: z.string().trim().min(3).max(200),
   description: z.string().trim().min(10).max(5000),
   deadline: z.coerce.date(),
-  columns: z.array(z.object({ key: z.string().max(20), label: z.string().trim().min(1).max(120) })).min(1).max(80),
+  kind: z.enum(['proforma', 'task']).default('proforma'),
+  columns: z.array(z.object({ key: z.string().max(20), label: z.string().trim().min(1).max(120) })).max(80).default([]),
   unitId: objectId,
   posts: z.array(z.string().max(40)).min(1).default(['patwari']),
   groupLevel: z.string().max(40).optional(),
   sourceFile: z.string().max(200).optional(),
 });
 
-router.post('/', requireRole('admin'), validate({ body }), async (req, res) => {
+router.post('/', validate({ body }), async (req, res) => {
   const bp = bpOf(req);
   const b = req.body as z.infer<typeof body>;
+  if (b.kind === 'proforma' && !b.columns.length) throw badRequest('Upload the Excel format, or choose a to-do task');
+  if (b.kind === 'task') b.columns = [];
   if (b.deadline.getTime() < Date.now() - 86_400_000) throw badRequest('The deadline is in the past');
   const unknown = b.posts.filter((p) => !bp.post.has(p));
   if (unknown.length) throw badRequest(`Unknown post: ${unknown.join(', ')}`);
   const unit = await Unit.findById(b.unitId).select('anc type').lean();
   if (!unit) throw notFound('Area');
+  if (!(await canIssue(req.user!, bp, unit as any))) throw forbidden('You can issue a Tameel only within your own jurisdiction');
   const groupLevel = b.groupLevel && bp.level.has(b.groupLevel) ? b.groupLevel : bp.level.has('tehsil') ? 'tehsil' : unit.type;
   const t = await Tameel.create({ ...b, anc: unit.anc, groupLevel, createdBy: req.user!.id });
   // Tell everyone who must fill it in
   const inArea = await Unit.find({ anc: unit._id }).select('_id').lean();
   const people = await Charge.find({ post: { $in: b.posts }, unitId: { $in: inArea.map((u) => u._id) }, ...activeFilter() }).distinct('userId');
-  await notify(people, { type: 'tameel.new', title: `New Tameel: ${b.title}`, body: `Due ${b.deadline.toDateString()}`, link: `/tameel/${t._id}` });
+  await notify(people, { type: 'tameel.new', title: `${b.kind === 'task' ? 'New task' : 'New Tameel'}: ${b.title}`, body: `Due ${b.deadline.toDateString()}`, link: `/tameel/${t._id}` });
   await audit('tameel.create', 'Tameel', t._id, { title: b.title, assignees: people.length });
   res.status(201).json(t);
 });
 
-router.patch('/:id', requireRole('admin'), validate({ params: z.object({ id: objectId }), body: z.object({ title: z.string().trim().min(3).max(200).optional(), description: z.string().trim().min(10).max(5000).optional(), deadline: z.coerce.date().optional(), status: z.enum(['open', 'closed']).optional() }) }), async (req, res) => {
+router.patch('/:id', validate({ params: z.object({ id: objectId }), body: z.object({ title: z.string().trim().min(3).max(200).optional(), description: z.string().trim().min(10).max(5000).optional(), deadline: z.coerce.date().optional(), status: z.enum(['open', 'closed']).optional() }) }), async (req, res) => {
+  if (!canManage(req.user!, await loadTameel(req.params.id as string))) throw forbidden();
   const t = await Tameel.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }).lean();
   if (!t) throw notFound('Tameel');
   await audit('tameel.update', 'Tameel', t._id, { fields: Object.keys(req.body) });
   res.json(t);
 });
 
-router.delete('/:id', requireRole('admin'), validate({ params: z.object({ id: objectId }) }), async (req, res) => {
+router.delete('/:id', validate({ params: z.object({ id: objectId }) }), async (req, res) => {
   const t = await loadTameel(req.params.id as string);
+  if (!canManage(req.user!, t)) throw forbidden();
   await Promise.all([TameelSheet.deleteMany({ tameelId: t._id }), TameelFile.deleteMany({ tameelId: t._id }), Tameel.deleteOne({ _id: t._id })]);
   await audit('tameel.delete', 'Tameel', t._id, { title: t.title });
   res.status(204).end();
@@ -182,19 +199,21 @@ router.delete('/:id', requireRole('admin'), validate({ params: z.object({ id: ob
 /* ---------- lists ---------- */
 router.get('/', async (req, res) => {
   const me = req.user!;
-  const all = await Tameel.find(isAdmin(me) ? {} : { status: 'open' }).populate('unitId', 'name type').sort({ status: 1, deadline: 1 }).limit(300).lean();
+  const all = await Tameel.find(isAdmin(me) ? {} : { $or: [{ status: 'open' }, { createdBy: me.id }] }).populate('unitId', 'name type').sort({ status: 1, deadline: 1 }).limit(300).lean();
   const sheets = await TameelSheet.find({ tameelId: { $in: all.map((t) => t._id) } }).select('tameelId unitId status rows').lean();
   const charges = isAdmin(me) ? [] : await myCharges(me.id);
   const out = [];
   for (const t of all) {
     const mine = charges.filter((c) => t.posts.includes(c.post) && c.unit.anc.some((a) => String(a) === String((t.unitId as any)?._id ?? t.unitId)));
-    if (!isAdmin(me) && !mine.length) continue;
+    const manager = canManage(me, t);
+    if (!manager && !mine.length) continue;
     const ts = sheets.filter((s) => String(s.tameelId) === String(t._id));
     const own = mine.map((c) => ({ unitId: c.unit._id, unitName: c.unit.name, status: ts.find((s) => String(s.unitId) === String(c.unit._id))?.status ?? 'not started', rows: ts.find((s) => String(s.unitId) === String(c.unit._id))?.rows.length ?? 0 }));
     out.push({
       ...t,
       counts: { submitted: ts.filter((s) => s.status === 'submitted').length, accepted: ts.filter((s) => s.status === 'accepted').length, returned: ts.filter((s) => s.status === 'returned').length, draft: ts.filter((s) => s.status === 'draft').length },
       mine: own,
+      manager,
     });
   }
   res.json(out);
@@ -205,7 +224,7 @@ router.get('/:id', validate({ params: z.object({ id: objectId }) }), async (req,
   const me = req.user!;
   const t = await Tameel.findById(req.params.id).populate('unitId', 'name type').populate('createdBy', 'name').lean();
   if (!t) throw notFound('Tameel');
-  const admin = isAdmin(me);
+  const admin = canManage(me, t);
   const assigned = await assignedUnits(t);
   const unitIds = [...assigned.keys()];
   const [units, sheets, files] = await Promise.all([
@@ -244,7 +263,7 @@ const rowBody = z.object({ values: z.record(z.string().max(20), z.string().max(2
 /** Add (no rowId) or update one row. */
 router.put('/:id/sheet/:unitId/rows{/:rowId}', validate({ params: z.object({ id: objectId, unitId: objectId, rowId: objectId.optional() }), body: rowBody }), async (req, res) => {
   const t = await loadTameel(req.params.id as string);
-  if (t.status !== 'open' && !isAdmin(req.user!)) throw badRequest('This Tameel is closed');
+  if (t.status !== 'open' && !canManage(req.user!, t)) throw badRequest('This Tameel is closed');
   const access = await sheetAccess(req.user!, t, req.params.unitId as string);
   if (!access) throw forbidden();
   const s = await getOrCreateSheet(bpOf(req), t, req.params.unitId as string);
@@ -280,17 +299,18 @@ router.delete('/:id/sheet/:unitId/rows/:rowId', validate({ params: z.object({ id
   res.json(s);
 });
 
-router.post('/:id/sheet/:unitId/submit', validate({ params: z.object({ id: objectId, unitId: objectId }) }), async (req, res) => {
+router.post('/:id/sheet/:unitId/submit', validate({ params: z.object({ id: objectId, unitId: objectId }), body: z.object({ note: z.string().trim().max(2000).optional() }) }), async (req, res) => {
   const t = await loadTameel(req.params.id as string);
   if (t.status !== 'open') throw badRequest('This Tameel is closed');
   const access = await sheetAccess(req.user!, t, req.params.unitId as string);
   if (!access) throw forbidden();
   const s = await getOrCreateSheet(bpOf(req), t, req.params.unitId as string);
-  if (!s.rows.length) throw badRequest('Add at least one row before submitting');
+  if (t.kind !== 'task' && !s.rows.length) throw badRequest('Add at least one row before submitting');
+  if (t.kind === 'task') s.set('doneNote', req.body.note);
   if (!['draft', 'returned'].includes(s.status) && access !== 'admin') throw badRequest('Already submitted');
   const now = new Date();
   s.set({ status: 'submitted', submittedBy: req.user!.id, submittedAt: now, returnNote: undefined });
-  s.history.push({ at: now, by: req.user!.id, action: now > t.deadline ? 'submitted (late)' : 'submitted' } as any);
+  s.history.push({ at: now, by: req.user!.id, action: `${t.kind === 'task' ? 'done' : 'submitted'}${now > t.deadline ? ' (late)' : ''}`, note: req.body.note } as any);
   await s.save();
   await rebuildGroupFile(t, s.groupId as any);
   await notify(t.createdBy, { type: 'tameel.submitted', title: `Tameel submitted: ${t.title}`, body: `${(await Unit.findById(s.unitId).select('name').lean())?.name} · ${s.rows.length} row(s)`, link: `/tameel/${t._id}` });
@@ -298,8 +318,9 @@ router.post('/:id/sheet/:unitId/submit', validate({ params: z.object({ id: objec
 });
 
 /* Admin: return for correction (with a note) or accept */
-router.post('/:id/sheet/:unitId/review', requireRole('admin'), validate({ params: z.object({ id: objectId, unitId: objectId }), body: z.object({ action: z.enum(['return', 'accept']), note: z.string().trim().max(1000).optional() }) }), async (req, res) => {
+router.post('/:id/sheet/:unitId/review', validate({ params: z.object({ id: objectId, unitId: objectId }), body: z.object({ action: z.enum(['return', 'accept']), note: z.string().trim().max(1000).optional() }) }), async (req, res) => {
   const t = await loadTameel(req.params.id as string);
+  if (!canManage(req.user!, t)) throw forbidden();
   const s = await TameelSheet.findOne({ tameelId: t._id, unitId: req.params.unitId });
   if (!s) throw notFound('Sheet');
   const { action, note } = req.body;
@@ -326,7 +347,8 @@ const sendXlsx = (res: express.Response, name: string, data: Buffer) => {
 };
 
 /** The stored combined file of one group (e.g. a tehsil). */
-router.get('/:id/files/:groupId', requireRole('admin'), validate({ params: z.object({ id: objectId, groupId: objectId }) }), async (req, res) => {
+router.get('/:id/files/:groupId', validate({ params: z.object({ id: objectId, groupId: objectId }) }), async (req, res) => {
+  if (!canManage(req.user!, await loadTameel(req.params.id as string))) throw forbidden();
   const f = await TameelFile.findOne({ tameelId: req.params.id, groupId: req.params.groupId });
   if (!f) throw notFound('File');
   const data = Buffer.from(f.get('data') as Buffer);
@@ -342,7 +364,7 @@ router.get('/:id/export', validate({ params: z.object({ id: objectId }), query: 
   if (unitId) {
     if (!(await sheetAccess(me, t, unitId))) throw forbidden();
     filter = { ...filter, unitId };
-  } else if (!isAdmin(me)) throw forbidden();
+  } else if (!canManage(me, t)) throw forbidden();
   const sheets = await TameelSheet.find(filter).lean();
   const units = new Map((await Unit.find({ _id: { $in: sheets.map((s) => s.unitId) } }).select('name').lean()).map((u) => [String(u._id), u]));
   const users = new Map((await User.find({ _id: { $in: sheets.map((s) => s.submittedBy).filter(Boolean) } }).select('name').lean()).map((u) => [String(u._id), u.name]));

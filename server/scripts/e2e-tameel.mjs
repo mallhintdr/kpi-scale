@@ -75,4 +75,18 @@ const all = await call(adm, 'GET', `/tameel/${id}/export`);
 check(all.s === 200 && all.b.length > 1000, 'combined Excel of all units downloads');
 
 await call(adm, 'DELETE', `/tameel/${id}`);
+
+console.log('To-do task issued by an officer');
+const tsd = await login('tehsildar.hasilpur@bwp.test');
+const task = await call(tsd, 'POST', '/tameel', { kind: 'task', title: 'Demarcation of state land (test)', description: '1. Visit all state land khasras\n2. Report encroachments to the Tehsildar', deadline: new Date(Date.now() + 2 * 86_400_000).toISOString(), unitId: tehsil._id, posts: ['patwari'] });
+check(task.s === 201, 'the Tehsildar issues a to-do task (no Excel) to his patwaris');
+const yaz = (await call(adm, 'GET', '/org/units?search=Yazman')).b.find((u) => u.type === 'tehsil');
+check((await call(tsd, 'POST', '/tameel', { kind: 'task', title: 'Outside (test)', description: 'Should be refused here', deadline: new Date(Date.now() + 86_400_000).toISOString(), unitId: yaz._id })).s === 403, 'but not outside his jurisdiction');
+check((await call(p1, 'POST', '/tameel', { kind: 'task', title: 'x (test)', description: 'patwaris cannot assign', deadline: new Date(Date.now() + 86_400_000).toISOString(), unitId: tehsil._id })).s === 403, 'a patwari cannot issue tasks');
+const done = await call(p1, 'POST', `/tameel/${task.b._id}/sheet/${circle}/submit`, { note: 'Visited 14 khasras; 2 encroachments found' });
+check(done.s === 200 && done.b.doneNote.includes('14 khasras'), 'the patwari marks it Done with a note');
+const tdet = (await call(tsd, 'GET', `/tameel/${task.b._id}`)).b;
+check(tdet.admin && tdet.progress.find((p) => p.unitId === circle).status === 'submitted', 'the Tehsildar sees it done and can review it');
+check((await call(tsd, 'POST', `/tameel/${task.b._id}/sheet/${circle}/review`, { action: 'accept' })).s === 200, 'and accepts it');
+await call(tsd, 'DELETE', `/tameel/${task.b._id}`);
 console.log(`\n${ok} checks passed (test Tameel deleted)`);

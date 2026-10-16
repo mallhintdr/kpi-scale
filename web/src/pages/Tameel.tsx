@@ -17,13 +17,13 @@ import { getOrg, useCaps, type UnitRef } from '../lib/rev';
 interface Col { key: string; label: string }
 interface Mine { unitId: string; unitName: string; status: string; rows: number }
 interface TameelRow {
-  _id: string; title: string; description: string; deadline: string; status: 'open' | 'closed'; columns: Col[]; posts: string[];
+  _id: string; title: string; description: string; deadline: string; status: 'open' | 'closed'; kind?: 'proforma' | 'task'; columns: Col[]; posts: string[]; manager?: boolean;
   unitId: { _id: string; name: string; type: string } | null; counts: Record<string, number>; mine: Mine[];
 }
 interface Progress { unitId: string; unitName: string; group?: string; groupId?: string; holders: string[]; status: string; rows: number; submittedAt?: string; returnNote?: string }
 interface Detail extends Omit<TameelRow, 'counts' | 'mine'> { admin: boolean; progress: Progress[]; files: { _id: string; groupId: { _id: string; name: string }; name: string; rows: number; builtAt: string }[]; createdBy?: { name: string } }
 interface Row { _id: string; values: Record<string, string>; updatedAt?: string }
-interface SheetData { tameel: Detail; unit: { _id: string; name: string; type: string }; sheet: { _id: string; status: string; rows: Row[]; returnNote?: string; submittedAt?: string; history: { at: string; action: string; note?: string }[] }; access: 'admin' | 'holder'; canEdit: boolean }
+interface SheetData { tameel: Detail; unit: { _id: string; name: string; type: string }; sheet: { _id: string; status: string; rows: Row[]; returnNote?: string; doneNote?: string; submittedAt?: string; history: { at: string; action: string; note?: string }[] }; access: 'admin' | 'holder'; canEdit: boolean }
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   'not started': { label: 'Not Started', tone: 'bg-slate-100 text-slate-600' },
@@ -32,7 +32,8 @@ const STATUS: Record<string, { label: string; tone: string }> = {
   returned: { label: 'Returned', tone: 'bg-rose-100 text-rose-800' },
   accepted: { label: 'Accepted', tone: 'bg-emerald-100 text-emerald-800' },
 };
-const StatusBadge = ({ s }: { s: string }) => <Badge tone={STATUS[s]?.tone}>{STATUS[s]?.label ?? s}</Badge>;
+const StatusBadge = ({ s, task }: { s: string; task?: boolean }) => <Badge tone={STATUS[s]?.tone}>{task && s === 'submitted' ? 'Done' : STATUS[s]?.label ?? s}</Badge>;
+const KindBadge = ({ kind }: { kind?: string }) => <Badge tone={kind === 'task' ? 'bg-violet-100 text-violet-800' : 'bg-emerald-100 text-emerald-800'}>{kind === 'task' ? 'To-Do Task' : 'Excel Proforma'}</Badge>;
 
 function Due({ deadline }: { deadline: string }) {
   const d = new Date(deadline);
@@ -55,9 +56,14 @@ export function TameelList() {
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['tameel'], queryFn: () => get<TameelRow[]>('/tameel') });
   return (
     <>
-      <PageHeader title="Tameel / Tasks" subtitle="Information requested in the prescribed format" actions={caps.isAdmin && <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />New Tameel</Button>} />
+      <PageHeader title="Tameel / Tasks" subtitle="Proformas to fill in and tasks to complete" actions={
+        <div className="flex gap-2">
+          <Link to="/tasks" className="inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50">Individual Tasks</Link>
+          {(caps.isAdmin || caps.canAssign) && <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />New Tameel / Task</Button>}
+        </div>
+      } />
       {isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !data?.length ? (
-        <Card><Empty icon={ClipboardList} title="No Tameel" body={caps.isAdmin ? 'Upload the Excel format received from the government to request the information.' : 'Nothing is pending for you.'} /></Card>
+        <Card><Empty icon={ClipboardList} title="Nothing Here Yet" body={caps.isAdmin || caps.canAssign ? 'Issue an Excel proforma, or a to-do task with instructions.' : 'Nothing is pending for you.'} /></Card>
       ) : (
         <div className="grid gap-2 lg:grid-cols-2">
           {data.map((t) => (
@@ -66,21 +72,21 @@ export function TameelList() {
                 <div className="flex items-start gap-3">
                   <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700"><FileSpreadsheet className="size-5" /></div>
                   <div className="min-w-0 flex-1">
-                    <div className="font-semibold">{t.title}</div>
+                    <div className="font-semibold">{t.title} <KindBadge kind={t.kind} /></div>
                     <Due deadline={t.deadline} />
                     <p className="mt-1 line-clamp-2 text-xs text-slate-600 dark:text-slate-300">{t.description}</p>
                   </div>
                   {t.status === 'closed' && <Badge>Closed</Badge>}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-                  {caps.isAdmin ? (
+                  {t.manager ? (
                     <>
-                      <span className="text-slate-500">{t.unitId?.name} · {t.columns.length} columns ·</span>
-                      <Badge tone={STATUS.submitted.tone}>{t.counts.submitted ?? 0} submitted</Badge>
+                      <span className="text-slate-500">{t.unitId?.name}{t.kind !== 'task' && ` · ${t.columns.length} columns`} ·</span>
+                      <Badge tone={STATUS.submitted.tone}>{t.counts.submitted ?? 0} {t.kind === 'task' ? 'done' : 'submitted'}</Badge>
                       <Badge tone={STATUS.accepted.tone}>{t.counts.accepted ?? 0} accepted</Badge>
                       {!!t.counts.returned && <Badge tone={STATUS.returned.tone}>{t.counts.returned} returned</Badge>}
                     </>
-                  ) : t.mine.map((m) => <span key={m.unitId} className="flex items-center gap-1">{m.unitName}: <StatusBadge s={m.status} /></span>)}
+                  ) : t.mine.map((m) => <span key={m.unitId} className="flex items-center gap-1">{m.unitName}: <StatusBadge s={m.status} task={t.kind === 'task'} /></span>)}
                 </div>
               </Card>
             </Link>
@@ -102,6 +108,7 @@ function CreateSheet({ onClose }: { onClose: () => void }) {
   const [file, setFile] = useState<{ name: string; data: string } | null>(null);
   const [cols, setCols] = useState<Col[]>([]);
   const [info, setInfo] = useState<string>('');
+  const [kind, setKind] = useState<'proforma' | 'task'>('proforma');
   const [f, setF] = useState({ title: '', description: '', deadline: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10), posts: ['patwari'].filter((p) => posts.some((x) => x.key === p)), groupLevel: levels.some((l) => l.key === 'tehsil') ? 'tehsil' : levels[1]?.key ?? '' });
   const [area, setArea] = useState<UnitRef | null>(caps.browseRoots[0] ?? null);
   const [error, setError] = useState<unknown>(null);
@@ -126,7 +133,7 @@ function CreateSheet({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const t = await post<{ _id: string }>('/tameel', { ...f, deadline: new Date(`${f.deadline}T23:59:59`).toISOString(), columns: cols, unitId: area?._id, sourceFile: file?.name });
+      const t = await post<{ _id: string }>('/tameel', { ...f, kind, deadline: new Date(`${f.deadline}T23:59:59`).toISOString(), columns: cols, unitId: area?._id, sourceFile: file?.name });
       qc.invalidateQueries({ queryKey: ['tameel'] });
       toast('Tameel issued — everyone concerned has been notified');
       navigate(`/tameel/${t._id}`);
@@ -137,9 +144,20 @@ function CreateSheet({ onClose }: { onClose: () => void }) {
     }
   };
   return (
-    <Sheet open onClose={onClose} title="New Tameel" footer={<Button form="tameel-form" type="submit" block disabled={!cols.length || !area || !f.posts.length} loading={busy}><Send className="size-4" />Issue Tameel</Button>}>
+    <Sheet open onClose={onClose} title="New Tameel / Task" footer={<Button form="tameel-form" type="submit" block disabled={(kind === 'proforma' && !cols.length) || !area || !f.posts.length} loading={busy}><Send className="size-4" />Issue</Button>}>
       <form id="tameel-form" onSubmit={submit} className="space-y-4">
-        <Field label="Excel format (.xlsx)">
+        <Field label="Type">
+          {() => (
+            <div className="grid grid-cols-2 gap-2">
+              {([['proforma', 'Excel Proforma', 'Information filled in row by row in the given format'], ['task', 'To-Do Task', 'A directive or list of things to do — marked Done with a note']] as const).map(([k, l, h]) => (
+                <button type="button" key={k} onClick={() => setKind(k)} className={clsx('rounded-lg p-3 text-left ring-1', kind === k ? 'bg-brand-50 ring-2 ring-brand-500' : 'ring-slate-200 dark:ring-slate-700')}>
+                  <div className="text-sm font-semibold">{l}</div><div className="text-[11px] text-slate-500">{h}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </Field>
+        {kind === 'proforma' && <Field label="Excel format (.xlsx)">
           {() => (
             <label className="flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-slate-300 p-3 hover:border-brand-400">
               <Upload className="size-5 text-brand-600" />
@@ -147,9 +165,9 @@ function CreateSheet({ onClose }: { onClose: () => void }) {
               <input type="file" accept=".xlsx" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
             </label>
           )}
-        </Field>
-        {info && <p className="text-xs text-slate-500">{info}</p>}
-        {cols.length > 0 && (
+        </Field>}
+        {kind === 'proforma' && info && <p className="text-xs text-slate-500">{info}</p>}
+        {kind === 'proforma' && cols.length > 0 && (
           <Field label="Columns" hint="Rename or remove columns if needed">
             {() => (
               <div className="space-y-1.5">
@@ -164,14 +182,14 @@ function CreateSheet({ onClose }: { onClose: () => void }) {
             )}
           </Field>
         )}
-        <Field label="Title">{(id) => <Input id={id} required minLength={3} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="e.g. State land under encroachment" />}</Field>
-        <Field label="Description / instructions" hint="Shown to everyone who must fill it in">{(id) => <Textarea id={id} required minLength={10} rows={5} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="What information is required, in what units, any references…" />}</Field>
+        <Field label="Title">{(id) => <Input id={id} required minLength={3} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={kind === 'task' ? 'e.g. Demarcation of state land in your circle' : 'e.g. State land under encroachment'} />}</Field>
+        <Field label={kind === 'task' ? 'What must be done' : 'Description / instructions'} hint="Shown to everyone it is assigned to; write each to-do on its own line">{(id) => <Textarea id={id} required minLength={10} rows={5} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="What information is required, in what units, any references…" />}</Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Deadline">{(id) => <Input id={id} type="date" required value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} />}</Field>
           <Field label="Combine files by">{(id) => <Select id={id} value={f.groupLevel} onChange={(e) => setF({ ...f, groupLevel: e.target.value })}>{levels.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}</Select>}</Field>
         </div>
         <Field label="Area" hint="Everyone holding the posts below inside this area must submit">{() => <UnitField value={area} onChange={setArea} />}</Field>
-        <Field label="To be filled by">
+        <Field label="Assigned to">
           {() => (
             <div className="flex flex-wrap gap-1.5">
               {posts.map((p) => (
@@ -228,7 +246,7 @@ export function TameelDetail() {
       <Card className="mb-3 border-l-4 border-gold-500 p-4">
         <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Instructions</div>
         <p className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">{t.description}</p>
-        <div className="mt-2 text-xs text-slate-500">{t.unitId?.name} · {t.columns.length} columns{t.createdBy && ` · issued by ${t.createdBy.name}`}{t.status === 'closed' && ' · CLOSED'}</div>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500"><KindBadge kind={t.kind} />{t.unitId?.name}{t.kind !== 'task' && ` · ${t.columns.length} columns`}{t.createdBy && ` · issued by ${t.createdBy.name}`}{t.status === 'closed' && ' · CLOSED'}</div>
       </Card>
 
       {t.admin && (
@@ -256,7 +274,7 @@ export function TameelDetail() {
           <Card className="overflow-x-auto">
             <table className="w-full min-w-[640px] border-separate border-spacing-0 text-[13px]">
               <thead className="bg-brand-700 text-center text-[12.5px] text-white">
-                <tr>{['#', 'Group', 'Unit', 'Filled By', 'Rows', 'Status', 'Submitted', ''].map((h) => <th key={h} className="border-b border-r border-white/50 px-3 py-2">{h}</th>)}</tr>
+                <tr>{['#', 'Group', 'Unit', 'Assigned To', t.kind === 'task' ? 'Note' : 'Rows', 'Status', t.kind === 'task' ? 'Done At' : 'Submitted', ''].map((h) => <th key={h} className="border-b border-r border-white/50 px-3 py-2">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {t.progress.map((p, i) => (
@@ -265,8 +283,8 @@ export function TameelDetail() {
                     <td className="border-b border-r border-slate-200 px-3 py-1.5">{p.group}</td>
                     <td className="border-b border-r border-slate-200 px-3 py-1.5 font-medium">{p.unitName}</td>
                     <td className="border-b border-r border-slate-200 px-3 py-1.5 text-xs">{p.holders.join(', ') || <span className="text-amber-600">Vacant</span>}</td>
-                    <td className="border-b border-r border-slate-200 px-3 py-1.5 text-center tabular-nums">{p.rows}</td>
-                    <td className="border-b border-r border-slate-200 px-3 py-1.5 text-center"><StatusBadge s={p.status} /></td>
+                    <td className="border-b border-r border-slate-200 px-3 py-1.5 text-center tabular-nums">{t.kind === 'task' ? (p.status === 'submitted' || p.status === 'accepted' ? '✓' : '—') : p.rows}</td>
+                    <td className="border-b border-r border-slate-200 px-3 py-1.5 text-center"><StatusBadge s={p.status} task={t.kind === 'task'} /></td>
                     <td className="border-b border-r border-slate-200 px-3 py-1.5 text-center text-xs">{p.submittedAt ? new Date(p.submittedAt).toLocaleString() : '—'}</td>
                     <td className="border-b border-slate-200 px-2 py-1.5 text-center"><Pencil className="mx-auto size-4 text-slate-400" /></td>
                   </tr>
@@ -280,7 +298,7 @@ export function TameelDetail() {
       {!t.admin && mine.length > 1 && (
         <Card className="mb-3 flex flex-wrap gap-2 p-3">
           {mine.map((m) => (
-            <Button key={m.unitId} size="sm" variant={unit === m.unitId ? 'primary' : 'secondary'} onClick={() => setOpenUnit(m.unitId)}>{m.unitName} <StatusBadge s={m.status} /></Button>
+            <Button key={m.unitId} size="sm" variant={unit === m.unitId ? 'primary' : 'secondary'} onClick={() => setOpenUnit(m.unitId)}>{m.unitName} <StatusBadge s={m.status} task={t.kind === 'task'} /></Button>
           ))}
         </Card>
       )}
@@ -298,9 +316,11 @@ function SheetEditor({ tameelId, unitId }: { tameelId: string; unitId: string })
   const [editing, setEditing] = useState<string | 'new' | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
   if (isLoading) return <Loading />;
   if (error) return <ErrorState error={error} retry={refetch} />;
   const { tameel: t, sheet, canEdit, access, unit } = data!;
+  const isTask = t.kind === 'task';
   const refresh = () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ['tameel', tameelId] }); qc.invalidateQueries({ queryKey: ['tameel'] }); };
   const act = async (fn: () => Promise<unknown>, msg: string) => {
     setBusy(true);
@@ -315,6 +335,32 @@ function SheetEditor({ tameelId, unitId }: { tameelId: string; unitId: string })
     if (action === 'return' && !note) return;
     act(() => post(`/tameel/${tameelId}/sheet/${unitId}/review`, { action, note }), action === 'return' ? 'Returned for correction' : 'Accepted');
   };
+  const markDone = () => act(() => post(`/tameel/${tameelId}/sheet/${unitId}/submit`, { note: note || undefined }), 'Marked done — thank you');
+  if (isTask) {
+    const done = sheet.status === 'submitted' || sheet.status === 'accepted';
+    return (
+      <>
+        <SectionTitle action={<StatusBadge s={sheet.status} task />}>{unit.name}</SectionTitle>
+        {sheet.status === 'returned' && sheet.returnNote && <Card className="mb-2 border-l-4 border-rose-500 p-3 text-sm"><b className="text-rose-700">Returned:</b> {sheet.returnNote}</Card>}
+        <Card className="space-y-3 p-4">
+          {done ? (
+            <div className="text-sm"><b className="text-emerald-700">Done</b>{sheet.submittedAt && ` on ${new Date(sheet.submittedAt).toLocaleString()}`}{sheet.doneNote && <p className="mt-1 whitespace-pre-wrap text-slate-700 dark:text-slate-200">{sheet.doneNote}</p>}</div>
+          ) : canEdit && access === 'holder' ? (
+            <>
+              <Field label="What was done (optional)">{(id) => <Textarea id={id} rows={4} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Briefly report the action taken…" />}</Field>
+              <Button loading={busy} onClick={() => confirm('Mark this task as done?') && markDone()}><Check className="size-4" />Mark Done</Button>
+            </>
+          ) : <p className="text-sm text-slate-500">Not done yet.</p>}
+          {access === 'admin' && done && (
+            <div className="flex gap-2">
+              <Button variant="secondary" disabled={busy} onClick={() => review('return')}><Undo2 className="size-4" />Return</Button>
+              {sheet.status !== 'accepted' && <Button disabled={busy} onClick={() => review('accept')}><Check className="size-4" />Accept</Button>}
+            </div>
+          )}
+        </Card>
+      </>
+    );
+  }
   const cell = 'border-b border-r border-slate-200 px-2 py-1.5 align-top dark:border-slate-700';
   const editRow = (
     <tr className="bg-amber-50 dark:bg-amber-500/10">
