@@ -63,7 +63,7 @@ Everything is mobile-first: a single column on phones, large tap targets, and pi
 | `court` | Court of the current stage (§2.6); "Other" needs a name |
 | `courtCaseNo` | The court's own case number (optional, useful for searching) |
 | `applicants[]`, `respondents[]` | Several names each |
-| `land` | `{ kanal, marla, sarsai }` (or acres), plus `khasraNos[]`, `khewat`, `khatauni` |
+| `land` | `{ kanal, marla, feet }` (or acres), plus `khasraNos[]`, `khewat`, `khatauni` |
 | `landSpec` | Land specification: state land / private / evacuee / Nazool …, nature (barani, nehri…), free text |
 | `lastHearing` / `nextHearing` | Derived from the hearing timeline (always consistent) |
 | `lastProceedings` / `nextAction` | From the latest hearing |
@@ -177,7 +177,7 @@ Also: download a single document, and a **ZIP of the original files**.
 ## 6. Data entry quality
 - **Mouza** is chosen only from the user's assigned list.
 - **Khasra numbers** are entered as tags.
-- **Land area** uses separate number fields (kanal / marla / sarsai), with a total shown.
+- **Land area** uses separate number fields (kanal / marla / feet), with a total shown.
 - **Required fields:** mouza, case type, court, institution date, at least one applicant and one respondent.
 - **Status = Decided** requires a decision date. **Appeal = No** requires a reason. **Appeal = Yes** requires a court.
 - **Duplicate warning:** when the same court case number, or the same parties and khasra, already exist, the form asks "Possible duplicate: HSP-CHK12-0003?"

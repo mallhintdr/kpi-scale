@@ -190,7 +190,7 @@ router.get('/dashboard', async (req, res) => {
  * with khasra nos. only. The flat `murabba` summary and `khasraNos` are derived for search, PDF and Excel.
  */
 const parcelBody = z.object({ murabba: z.string().trim().max(40).optional(), khasras: z.array(z.string().trim().max(40)).max(200).default([]) });
-export const landBody = z.object({ kanal: z.number().min(0).max(1e7).optional(), marla: z.number().min(0).max(1e7).optional(), sarsai: z.number().min(0).max(1e7).optional(), murabba: z.string().trim().max(400).optional(), khasraNos: z.array(z.string().trim().max(40)).max(400).default([]), parcels: z.array(parcelBody).max(100).optional(), khewat: z.string().max(60).optional(), khatauni: z.string().max(60).optional() })
+export const landBody = z.object({ kanal: z.number().min(0).max(1e7).optional(), marla: z.number().min(0).max(1e7).optional(), feet: z.number().min(0).max(1e7).optional(), murabba: z.string().trim().max(400).optional(), khasraNos: z.array(z.string().trim().max(40)).max(400).default([]), parcels: z.array(parcelBody).max(100).optional(), khewat: z.string().max(60).optional(), khatauni: z.string().max(60).optional() })
   .default({ khasraNos: [] })
   .transform((l) => {
     if (!l.parcels) return l;
@@ -455,12 +455,12 @@ router.get('/export/xlsx', validate({ query: listQuery }), async (req, res) => {
   const rows = await LitigationCase.find(filter).populate('unitId', 'name').populate('tehsilId', 'name').sort({ caseId: 1 }).limit(20000).lean();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Litigation');
-  const head = ['S.No', 'Case ID', 'Tehsil', 'Mouza', 'Type of Case', 'Date of Institution', 'Court', 'Court Case No.', 'Applicant(s)', 'Respondent(s)', 'Kanal', 'Marla', 'Sarsai', 'Mustateel / Murabba', 'Khasra Nos.', 'Land Specification', 'Last Hearing', 'Next Hearing', 'Proceedings (Last Date)', 'To Be Done (Next Date)', 'Status', 'Date of Decision', 'Appeal', 'Appellate Court', 'Reason Appeal Not Filed', 'Note'];
+  const head = ['S.No', 'Case ID', 'Tehsil', 'Mouza', 'Type of Case', 'Date of Institution', 'Court', 'Court Case No.', 'Applicant(s)', 'Respondent(s)', 'Kanal', 'Marla', 'Feet', 'Mustateel / Murabba', 'Khasra Nos.', 'Land Specification', 'Last Hearing', 'Next Hearing', 'Proceedings (Last Date)', 'To Be Done (Next Date)', 'Status', 'Date of Decision', 'Appeal', 'Appellate Court', 'Reason Appeal Not Filed', 'Note'];
   const h = ws.addRow(head);
   h.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   h.eachCell((cl) => { cl.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF187A43' } }; });
   const d = (x?: Date | null) => (x ? new Date(x) : '');
-  rows.forEach((c: any, i) => ws.addRow([i + 1, c.caseId, c.tehsilId?.name, c.unitId?.name, c.caseType, d(c.institutedOn), courtName(c.court, c.courtOther), c.courtCaseNo, c.applicants.join('; '), c.respondents.join('; '), c.land?.kanal, c.land?.marla, c.land?.sarsai, c.land?.murabba, (c.land?.khasraNos ?? []).join(', '), c.landSpec, d(c.lastHearing), d(c.nextHearing), c.lastProceedings, c.nextAction, c.status === 'decided' ? 'Decided' : 'Pending', d(c.decision?.date), c.appeal?.filed === 'yes' ? 'Filed' : c.appeal?.filed === 'no' ? 'Not filed' : '', c.appeal?.filed === 'yes' ? courtName(c.appeal.court, c.appeal.courtOther) : '', c.appeal?.reasonNotFiled, c.note]));
+  rows.forEach((c: any, i) => ws.addRow([i + 1, c.caseId, c.tehsilId?.name, c.unitId?.name, c.caseType, d(c.institutedOn), courtName(c.court, c.courtOther), c.courtCaseNo, c.applicants.join('; '), c.respondents.join('; '), c.land?.kanal, c.land?.marla, c.land?.feet, c.land?.murabba, (c.land?.khasraNos ?? []).join(', '), c.landSpec, d(c.lastHearing), d(c.nextHearing), c.lastProceedings, c.nextAction, c.status === 'decided' ? 'Decided' : 'Pending', d(c.decision?.date), c.appeal?.filed === 'yes' ? 'Filed' : c.appeal?.filed === 'no' ? 'Not filed' : '', c.appeal?.filed === 'yes' ? courtName(c.appeal.court, c.appeal.courtOther) : '', c.appeal?.reasonNotFiled, c.note]));
   ws.columns.forEach((col) => { col.width = 16; });
   ws.views = [{ state: 'frozen', ySplit: 1 }];
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

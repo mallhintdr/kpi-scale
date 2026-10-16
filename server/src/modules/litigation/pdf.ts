@@ -149,7 +149,7 @@ export async function caseFilePdf(c: any, ctx: { mouza?: string; tehsil?: string
   w.pair('Applicant(s)', (c.applicants ?? []).join('; '));
   w.pair('Respondent(s)', (c.respondents ?? []).join('; '));
   const l = c.land ?? {};
-  w.pair('Land measuring', [l.kanal ? `${l.kanal} Kanal` : '', l.marla ? `${l.marla} Marla` : '', l.sarsai ? `${l.sarsai} Sarsai` : ''].filter(Boolean).join(' ') || '—');
+  w.pair('Land measuring', [l.kanal ? `${l.kanal} Kanal` : '', l.marla ? `${l.marla} Marla` : '', l.feet ? `${l.feet} Feet` : ''].filter(Boolean).join(' ') || '—');
   // With murabbas the khasras are listed under each murabba; otherwise (khasra-only tehsils) on their own line
   const loose = (l.parcels?.length ? l.parcels.filter((p: any) => !p.murabba).flatMap((p: any) => p.khasras) : l.murabba ? [] : l.khasraNos) ?? [];
   if (l.murabba) w.pair('Murabba (Killa / Khasra)', l.murabba);

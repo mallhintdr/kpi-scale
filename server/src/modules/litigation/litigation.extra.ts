@@ -119,7 +119,7 @@ router.get('/settings', async (req, res) => {
 /* ================================================================== *
  *  Excel import of existing litigation registers
  * ================================================================== */
-const COLS = ['Tehsil', 'Mouza', 'Type of Case', 'Date of Institution', 'Court', 'Court Case No.', 'Applicant(s)', 'Respondent(s)', 'Kanal', 'Marla', 'Sarsai', 'Mustateel / Murabba', 'Khasra Nos.', 'Land Specification', 'Last Hearing', 'Next Hearing', 'Proceedings (Last Date)', 'To Be Done (Next Date)', 'Status', 'Date of Decision', 'Appeal', 'Appellate Court', 'Reason Appeal Not Filed', 'Note'];
+const COLS = ['Tehsil', 'Mouza', 'Type of Case', 'Date of Institution', 'Court', 'Court Case No.', 'Applicant(s)', 'Respondent(s)', 'Kanal', 'Marla', 'Feet', 'Mustateel / Murabba', 'Khasra Nos.', 'Land Specification', 'Last Hearing', 'Next Hearing', 'Proceedings (Last Date)', 'To Be Done (Next Date)', 'Status', 'Date of Decision', 'Appeal', 'Appellate Court', 'Reason Appeal Not Filed', 'Note'];
 
 router.get('/import/template', async (_req, res) => {
   const wb = new ExcelJS.Workbook();
@@ -197,7 +197,7 @@ router.post('/import', express.json({ limit: '15mb' }), validate({ body: z.objec
         unitId: mouza._id, anc: mouza.anc, tehsilId: ancestorAt(bp, mouza as any, 'tehsil'),
         caseType: v('Type of Case') || 'Other', institutedOn: inst, court, courtOther: court === 'other' ? courtTxt || 'Other' : undefined, courtCaseNo: v('Court Case No.') || undefined,
         applicants, respondents,
-        land: { kanal: num(v('Kanal')), marla: num(v('Marla')), sarsai: num(v('Sarsai')), ...landFrom(v('Mustateel / Murabba'), v('Khasra Nos.')) },
+        land: { kanal: num(v('Kanal')), marla: num(v('Marla')), feet: num(v('Feet')), ...landFrom(v('Mustateel / Murabba'), v('Khasra Nos.')) },
         landSpec: v('Land Specification') || undefined,
         lastHearing: last ?? undefined, nextHearing: decided ? undefined : next ?? undefined,
         lastProceedings: v('Proceedings (Last Date)') || undefined, nextAction: v('To Be Done (Next Date)') || undefined,

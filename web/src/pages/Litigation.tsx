@@ -19,7 +19,7 @@ interface ListRow { _id: string; caseId: string; unitId: { name: string } | null
 interface Hearing { _id: string; date: string; court?: string; proceedingsDone?: string; nextAction?: string; nextDate?: string; attendedBy?: string; by?: { name: string } }
 interface Case {
   _id: string; caseId: string; unitId: { _id: string; name: string }; caseType: string; institutedOn: string; court: string; courtOther?: string; bench?: string; courtCaseNo?: string;
-  applicants: string[]; respondents: string[]; land: { kanal?: number; marla?: number; sarsai?: number; murabba?: string; khasraNos: string[]; parcels?: { murabba?: string; khasras: string[] }[]; khewat?: string; khatauni?: string }; landSpec?: string; governmentParty: boolean;
+  applicants: string[]; respondents: string[]; land: { kanal?: number; marla?: number; feet?: number; murabba?: string; khasraNos: string[]; parcels?: { murabba?: string; khasras: string[] }[]; khewat?: string; khatauni?: string }; landSpec?: string; governmentParty: boolean;
   hearings: Hearing[]; lastHearing?: string; nextHearing?: string; lastProceedings?: string; nextAction?: string; status: 'pending' | 'decided';
   decision?: { date?: string; result?: string; summary?: string }; appeal: { filed: 'yes' | 'no' | 'undecided'; court?: string; courtOther?: string; filedOn?: string; appealNo?: string; reasonNotFiled?: string };
   stage: number; stages: { stage: number; court: string; courtOther?: string; courtCaseNo?: string; institutedOn?: string; decidedOn?: string; result?: string }[];
@@ -477,7 +477,7 @@ function landInit(c?: Case): Pick<FormState, 'landMode' | 'parcels' | 'khasraNos
 }
 interface FormState {
   unitId: string; mouzaName: string; caseType: string; caseTypeOther: string; institutedOn: string; court: string; courtOther?: string; bench: string; courtCaseNo: string;
-  applicants: string[]; respondents: string[]; kanal: string; marla: string; sarsai: string; landMode: 'murabba' | 'khasra'; parcels: { murabba: string; khasras: string }[]; khasraNos: string; khewat: string; khatauni: string; landSpec: string;
+  applicants: string[]; respondents: string[]; kanal: string; marla: string; feet: string; landMode: 'murabba' | 'khasra'; parcels: { murabba: string; khasras: string }[]; khasraNos: string; khewat: string; khatauni: string; landSpec: string;
   governmentParty: boolean; nextHearing: string; note: string;
 }
 function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void }) {
@@ -495,7 +495,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
     caseType: initial?.caseType ?? '', caseTypeOther: '',
     institutedOn: iso(initial?.institutedOn), court: initial?.court ?? '', courtOther: initial?.courtOther, bench: initial?.bench ?? '', courtCaseNo: initial?.courtCaseNo ?? '',
     applicants: initial?.applicants ?? [''], respondents: initial?.respondents ?? [''],
-    kanal: String(initial?.land.kanal ?? ''), marla: String(initial?.land.marla ?? ''), sarsai: String(initial?.land.sarsai ?? ''), ...landInit(initial),
+    kanal: String(initial?.land.kanal ?? ''), marla: String(initial?.land.marla ?? ''), feet: String(initial?.land.feet ?? ''), ...landInit(initial),
     khewat: initial?.land.khewat ?? '', khatauni: initial?.land.khatauni ?? '', landSpec: initial?.landSpec ?? '', governmentParty: initial?.governmentParty ?? false,
     nextHearing: iso(initial?.nextHearing), note: initial?.note ?? '',
   }));
@@ -510,7 +510,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
       ...(initial ? {} : { unitId: f.unitId }),
       caseType: f.caseType === 'Other' ? f.caseTypeOther || 'Other' : f.caseType, institutedOn: f.institutedOn, court: f.court, courtOther: f.courtOther || undefined, bench: f.bench || undefined, courtCaseNo: f.courtCaseNo || undefined,
       applicants: f.applicants.map((x) => x.trim()).filter(Boolean), respondents: f.respondents.map((x) => x.trim()).filter(Boolean),
-      land: { kanal: num(f.kanal), marla: num(f.marla), sarsai: num(f.sarsai), parcels: f.landMode === 'murabba' ? f.parcels.map((x) => ({ murabba: x.murabba.trim(), khasras: splitNos(x.khasras) })) : [{ khasras: splitNos(f.khasraNos) }], khewat: f.khewat || undefined, khatauni: f.khatauni || undefined },
+      land: { kanal: num(f.kanal), marla: num(f.marla), feet: num(f.feet), parcels: f.landMode === 'murabba' ? f.parcels.map((x) => ({ murabba: x.murabba.trim(), khasras: splitNos(x.khasras) })) : [{ khasras: splitNos(f.khasraNos) }], khewat: f.khewat || undefined, khatauni: f.khatauni || undefined },
       landSpec: f.landSpec || undefined, governmentParty: f.governmentParty, nextHearing: f.nextHearing || null, note: f.note || undefined,
     };
     try {
@@ -572,7 +572,7 @@ function CaseForm({ initial, onClose }: { initial?: Case; onClose: () => void })
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
             <Field label="Kanal">{(id) => <Input id={id} type="number" min={0} value={f.kanal} onChange={(e) => set('kanal', e.target.value)} />}</Field>
             <Field label="Marla">{(id) => <Input id={id} type="number" min={0} value={f.marla} onChange={(e) => set('marla', e.target.value)} />}</Field>
-            <Field label="Sarsai">{(id) => <Input id={id} type="number" min={0} value={f.sarsai} onChange={(e) => set('sarsai', e.target.value)} />}</Field>
+            <Field label="Feet">{(id) => <Input id={id} type="number" min={0} value={f.feet} onChange={(e) => set('feet', e.target.value)} />}</Field>
             <Field label="Khewat">{(id) => <Input id={id} value={f.khewat} onChange={(e) => set('khewat', e.target.value)} />}</Field>
             <Field label="Khatauni">{(id) => <Input id={id} value={f.khatauni} onChange={(e) => set('khatauni', e.target.value)} />}</Field>
           </div>
@@ -660,7 +660,7 @@ export function LitigationCasePage() {
             {row('Court case no.', c.courtCaseNo)}
             {row('Applicant(s)', c.applicants.join('; '))}
             {row('Respondent(s)', c.respondents.join('; '))}
-            {row('Land measuring', [l.kanal ? `${l.kanal} K` : '', l.marla ? `${l.marla} M` : '', l.sarsai ? `${l.sarsai} S` : ''].filter(Boolean).join(' – '))}
+            {row('Land measuring', [l.kanal ? `${l.kanal} K` : '', l.marla ? `${l.marla} M` : '', l.feet ? `${l.feet} Ft` : ''].filter(Boolean).join(' – '))}
             {(l.parcels ?? []).some((p) => p.murabba) ? row('Murabba → Killa / Khasra', (l.parcels ?? []).filter((p) => p.murabba).map((p) => `${p.murabba}: ${p.khasras.join(', ') || '—'}`).join('  |  ')) : l.murabba && row('Mustateel / Murabba', l.murabba)}
             {row('Khasra / Khewat / Khatauni', [((l.parcels ?? []).some((p) => p.murabba) ? (l.parcels ?? []).filter((p) => !p.murabba).flatMap((p) => p.khasras) : l.khasraNos).join(', '), l.khewat, l.khatauni].filter(Boolean).join(' · '))}
             {row('Land specification', c.landSpec)}
