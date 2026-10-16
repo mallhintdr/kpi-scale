@@ -13,7 +13,8 @@ export function titleCase(s: string): string {
   return s.replace(/[\p{L}\p{N}][\p{L}\p{N}'’.-]*/gu, (word, offset: number) => {
     const before = s.slice(0, offset);
     // Start of the text, or right after a separator such as "—", ":", "·", "(" or "/": capitalise
-    const startsPhrase = first || /[—–:·(/|•]\s*$/.test(before);
+    if (word.length === 1 && before.endsWith('(')) return word; // e.g. Applicant(s)
+    const startsPhrase = first ||/[—–:·(/|•]\s*$/.test(before);
     first = false;
     if (/[A-Z\d]/.test(word.slice(1)) || /^\d/.test(word) || /[^\x00-\x7F]/.test(word[0])) return word; // acronyms, codes, non-Latin
     const lower = word.toLowerCase();
