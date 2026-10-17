@@ -118,7 +118,7 @@ export function AppShell() {
           </button>
         </div>
 
-        <nav className={clsx('flex-1 space-y-px overflow-hidden py-2', collapsed ? 'px-1.5' : 'px-2')}>
+        <nav className={clsx('min-h-0 flex-1 space-y-px overflow-y-auto overflow-x-hidden py-2 [scrollbar-width:thin] [scrollbar-color:rgb(255_255_255/0.25)_transparent]', collapsed ? 'px-1.5' : 'px-2')}>
           {items.filter((i) => i.group !== 'admin').map((i) => (
             <SideLink key={i.to} item={i} collapsed={collapsed} badge={i.to === '/notifications' ? unread : 0} />
           ))}
