@@ -43,7 +43,7 @@ services:
 
   web:
     build: ./web
-    ports: ["127.0.0.1:8080:80"]   # reached through nginx on the host (HTTPS); not open to the internet directly
+    ports: ["127.0.0.1:${WEB_PORT:-8080}:80"]   # reached through nginx on the host (HTTPS); not open to the internet directly
     depends_on: [api]
     restart: unless-stopped
 

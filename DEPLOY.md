@@ -5,6 +5,11 @@ This guide puts the KPI Dashboard on your own Linux VPS:
 - with **your admin account** kept for demos;
 - with a **guest link** that opens the dashboard without a password, read-only.
 
+**This VPS already runs other apps.** The steps don't touch them:
+- the dashboard uses its own folder (`/opt/kpi`) and its own Docker containers, database and Redis, with none of them exposed outside the VPS;
+- it uses one free local port (`WEB_PORT`, chosen in step 3);
+- it adds one nginx site file for its own domain or subdomain.
+
 Each command block says where to run it: **on your PC** (Windows PowerShell) or **on the VPS** (over SSH).
 
 ---
@@ -14,7 +19,7 @@ Each command block says where to run it: **on your PC** (Windows PowerShell) or 
 | Item | Notes |
 |---|---|
 | VPS | Ubuntu 22.04 or 24.04. **At least 2 GB RAM** (4 GB better), 2 CPUs, 40 GB disk. |
-| Domain name | E.g. `kpi.example.com`, with an **A record** pointing to the VPS IP. If you have no domain yet, use `<VPS-IP>.sslip.io` (e.g. `203.0.113.10.sslip.io`). It works without any setup. |
+| Domain name | Its own domain or **subdomain**, e.g. `kpi.example.com`. Your other apps keep theirs. Point it to the VPS with an A record. If you have no domain yet, use `kpi.<VPS-IP>.sslip.io` (e.g. `kpi.203.0.113.10.sslip.io`). It works without any setup and doesn't clash with your other apps. |
 | GitHub access | The code is in `github.com/mallhintdr/kpi-scale`. If the repository is private, create a **Personal Access Token** (GitHub › Settings › Developer settings › Tokens, scope *repo*) to use as the password when cloning. |
 | Database copy | `deploy-backup\kpi.gz` in the project folder (already created). To refresh it later, see step 4. |
 
@@ -31,21 +36,23 @@ ssh root@<VPS-IP>
 
 **On the VPS**:
 ```bash
-# Updates
-apt update && apt -y upgrade
-
-# Swap (lets a 2 GB VPS build the app without running out of memory)
-fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-echo '/swapfile none swap sw 0 0' >> /etc/fstab
-
-# Firewall: only SSH and web
-apt -y install ufw
-ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw --force enable
-
-# Docker
-curl -fsSL https://get.docker.com | sh
-docker --version && docker compose version
+# What is already there: memory, swap, disk, Docker, firewall, ports in use
+free -h
+df -h /
+docker --version; docker compose version
+ufw status
+ss -ltnp
 ```
+Then do only the parts you need:
+
+- **Docker missing:** `curl -fsSL https://get.docker.com | sh`. If `docker --version` works but `docker compose version` fails, run `apt -y install docker-compose-plugin`.
+- **No swap on a VPS with 4 GB RAM or less:** the build needs about 1.5 GB more memory while it runs, on top of your other apps.
+  ```bash
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  ```
+- **Firewall:** if `ufw status` says `active`, run `ufw allow 80 && ufw allow 443` (it is probably already allowed for your other sites). If it says `inactive`, **leave it off**. Turning it on now would block your other apps' ports. The dashboard opens no new public ports anyway.
+- **Disk:** keep at least 10 GB free for the images and database.
 
 ---
 
@@ -63,7 +70,18 @@ If asked, enter your GitHub username, then the access token as the password.
 
 ## 3. Settings and secrets
 
-**On the VPS**:
+**Choose a free local port** for the dashboard. Nginx forwards your domain to it. Check that nothing else uses it (no output means it's free):
+```bash
+ss -ltn | grep ':8080 '
+```
+If 8080 is taken, try 8090, 8095 and so on. Then save your choice. Docker reads `/opt/kpi/.env`, which is separate from the app settings below:
+```bash
+cd /opt/kpi
+echo "WEB_PORT=8090" > .env       # your free port
+```
+Use the same port everywhere this guide says `<WEB_PORT>`.
+
+**App settings**, on the VPS:
 ```bash
 cd /opt/kpi
 cp server/.env.example server/.env.production
@@ -129,23 +147,23 @@ docker compose up -d --build
 The first build takes 5–10 minutes. Then check:
 ```bash
 docker compose ps                         # all "running"; "migrate" shows "exited (0)": that is normal
-curl -s localhost:8080/api/config         # {"singleTenant":true,...,"guest":true}
+curl -s localhost:<WEB_PORT>/api/config         # {"singleTenant":true,...,"guest":true}
 ```
 
 ---
 
 ## 6. Nginx and HTTPS
 
-Nginx on the VPS receives visitors on ports 80 and 443 and passes them to the app on `localhost:8080`. Certbot gets a free Let's Encrypt certificate and renews it automatically.
+Nginx on the VPS receives visitors on ports 80 and 443 and passes them to the dashboard on `localhost:<WEB_PORT>`. Your other sites keep their own files and are not affected. Certbot gets a free Let's Encrypt certificate and renews it automatically.
 
-> If nginx already serves other sites on this VPS, keep them. Only add the new file below. Don't edit or delete the existing sites.
+> Only **add** the new site file below. Don't edit or delete the files for your other apps, and **don't remove the `default` site**.
 
-**On the VPS**, install nginx and certbot:
+**On the VPS**, install certbot if you don't have it (nginx is already installed for your other apps):
 ```bash
-apt -y install nginx certbot python3-certbot-nginx
+certbot --version || apt -y install certbot python3-certbot-nginx
 ```
 
-Create the site file (replace `kpi.example.com` with your domain in **both** places):
+Create the site file (replace `kpi.example.com` with your domain and `<WEB_PORT>` with your port):
 ```bash
 cat > /etc/nginx/sites-available/kpi <<'EOF'
 server {
@@ -155,7 +173,7 @@ server {
     client_max_body_size 20m;          # litigation documents and imports
 
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:<WEB_PORT>;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -166,12 +184,11 @@ server {
 }
 EOF
 ln -s /etc/nginx/sites-available/kpi /etc/nginx/sites-enabled/kpi
-rm -f /etc/nginx/sites-enabled/default   # only if this VPS has no other sites
 nginx -t && systemctl reload nginx
 ```
 `nginx -t` must say `syntax is ok` and `test is successful`.
 
-Get the certificate. Certbot adds HTTPS to the site file and redirects `http` to `https`:
+Get the certificate. Name only this domain, so certbot changes only the new site file. It adds HTTPS there and redirects `http` to `https`:
 ```bash
 certbot --nginx -d kpi.example.com --redirect -m you@example.com --agree-tos -n
 ```
@@ -184,7 +201,7 @@ Open `https://kpi.example.com` in your browser.
 If certbot fails:
 - check that the domain points to this VPS (`ping kpi.example.com` shows the VPS IP);
 - check that ports 80 and 443 are open (`ufw status`);
-- check that no other program is using port 80 (`ss -ltnp | grep ':80 '` should show only nginx).
+- check that this domain isn't already used by `server_name` in another site file: `grep -rn "kpi.example.com" /etc/nginx/sites-enabled/` should list only `kpi`.
 
 ---
 
@@ -273,6 +290,7 @@ Database indexes are updated automatically, and the data is kept.
 | Guest link says "Guest account not found" | `GUEST_EMAIL` doesn't match an active account. Fix it in `.env.production`, then `docker compose up -d`. |
 | `502 Bad Gateway` | The app is still starting or has crashed. Check `docker compose ps` and `docker compose logs api`. Nginx errors are in `/var/log/nginx/error.log`. |
 | `413 Request Entity Too Large` on upload | `client_max_body_size 20m;` is missing from `/etc/nginx/sites-available/kpi`. Add it, then `nginx -t && systemctl reload nginx`. |
-| Nginx shows its default "Welcome to nginx" page | The `default` site is still enabled, or `server_name` doesn't match your domain. Fix it, then reload nginx. |
+| The domain opens one of your **other** apps, or the "Welcome to nginx" page | `server_name` in `/etc/nginx/sites-available/kpi` doesn't exactly match the domain you typed, or the `kpi` link in `sites-enabled` is missing. Fix it, then `nginx -t && systemctl reload nginx`. |
+| `docker compose up` says "port is already allocated" | `WEB_PORT` is used by another app. Pick another free port in `/opt/kpi/.env`, update `proxy_pass` in the nginx file, then `docker compose up -d` and reload nginx. |
 | Build stops with "killed" | Out of memory. Check that swap is on (`free -h`, step 1). |
 | Uploads fail for big documents | The limit is 10 MB per document. Photos are compressed on the phone before upload. |
