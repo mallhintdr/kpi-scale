@@ -14,7 +14,7 @@ async function main() {
     startWorker();
     startWaWorker();
   }
-  const server = createApp().listen(env.PORT, () => logger.info(`API listening on :${env.PORT}${env.REDIS_URL ? ' (Redis enabled)' : ' (no Redis: in-process cache, inline jobs)'}`));
+  const server = createApp().listen(env.PORT, env.HOST, () => logger.info(`API listening on :${env.PORT}${env.REDIS_URL ? ' (Redis enabled)' : ' (no Redis: in-process cache, inline jobs)'}`));
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'Shutting down');

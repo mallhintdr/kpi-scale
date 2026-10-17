@@ -4,6 +4,8 @@ import { z } from 'zod';
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(4000),
+  /** 127.0.0.1 = reachable only through nginx on the same server. */
+  HOST: z.string().default('0.0.0.0'),
   MONGO_URI: z.string().min(1),
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),

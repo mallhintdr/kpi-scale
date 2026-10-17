@@ -1,16 +1,19 @@
-# Deploying to a VPS
+# Deploying to the VPS (PM2 + nginx)
 
-This guide puts the KPI Dashboard on your own Linux VPS:
-- with the **current database** (all units, officers, figures, Tameel and litigation records);
-- with **your admin account** kept for demos;
-- with a **guest link** that opens the dashboard without a password, read-only.
+This guide puts the KPI Dashboard on your VPS the same way your other apps run: **Node under PM2**, served by **your existing nginx**, using **your existing MongoDB and Redis**.
 
-**This VPS already runs other apps.** The steps don't touch them:
-- the dashboard uses its own folder (`/opt/kpi`) and its own Docker containers, database and Redis, with none of them exposed outside the VPS;
-- it uses one free local port (`WEB_PORT`, chosen in step 3);
-- it adds one nginx site file for its own domain or subdomain.
+You end up with:
+- the **current database** (all units, officers, figures, Tameel and litigation records), as its own database `kpi_dashboard`;
+- **your admin account** (`admin@bwp.test`) for demos;
+- a **guest link**, `https://<domain>/guest`, that opens the dashboard read-only without a password.
 
-Each command block says where to run it: **on your PC** (Windows PowerShell) or **on the VPS** (over SSH).
+**Your other apps are not touched.**
+- The dashboard lives in `/opt/kpi`.
+- It uses its own database name, its own Redis database number and its own PM2 processes (`kpi-api`, `kpi-worker`).
+- Its API listens on a free port (4100), on `127.0.0.1` only.
+- It adds one new nginx site file for its own domain.
+
+Each command block says where to run it: **on your PC** (Windows PowerShell) or **on the VPS** (over SSH as root).
 
 ---
 
@@ -18,45 +21,60 @@ Each command block says where to run it: **on your PC** (Windows PowerShell) or 
 
 | Item | Notes |
 |---|---|
-| VPS | Ubuntu 22.04 or 24.04. **At least 2 GB RAM** (4 GB better), 2 CPUs, 40 GB disk. |
-| Domain name | Its own domain or **subdomain**, e.g. `kpi.example.com`. Your other apps keep theirs. Point it to the VPS with an A record. If you have no domain yet, use `kpi.<VPS-IP>.sslip.io` (e.g. `kpi.203.0.113.10.sslip.io`). It works without any setup and doesn't clash with your other apps. |
-| GitHub access | The code is in `github.com/mallhintdr/kpi-scale`. If the repository is private, create a **Personal Access Token** (GitHub › Settings › Developer settings › Tokens, scope *repo*) to use as the password when cloning. |
-| Database copy | `deploy-backup\kpi.gz` in the project folder (already created). To refresh it later, see step 4. |
+| Domain | Its own domain or subdomain, e.g. `kpi.example.com`, with an **A record** pointing to the VPS IP. If you have no domain, use `kpi.<VPS-IP>.sslip.io` (e.g. `kpi.203.0.113.10.sslip.io`). It needs no setup. |
+| GitHub access | The code is at `github.com/mallhintdr/kpi-scale`. If the repository is private, create a **Personal Access Token** (GitHub › Settings › Developer settings › Tokens, scope *repo*). Use it as the password when cloning. |
+| Database copy | `D:\KPI Dashboard\deploy-backup\kpi.gz` on your PC (step 5). |
 
-> HTTPS is **required**, not optional. Sign-in keeps a secure cookie that browsers only accept over HTTPS. On plain `http://` users would be signed out on every page reload.
+> **HTTPS is required.** Sign-in keeps a secure cookie that browsers only send over HTTPS. Over plain `http://`, users are signed out on every page reload.
 
 ---
 
-## 1. Prepare the VPS
+## 1. Check what's on the VPS
 
-**On your PC**, connect:
+**On your PC**:
 ```powershell
 ssh root@<VPS-IP>
 ```
-
 **On the VPS**:
 ```bash
-# What is already there: memory, swap, disk, Docker, firewall, ports in use
-free -h
-df -h /
-docker --version; docker compose version
-ufw status
-ss -ltnp
+node -v
+pm2 -v
+mongod --version | head -1
+mongorestore --version | head -1
+redis-cli config get maxmemory-policy
+free -h && df -h /
 ```
-Then do only the parts you need:
 
-- **Docker missing:** `curl -fsSL https://get.docker.com | sh`. If `docker --version` works but `docker compose version` fails, run `apt -y install docker-compose-plugin`.
-- **No swap on a VPS with 4 GB RAM or less:** the build needs about 1.5 GB more memory while it runs, on top of your other apps.
-  ```bash
-  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-  echo '/swapfile none swap sw 0 0' >> /etc/fstab
-  ```
-- **Firewall:** if `ufw status` says `active`, run `ufw allow 80 && ufw allow 443` (it is probably already allowed for your other sites). If it says `inactive`, **leave it off**. Turning it on now would block your other apps' ports. The dashboard opens no new public ports anyway.
-- **Disk:** keep at least 10 GB free for the images and database.
+| Result | What to do |
+|---|---|
+| `node -v` is **v22 or higher** | Nothing. Skip step 2. |
+| `node -v` is lower than v22 | Step 2 installs Node 22 for the dashboard only. Your other apps keep their Node version. |
+| `mongorestore: command not found` | `apt -y install mongodb-database-tools`. If that package isn't found, install the "MongoDB Database Tools" `.deb` for Ubuntu from mongodb.com/try/download/database-tools, then `apt -y install ./mongodb-database-tools-*.deb`. |
+| `maxmemory-policy` is `noeviction` | Good. That's the Redis default. |
+| `maxmemory-policy` is anything else | Tell me. The dashboard's job queue needs `noeviction`, and changing it affects your other apps, so we'd decide together. Usually the dashboard is then given its own small Redis. |
+| Less than 1 GB memory free | The build may run out of memory. Add swap first (see Troubleshooting). |
 
 ---
 
-## 2. Get the code
+## 2. Node 22 for the dashboard (only if `node -v` was lower than v22)
+
+This installs Node 22 alongside your current Node. Your other apps and the `node` command they use stay as they are.
+
+**On the VPS**:
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.nvm/nvm.sh
+nvm install 22
+nvm alias default system 2>/dev/null || true   # keep your current node as the default
+```
+Each time you build the dashboard (steps 4 and 10), first run this line in that SSH session:
+```bash
+export PATH="$(dirname $(source ~/.nvm/nvm.sh && nvm which 22)):$PATH"; node -v   # must show v22
+```
+
+---
+
+## 3. Get the code
 
 **On the VPS**:
 ```bash
@@ -68,34 +86,38 @@ If asked, enter your GitHub username, then the access token as the password.
 
 ---
 
-## 3. Settings and secrets
+## 4. Settings and build
 
-**Choose a free local port** for the dashboard. Nginx forwards your domain to it. Check that nothing else uses it (no output means it's free):
+### 4.1 Choose free slots
 ```bash
-ss -ltn | grep ':8080 '
+ss -ltn | grep ':4100 '                                          # no output = port 4100 is free
+mongosh --quiet --eval 'db.getMongo().getDBNames()'              # "kpi_dashboard" must NOT be in the list
+for n in 1 2 3 4 5; do echo "redis db $n: $(redis-cli -n $n dbsize)"; done   # pick a number showing 0
 ```
-If 8080 is taken, try 8090, 8095 and so on. Then save your choice. Docker reads `/opt/kpi/.env`, which is separate from the app settings below:
-```bash
-cd /opt/kpi
-echo "WEB_PORT=8090" > .env       # your free port
-```
-Use the same port everywhere this guide says `<WEB_PORT>`.
+- If 4100 is taken, use 4110, 4120 and so on.
+- If Redis db 1 isn't empty, use the first number that shows `0`.
+- Use your choices wherever this guide says `4100` and `/1`.
 
-**App settings**, on the VPS:
-```bash
-cd /opt/kpi
-cp server/.env.example server/.env.production
-# two random secrets: copy each output line
-openssl rand -hex 48
-openssl rand -hex 48
-nano server/.env.production
-```
-Set these lines and leave the rest as they are. `MONGO_URI` and `REDIS_URL` are filled in by Docker.
+If `mongosh` asks for a password, your MongoDB has authentication on. See *MongoDB with a password* at the end of this guide.
 
+### 4.2 App settings
+```bash
+cd /opt/kpi/server
+cp .env.example .env
+openssl rand -hex 48     # copy: first secret
+openssl rand -hex 48     # copy: second secret
+nano .env
+```
+Set these lines and leave the rest as they are:
 ```ini
 NODE_ENV=production
-JWT_ACCESS_SECRET=<first random value>
-JWT_REFRESH_SECRET=<second random value>
+PORT=4100
+HOST=127.0.0.1
+MONGO_URI=mongodb://127.0.0.1:27017/kpi_dashboard
+REDIS_URL=redis://127.0.0.1:6379/1
+RUN_WORKER=false
+JWT_ACCESS_SECRET=<first secret>
+JWT_REFRESH_SECRET=<second secret>
 CORS_ORIGINS=https://kpi.example.com
 SINGLE_TENANT=true
 DEFAULT_TENANT=bor-bahawalpur
@@ -104,108 +126,113 @@ WHATSAPP_MODE=mock
 # Guest link: visitors are signed in as this account, read-only
 GUEST_EMAIL=commissioner@bwp.test
 ```
-Save with `Ctrl+O`, `Enter`, then `Ctrl+X`.
+Save with `Ctrl+O`, `Enter`, then `Ctrl+X`. Then protect the file: `chmod 600 .env`.
 
-**Choosing the guest account.**
-- `commissioner@bwp.test` shows the whole division: Home, performance, league tables, trends, litigation and so on.
-- To show a smaller area, use any other account, such as `dc.bahawalpur@bwp.test`.
-- Don't use an admin account. The guest can't change anything either way, but admin menus would still be visible.
+What some of these settings do:
+- `HOST=127.0.0.1` means the API can only be reached through nginx, not directly from the internet.
+- `RUN_WORKER=false` is set because background jobs run in their own PM2 process (`kpi-worker`).
+- `GUEST_EMAIL`: `commissioner@bwp.test` shows the whole division. Use e.g. `dc.bahawalpur@bwp.test` to show one district. Don't use an admin account.
+
+### 4.3 Build
+(If you did step 2, run its `export PATH=…` line first.)
+```bash
+cd /opt/kpi/server && npm ci && npm run build
+cd /opt/kpi/web && npm ci && npm run build
+```
+The server build creates `/opt/kpi/server/dist`, and the website build creates `/opt/kpi/web/dist`. Together they take 2–5 minutes.
 
 ---
 
-## 4. Upload the database
+## 5. Load the database
 
-**On your PC.** The copy in `deploy-backup\kpi.gz` was taken on 17 Oct 2026. To include changes made since then, make a fresh copy first:
+**On your PC.** Make a fresh copy, so it includes your latest changes, then upload it:
 ```powershell
 cd "D:\KPI Dashboard"
 & "C:\Program Files\MongoDB\Tools\100\bin\mongodump.exe" --uri mongodb://127.0.0.1:27017/kpi_dashboard --archive=deploy-backup\kpi.gz --gzip
-```
-Upload it to the VPS:
-```powershell
-scp "D:\KPI Dashboard\deploy-backup\kpi.gz" root@<VPS-IP>:/opt/kpi/kpi.gz
+scp deploy-backup\kpi.gz root@<VPS-IP>:/opt/kpi/kpi.gz
 ```
 
-**On the VPS**, start only the database and load the copy:
+**On the VPS.** Restore into the new `kpi_dashboard` database only:
 ```bash
 cd /opt/kpi
-docker compose up -d mongo
-sleep 5
-docker compose cp kpi.gz mongo:/kpi.gz
-docker compose exec mongo mongorestore --archive=/kpi.gz --gzip --drop
+mongorestore --uri mongodb://127.0.0.1:27017 --archive=kpi.gz --gzip --nsInclude='kpi_dashboard.*'
 ```
-The last lines should report `documents restored successfully`.
+It should end with `… documents restored successfully`.
+
+`--nsInclude` limits the restore to `kpi_dashboard`, so your other apps' databases can't be affected. Don't add `--drop` on this first restore.
+
+Then update the database indexes:
+```bash
+cd /opt/kpi/server && node dist/migrate.js
+```
 
 ---
 
-## 5. Start the app
+## 6. Start with PM2
 
 **On the VPS**:
 ```bash
 cd /opt/kpi
-docker compose up -d --build
+# Only if you did step 2 (Node 22 alongside your current Node):
+export NODE_BIN="$(source ~/.nvm/nvm.sh && nvm which 22)"
+
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 ls                                   # kpi-api and kpi-worker: "online"
+curl -s localhost:4100/api/config        # {"singleTenant":true,...,"guest":true}
 ```
-The first build takes 5–10 minutes. Then check:
-```bash
-docker compose ps                         # all "running"; "migrate" shows "exited (0)": that is normal
-curl -s localhost:<WEB_PORT>/api/config         # {"singleTenant":true,...,"guest":true}
-```
+`pm2 save` makes the dashboard start again after a reboot, together with your other apps. If PM2 wasn't already set to start at boot, run `pm2 startup` once and follow its instruction.
 
 ---
 
-## 6. Nginx and HTTPS
+## 7. Nginx site and HTTPS
 
-Nginx on the VPS receives visitors on ports 80 and 443 and passes them to the dashboard on `localhost:<WEB_PORT>`. Your other sites keep their own files and are not affected. Certbot gets a free Let's Encrypt certificate and renews it automatically.
+Your nginx keeps serving your other apps. Here you **add** one new site file. Don't edit or delete the existing ones.
 
-> Only **add** the new site file below. Don't edit or delete the files for your other apps, and **don't remove the `default` site**.
-
-**On the VPS**, install certbot if you don't have it (nginx is already installed for your other apps):
-```bash
-certbot --version || apt -y install certbot python3-certbot-nginx
-```
-
-Create the site file (replace `kpi.example.com` with your domain and `<WEB_PORT>` with your port):
+**On the VPS**, create the site file. Replace `kpi.example.com` with your domain, and `4100` if you chose another port:
 ```bash
 cat > /etc/nginx/sites-available/kpi <<'EOF'
 server {
     listen 80;
     server_name kpi.example.com;
 
-    client_max_body_size 20m;          # litigation documents and imports
+    root /opt/kpi/web/dist;
+    client_max_body_size 20m;              # litigation documents and Excel imports
 
-    location / {
-        proxy_pass http://127.0.0.1:<WEB_PORT>;
+    # API (Node under PM2)
+    location /api/ {
+        proxy_pass http://127.0.0.1:4100;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 120s;       # large Excel / PDF downloads
+        proxy_read_timeout 120s;           # large Excel / PDF downloads
     }
+
+    # Website files (built once; long cache for versioned files)
+    location /assets/ { expires 1y; add_header Cache-Control "public, immutable"; }
+    location = /sw.js { add_header Cache-Control "no-cache"; }
+    location / { try_files $uri /index.html; }
 }
 EOF
 ln -s /etc/nginx/sites-available/kpi /etc/nginx/sites-enabled/kpi
+chmod o+x /opt /opt/kpi /opt/kpi/web    # nginx must be able to read the website folder
 nginx -t && systemctl reload nginx
 ```
-`nginx -t` must say `syntax is ok` and `test is successful`.
+`nginx -t` must report `syntax is ok` and `test is successful`. If it doesn't, nothing is reloaded and your other sites keep running.
 
-Get the certificate. Name only this domain, so certbot changes only the new site file. It adds HTTPS there and redirects `http` to `https`:
+Add HTTPS. Certbot changes only this domain's file:
 ```bash
+certbot --version || apt -y install certbot python3-certbot-nginx
 certbot --nginx -d kpi.example.com --redirect -m you@example.com --agree-tos -n
-```
-Check that automatic renewal works:
-```bash
 certbot renew --dry-run
 ```
-Open `https://kpi.example.com` in your browser.
-
-If certbot fails:
-- check that the domain points to this VPS (`ping kpi.example.com` shows the VPS IP);
-- check that ports 80 and 443 are open (`ufw status`);
-- check that this domain isn't already used by `server_name` in another site file: `grep -rn "kpi.example.com" /etc/nginx/sites-enabled/` should list only `kpi`.
+Then open `https://kpi.example.com`.
 
 ---
 
-## 7. Check the accounts
+## 8. Accounts: admin, guest link, test passwords
 
 | Purpose | How |
 |---|---|
@@ -214,70 +241,67 @@ If certbot fails:
 | Guest button | The sign-in page also shows **View Demo as Guest**. |
 
 **What a guest can and can't do.**
-- Guests can open every page the guest account can see, including Excel and PDF downloads.
-- Any attempt to save, enter, import or delete is refused with "Guest view is read-only".
+- A guest sees every page the guest account can see, including Excel and PDF downloads.
+- Saving, data entry, imports and deletes are refused with "Guest view is read-only".
 - A yellow banner at the top says "Demo guest view — read-only".
-- The guest session ends when the browser is closed.
+- The session ends when the browser is closed.
 
 **Before sharing the link:**
-1. **Change the admin password.** Sign in as `admin@bwp.test`, open the profile (your name, top right), then change the password. The copied database still has the test password `Password123` on every account.
-2. **Lock down the other test accounts.** Everyone else (`patwari1.hasilpur@bwp.test` and the rest) can still sign in with `Password123`. For a public demo, change their passwords in **People**, or ask me to add a one-off script that resets all passwords except yours.
-3. **Clean out litigation test cases** you don't want shown, from the Litigation register.
+1. **Change the admin password.** Sign in as `admin@bwp.test`, click your name (top right), then change the password. The copied database still has the test password `Password123` on every account.
+2. **Lock down the other test accounts.** Everyone else (`patwari1.hasilpur@bwp.test` and the rest) can still sign in with `Password123`. Change those passwords in **People**, or ask for a script that resets all passwords except yours.
+3. **Remove litigation test cases** you don't want shown, from the Litigation register.
 
 ---
 
-## 8. Daily backups
+## 9. Daily backups
 
 **On the VPS**:
 ```bash
 mkdir -p /opt/backups
 crontab -e
 ```
-Add this line. It runs a backup at 2 am and keeps 14 days:
+Add this line. It backs up at 2 am and keeps 14 days, covering only the dashboard's database:
 ```
-0 2 * * * cd /opt/kpi && docker compose exec -T mongo mongodump --archive --gzip > /opt/backups/kpi-$(date +\%F).gz && find /opt/backups -name 'kpi-*.gz' -mtime +14 -delete
+0 2 * * * mongodump --uri mongodb://127.0.0.1:27017/kpi_dashboard --archive=/opt/backups/kpi-$(date +\%F).gz --gzip && find /opt/backups -name 'kpi-*.gz' -mtime +14 -delete
 ```
+The backups include the uploaded litigation documents.
+
 Download a backup to your PC now and then. **On your PC**:
 ```powershell
 scp root@<VPS-IP>:/opt/backups/kpi-2026-10-20.gz "D:\KPI Dashboard\deploy-backup\"
 ```
-The backups include the uploaded litigation documents.
-
-To restore a backup **on the VPS**:
+To restore a backup **on the VPS**. This replaces only the dashboard's data:
 ```bash
-docker compose cp /opt/backups/kpi-2026-10-20.gz mongo:/r.gz
-docker compose exec mongo mongorestore --archive=/r.gz --gzip --drop
-docker compose restart api worker
+mongorestore --uri mongodb://127.0.0.1:27017 --archive=/opt/backups/kpi-2026-10-20.gz --gzip --nsInclude='kpi_dashboard.*' --drop
+pm2 restart kpi-api kpi-worker
 ```
 
 ---
 
-## 9. Updating to a new version
+## 10. Updating to a new version
 
-After new changes are pushed to GitHub, run **on the VPS**:
+**On the VPS**. If you did step 2, run its `export PATH=…` line first.
 ```bash
-cd /opt/kpi
-git pull
-docker compose up -d --build
+cd /opt/kpi && git pull
+cd server && npm ci && npm run build && node dist/migrate.js
+cd ../web && npm ci && npm run build
+pm2 restart kpi-api kpi-worker
 ```
-Database indexes are updated automatically, and the data is kept.
+The data is kept. `migrate.js` only updates indexes.
 
 ---
 
-## 10. Useful commands (on the VPS)
+## 11. Everyday commands (on the VPS)
 
 | Task | Command |
 |---|---|
-| See status | `docker compose ps` |
-| API errors | `docker compose logs api --tail 100` |
-| Follow logs live | `docker compose logs -f api worker` |
-| Restart the app | `docker compose restart api worker web` |
-| Stop everything | `docker compose down` (data is kept in Docker volumes) |
-| Turn the guest link off | Clear `GUEST_EMAIL=` in `server/.env.production`, then `docker compose up -d` |
-| Disk usage | `df -h` and `docker system df` |
-| Free space from old builds | `docker image prune -f` |
-
-**Never** run `docker compose down -v`. The `-v` deletes the database volume.
+| Status | `pm2 ls` |
+| API errors | `pm2 logs kpi-api --lines 100` |
+| Worker (reminders, jobs) | `pm2 logs kpi-worker --lines 100` |
+| Restart the dashboard | `pm2 restart kpi-api kpi-worker` |
+| Stop the dashboard only | `pm2 stop kpi-api kpi-worker` |
+| Turn the guest link off | Clear `GUEST_EMAIL=` in `/opt/kpi/server/.env`, then `pm2 restart kpi-api` |
+| Nginx errors | `tail -50 /var/log/nginx/error.log` |
 
 ---
 
@@ -285,12 +309,22 @@ Database indexes are updated automatically, and the data is kept.
 
 | Symptom | Fix |
 |---|---|
-| Signed out on every reload | The site is opened over `http://`. Use the `https://` address (step 6). |
-| Sign-in says "Invalid email or password" for everyone | The database wasn't restored. Repeat step 4, then `docker compose restart api`. |
-| Guest link says "Guest account not found" | `GUEST_EMAIL` doesn't match an active account. Fix it in `.env.production`, then `docker compose up -d`. |
-| `502 Bad Gateway` | The app is still starting or has crashed. Check `docker compose ps` and `docker compose logs api`. Nginx errors are in `/var/log/nginx/error.log`. |
-| `413 Request Entity Too Large` on upload | `client_max_body_size 20m;` is missing from `/etc/nginx/sites-available/kpi`. Add it, then `nginx -t && systemctl reload nginx`. |
-| The domain opens one of your **other** apps, or the "Welcome to nginx" page | `server_name` in `/etc/nginx/sites-available/kpi` doesn't exactly match the domain you typed, or the `kpi` link in `sites-enabled` is missing. Fix it, then `nginx -t && systemctl reload nginx`. |
-| `docker compose up` says "port is already allocated" | `WEB_PORT` is used by another app. Pick another free port in `/opt/kpi/.env`, update `proxy_pass` in the nginx file, then `docker compose up -d` and reload nginx. |
-| Build stops with "killed" | Out of memory. Check that swap is on (`free -h`, step 1). |
-| Uploads fail for big documents | The limit is 10 MB per document. Photos are compressed on the phone before upload. |
+| Signed out on every reload | The site is opened over `http://`. Use `https://` (step 7). |
+| "Invalid email or password" for every account | The database wasn't restored into `kpi_dashboard`. Repeat step 5, then `pm2 restart kpi-api`. |
+| Guest link says "Guest account not found" | `GUEST_EMAIL` doesn't match an active account. Fix `/opt/kpi/server/.env`, then `pm2 restart kpi-api`. |
+| `502 Bad Gateway` | The API isn't running, or nginx points to the wrong port. Check `pm2 logs kpi-api` and that `PORT` in `.env` matches `proxy_pass`. |
+| `500` or a blank page, with nginx error "Permission denied" | Run `chmod o+x /opt /opt/kpi /opt/kpi/web`, then `chmod -R o+r /opt/kpi/web/dist`. |
+| `413 Request Entity Too Large` on upload | `client_max_body_size 20m;` is missing from `/etc/nginx/sites-available/kpi`. |
+| The domain opens one of your other apps | `server_name` doesn't exactly match the domain, or the `sites-enabled/kpi` link is missing. Fix it, then `nginx -t && systemctl reload nginx`. |
+| `kpi-api` keeps restarting with `SyntaxError` / "Unexpected token" | PM2 is using an old Node. Redo step 6 with `NODE_BIN` set, after `pm2 delete kpi-api kpi-worker`. |
+| Build stops with "Killed" | Out of memory. Add swap: `fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab`, then build again. |
+
+### MongoDB with a password
+If your MongoDB requires sign-in, create a user for the dashboard. Use your MongoDB admin login:
+```bash
+mongosh -u <admin-user> -p --authenticationDatabase admin --eval '
+  db.getSiblingDB("kpi_dashboard").createUser({ user: "kpi", pwd: "<strong password>", roles: [{ role: "readWrite", db: "kpi_dashboard" }] })'
+```
+Then make these changes:
+- in `.env`, use `MONGO_URI=mongodb://kpi:<strong password>@127.0.0.1:27017/kpi_dashboard?authSource=kpi_dashboard`;
+- add `-u <admin-user> -p --authenticationDatabase admin` to the `mongorestore` and `mongodump` commands above.
