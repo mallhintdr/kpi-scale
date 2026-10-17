@@ -11,6 +11,7 @@ import { useCaps } from './lib/rev';
 import './index.css';
 
 const Login = lazy(() => import('./pages/Login'));
+const GuestLogin = lazy(() => import('./pages/Login').then((m) => ({ default: m.GuestLogin })));
 const Home = lazy(() => import('./pages/Home'));
 const UnitView = lazy(() => import('./pages/UnitView'));
 const League = lazy(() => import('./pages/League'));
@@ -91,6 +92,7 @@ function App() {
     <Suspense fallback={<FullScreen />}>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/guest" element={<GuestLogin />} />
         {!SINGLE_TENANT && <Route path="/platform" element={<Protected platform><Platform /></Protected>} />}
         <Route element={<Protected><AppShell /></Protected>}>
           <Route index element={<Home />} />

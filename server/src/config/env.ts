@@ -31,6 +31,8 @@ const schema = z.object({
   SINGLE_TENANT: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
   /** The one organisation used in single-organisation mode. */
   DEFAULT_TENANT: z.string().default('bor-bahawalpur'),
+  /** Demo: /guest signs visitors in as this account, read-only. Empty = no guest access. */
+  GUEST_EMAIL: z.string().trim().toLowerCase().default(''),
   /** Platform super-admin seeded on first start (only if no super-admin exists). */
   SUPERADMIN_EMAIL: z.string().email().optional(),
   SUPERADMIN_PASSWORD: z.string().min(10).optional(),

@@ -23,6 +23,8 @@ export interface NavItem {
   group?: 'main' | 'admin';
 }
 
+const isGuest = () => { try { return sessionStorage.getItem('guest') === '1'; } catch { return false; } };
+
 export const NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/explore', label: 'Performance', icon: BarChart3 },
@@ -169,6 +171,7 @@ export function AppShell() {
             </IconButton>
           </div>
         </div>
+        {isGuest() && <div className="bg-gold-500/15 px-4 py-1.5 text-center text-[13px] text-amber-900 dark:text-amber-200">Demo guest view — read-only. Figures and settings cannot be changed.</div>}
         <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 pb-36 sm:px-4 lg:pb-5">
           {meta.isLoading ? (
             <div className="py-16 text-center"><Spinner /></div>

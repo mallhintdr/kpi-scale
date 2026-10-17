@@ -36,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await post('/auth/logout').catch(() => {});
+    try { sessionStorage.removeItem('guest'); } catch { /* storage unavailable */ }
     clear();
   }, [clear]);
 

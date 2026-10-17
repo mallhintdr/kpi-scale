@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { env } from '../config/env.js';
 import { verifyAccessToken } from '../modules/auth/tokens.js';
 import { forbidden, unauthorized } from '../lib/errors.js';
 import { runWithContext, runUnscoped } from '../lib/tenantContext.js';
@@ -45,6 +46,8 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
   );
   if (!user || user.status !== 'active' || user.tokenVersion !== payload.tv) throw unauthorized('Session revoked');
   if (!tenant || tenant.status !== 'active') throw forbidden('Organisation is suspended');
+  // The demo guest may look at everything the account can see but change nothing.
+  if (env.GUEST_EMAIL && user.email === env.GUEST_EMAIL && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) throw forbidden('Guest view is read-only');
 
   req.user = {
     id: String(user._id),

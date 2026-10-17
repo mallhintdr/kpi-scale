@@ -24,6 +24,26 @@ const write = (k: string, v: string | null) => {
   }
 };
 
+/** Demo link (/guest): signs the visitor in as the read-only guest account and opens the dashboard. */
+export function GuestLogin() {
+  const { session, setSession } = useAuth();
+  const navigate = useNavigate();
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    post<any>('/auth/guest', {})
+      .then((data) => { try { sessionStorage.setItem('guest', '1'); } catch { /* storage unavailable */ } setSession(data); navigate('/', { replace: true }); })
+      .catch(setError);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (session && !error) return null;
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-gradient-to-b from-brand-600 to-brand-800 p-4">
+      <Card className="w-full max-w-sm space-y-3 p-5 text-center">
+        {error ? <><FormError error={error} /><Button block onClick={() => navigate('/login')}>Go to sign-in</Button></> : <p className="text-sm text-slate-600">Opening the demo dashboard…</p>}
+      </Card>
+    </div>
+  );
+}
+
 interface Brand { name: string; slug: string; branding: { shortName?: string; tagline?: string; logoUrl?: string } }
 
 /**
@@ -42,6 +62,8 @@ export default function Login() {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
+  const [guest, setGuest] = useState(false);
+  useEffect(() => { get<{ guest?: boolean }>('/config').then((c) => setGuest(!!c.guest)).catch(() => {}); }, []);
   useEffect(() => {
     if (!slug) return;
     get<Brand>(`/auth/branding/${encodeURIComponent(slug)}`).then(setBrand).catch(() => setBrand(null));
@@ -108,6 +130,7 @@ export default function Login() {
               </label>
               <FormError error={error} />
               <Button type="submit" block loading={busy}>Sign in</Button>
+              {guest && <Button type="button" variant="secondary" block onClick={() => navigate('/guest')}>View Demo as Guest</Button>}
               {brand && !SINGLE_TENANT && (
                 <button type="button" className="w-full text-center text-xs text-slate-500 hover:underline" onClick={() => { write(ORG_KEY, null); setBrand(null); navigate('/login', { replace: true }); }}>
                   Not with {brand.name}? Sign in to another organisation

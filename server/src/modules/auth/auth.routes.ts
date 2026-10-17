@@ -152,6 +152,15 @@ router.post(
   },
 );
 
+/* Demo guest: one click signs in as the configured read-only account (browser-session only). */
+router.post('/guest', perIp, async (req, res) => {
+  if (!env.GUEST_EMAIL) throw unauthorized('Guest access is not enabled');
+  const candidates = await runUnscoped(() => User.find({ email: env.GUEST_EMAIL, status: 'active' }).populate('tenantId', 'name slug status settings isPlatform industry branding'));
+  const user = candidates.find((u) => (u.tenantId as any)?.status === 'active' && (u.tenantId as any).slug === env.DEFAULT_TENANT);
+  if (!user) throw unauthorized('Guest account not found');
+  res.json({ ...(await issueSession(req, res, user, user.tenantId, { remember: false })), guest: true });
+});
+
 /* Rotate refresh token and issue a new access token */
 router.post('/refresh', async (req, res) => {
   const token = req.cookies?.[COOKIE];
