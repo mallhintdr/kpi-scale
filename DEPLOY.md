@@ -134,22 +134,57 @@ curl -s localhost:8080/api/config         # {"singleTenant":true,...,"guest":tru
 
 ---
 
-## 6. HTTPS with Caddy
+## 6. Nginx and HTTPS
 
-Caddy gets and renews the certificate automatically.
+Nginx on the VPS receives visitors on ports 80 and 443 and passes them to the app on `localhost:8080`. Certbot gets a free Let's Encrypt certificate and renews it automatically.
 
-**On the VPS** (replace the domain):
+> If nginx already serves other sites on this VPS, keep them. Only add the new file below. Don't edit or delete the existing sites.
+
+**On the VPS**, install nginx and certbot:
 ```bash
-apt -y install caddy
-cat > /etc/caddy/Caddyfile <<'EOF'
-kpi.example.com {
-    encode gzip
-    reverse_proxy localhost:8080
+apt -y install nginx certbot python3-certbot-nginx
+```
+
+Create the site file (replace `kpi.example.com` with your domain in **both** places):
+```bash
+cat > /etc/nginx/sites-available/kpi <<'EOF'
+server {
+    listen 80;
+    server_name kpi.example.com;
+
+    client_max_body_size 20m;          # litigation documents and imports
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;       # large Excel / PDF downloads
+    }
 }
 EOF
-systemctl reload caddy
+ln -s /etc/nginx/sites-available/kpi /etc/nginx/sites-enabled/kpi
+rm -f /etc/nginx/sites-enabled/default   # only if this VPS has no other sites
+nginx -t && systemctl reload nginx
 ```
-Open `https://kpi.example.com` in your browser. If the certificate fails, check that the domain points to this VPS (`ping kpi.example.com`) and that ports 80 and 443 are open.
+`nginx -t` must say `syntax is ok` and `test is successful`.
+
+Get the certificate. Certbot adds HTTPS to the site file and redirects `http` to `https`:
+```bash
+certbot --nginx -d kpi.example.com --redirect -m you@example.com --agree-tos -n
+```
+Check that automatic renewal works:
+```bash
+certbot renew --dry-run
+```
+Open `https://kpi.example.com` in your browser.
+
+If certbot fails:
+- check that the domain points to this VPS (`ping kpi.example.com` shows the VPS IP);
+- check that ports 80 and 443 are open (`ufw status`);
+- check that no other program is using port 80 (`ss -ltnp | grep ':80 '` should show only nginx).
 
 ---
 
@@ -236,6 +271,8 @@ Database indexes are updated automatically, and the data is kept.
 | Signed out on every reload | The site is opened over `http://`. Use the `https://` address (step 6). |
 | Sign-in says "Invalid email or password" for everyone | The database wasn't restored. Repeat step 4, then `docker compose restart api`. |
 | Guest link says "Guest account not found" | `GUEST_EMAIL` doesn't match an active account. Fix it in `.env.production`, then `docker compose up -d`. |
-| `502 Bad Gateway` | The app is still starting or has crashed. Check `docker compose ps` and `docker compose logs api`. |
+| `502 Bad Gateway` | The app is still starting or has crashed. Check `docker compose ps` and `docker compose logs api`. Nginx errors are in `/var/log/nginx/error.log`. |
+| `413 Request Entity Too Large` on upload | `client_max_body_size 20m;` is missing from `/etc/nginx/sites-available/kpi`. Add it, then `nginx -t && systemctl reload nginx`. |
+| Nginx shows its default "Welcome to nginx" page | The `default` site is still enabled, or `server_name` doesn't match your domain. Fix it, then reload nginx. |
 | Build stops with "killed" | Out of memory. Check that swap is on (`free -h`, step 1). |
 | Uploads fail for big documents | The limit is 10 MB per document. Photos are compressed on the phone before upload. |
