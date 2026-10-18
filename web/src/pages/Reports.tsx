@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Download, FileSpreadsheet, Printer } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { FileSpreadsheet, Printer, Sheet as SheetIcon } from 'lucide-react';
+import { exportTableXlsx } from '../lib/xlsx';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/AppShell';
 import { FyPicker, UnitField } from '../components/rev';
@@ -140,6 +141,12 @@ export default function Reports() {
   const [selected, setSelected] = useState<string | null>(null);
   const anyMoney = chosenHeads.some((h) => h.money);
 
+  const tableRef = useRef<HTMLTableElement>(null);
+  const exportXlsx = () => exportTableXlsx(tableRef.current, {
+    filename: `report-${data?.postLabel ?? post}-${unit?.name}-${fy}`, sheet: data?.postLabel ?? 'Report', freezeCols: 2 + groupCols.length,
+    title: `${data?.postLabel} report · ${unit?.name} · FY ${generated?.fy ?? fy}`,
+    subtitle: `Generated ${new Date().toLocaleString()} · ${perf ? 'Performance mode' : 'KPI evaluation mode'}${anyMoney ? ` · amounts ${MILLIONS}` : ''}`,
+  });
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const header = ['S.No', ...groupCols.map((l) => UNIT_LABEL[l]), 'Name', 'Area', ...chosenDetails.map((d) => (d.key === 'overall' ? (perf ? `${T.money} achievement %` : 'KPI score') : d.label)),
@@ -202,7 +209,8 @@ export default function Reports() {
             </span>
             <div className="flex gap-2">
               <Button variant="secondary" size="sm" onClick={() => window.print()}><Printer className="size-4" />Print</Button>
-              <Button variant="secondary" size="sm" onClick={exportCsv}><Download className="size-4" />CSV</Button>
+              <Button variant="secondary" size="sm" onClick={exportXlsx}><SheetIcon className="size-4" />Excel</Button>
+              <Button variant="ghost" size="sm" onClick={exportCsv}>CSV</Button>
             </div>
           </div>
 
@@ -215,7 +223,7 @@ export default function Reports() {
 
           <Card className="overflow-hidden print:rounded-none print:shadow-none print:ring-0">
             <div className="max-h-[70vh] overflow-auto print:max-h-none print:overflow-visible">
-              <table className="w-max min-w-full border-separate border-spacing-0 text-[13px] print:text-[10px]">
+              <table ref={tableRef} className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
                 <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white print:static">
                   <tr>
                     <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2 text-center print:static">#</th>

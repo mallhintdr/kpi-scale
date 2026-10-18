@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { Download, Search } from 'lucide-react';
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { Download, Search, Printer } from 'lucide-react';
+import { exportTableXlsx } from '../lib/xlsx';
+import { useDeferredValue, useEffect, useMemo, useState, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { achievement, useViewMode } from '../lib/mode';
 import { useTargetSummary } from '../components/targets';
@@ -80,6 +81,11 @@ export default function Staff() {
   // Clicked row stays highlighted so the officer's figures can be read across the whole table
   const [selected, setSelected] = useState<string | null>(null);
 
+  const tableRef = useRef<HTMLTableElement>(null);
+  const exportXlsx = () => exportTableXlsx(tableRef.current, {
+    filename: `staff-${post}-${unit?.name}-${fy}`, sheet: 'Staff performance', freezeCols: 3 + groupCols.length,
+    title: `Staff performance · ${unit?.name ?? ''} · FY ${fy}`, subtitle: `Generated ${new Date().toLocaleString()}`,
+  });
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const header = ['S.No', ...groupCols.map((l) => UNIT_LABEL[l]), 'Name', 'Area', 'BPS', perf ? `${T.money} achievement %` : 'KPI score', ...columns.flatMap((c) => [`${c.name} %`, `${c.name} done`, `${c.name} of`])];
@@ -92,7 +98,7 @@ export default function Staff() {
   return (
     <>
       <PageHeader title="Staff performance" subtitle="Every subordinate, every KPI" actions={<FyPicker />} />
-      <Card className="mb-4 grid gap-3 p-4 md:grid-cols-[1fr_1fr_1fr_auto] md:items-end">
+      <Card className="mb-4 grid gap-3 p-4 md:grid-cols-[1fr_1fr_1fr_auto] md:items-end print:hidden">
         <Field label="Area">{() => <UnitField value={unit} onChange={setUnit} accept={parentLevels()} />}</Field>
         <Field label="Staff">{(id) => <Select id={id} value={post} onChange={(e) => setPost(e.target.value as Post)}>{options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}</Select>}</Field>
         <Field label="Search">
@@ -103,16 +109,26 @@ export default function Staff() {
             </div>
           )}
         </Field>
-        <button onClick={exportCsv} disabled={!rows.length} className="flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:ring-slate-700 dark:hover:bg-slate-800">
-          <Download className="size-4" />CSV
-        </button>
+        <div className="flex gap-2">
+          <button onClick={exportXlsx} disabled={!rows.length} className="flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:ring-slate-700 dark:hover:bg-slate-800">
+            <Download className="size-4" />Excel
+          </button>
+          <button onClick={() => window.print()} disabled={!rows.length} className="flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:ring-slate-700 dark:hover:bg-slate-800">
+            <Printer className="size-4" />Print
+          </button>
+          <button onClick={exportCsv} disabled={!rows.length} className="h-11 px-2 text-xs text-slate-500 hover:underline disabled:opacity-50">CSV</button>
+        </div>
       </Card>
 
       {!options.length ? <Card><Empty title="Choose an area" /></Card> : isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !rows.length ? (
         <Card><Empty title="No staff found" /></Card>
       ) : (
         <>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
+          <div className="hidden print:mb-2 print:block">
+            <div className="text-lg font-bold">Staff Performance · {data?.postLabel} · {unit?.name} · FY {fy}</div>
+            <div className="text-xs">{rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS} · generated {new Date().toLocaleString()}</div>
+          </div>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500 print:hidden">
             <span>
               {rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS} · tap a row to highlight it · tap a name for the profile
               {focusName && (
@@ -124,7 +140,7 @@ export default function Staff() {
           </div>
           <Card className="overflow-hidden">
             <div className="max-h-[70vh] overflow-auto">
-              <table className="w-max min-w-full border-separate border-spacing-0 text-sm">
+              <table ref={tableRef} className="w-max min-w-full border-separate border-spacing-0 text-sm">
                 {/* Two header rows: group (head) on top, its sub-columns below. Headers ~15% larger, centred. */}
                 <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white">
                   <tr>

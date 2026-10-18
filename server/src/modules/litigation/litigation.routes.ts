@@ -20,6 +20,7 @@ import { Counter, LitigationCase, LitigationDoc, Tenant, Unit } from '../../mode
 import type { BP } from '../org/blueprint.js';
 import { bpOf } from '../org/service.js';
 import { ancestorAt, hasCap, scopeRoots } from '../revenue/access.js';
+import { finishSheet } from '../../lib/xlsxStyle.js';
 import { CATEGORY_ORDER, caseFilePdf, imagesToPdf, pdfPages } from './pdf.js';
 
 const router = Router();
@@ -461,8 +462,7 @@ router.get('/export/xlsx', validate({ query: listQuery }), async (req, res) => {
   h.eachCell((cl) => { cl.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF187A43' } }; });
   const d = (x?: Date | null) => (x ? new Date(x) : '');
   rows.forEach((c: any, i) => ws.addRow([i + 1, c.caseId, c.tehsilId?.name, c.unitId?.name, c.caseType, d(c.institutedOn), courtName(c.court, c.courtOther), c.courtCaseNo, c.applicants.join('; '), c.respondents.join('; '), c.land?.kanal, c.land?.marla, c.land?.feet, c.land?.murabba, (c.land?.khasraNos ?? []).join(', '), c.landSpec, d(c.lastHearing), d(c.nextHearing), c.lastProceedings, c.nextAction, c.status === 'decided' ? 'Decided' : 'Pending', d(c.decision?.date), c.appeal?.filed === 'yes' ? 'Filed' : c.appeal?.filed === 'no' ? 'Not filed' : '', c.appeal?.filed === 'yes' ? courtName(c.appeal.court, c.appeal.courtOther) : '', c.appeal?.reasonNotFiled, c.note]));
-  ws.columns.forEach((col) => { col.width = 16; });
-  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  finishSheet(ws, { headerRow: 1, keyCols: 2 });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="litigation.xlsx"');
   res.send(Buffer.from(await wb.xlsx.writeBuffer()));

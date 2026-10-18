@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { ApiError } from './lib/api';
 import { SINGLE_TENANT } from './lib/edition';
 import { useCaps } from './lib/rev';
+import { installPrintFit } from './lib/print';
 import './index.css';
 
 const Login = lazy(() => import('./pages/Login'));
@@ -86,6 +87,8 @@ function CacheReset() {
   }, [who]);
   return null;
 }
+
+installPrintFit();
 
 function App() {
   return (

@@ -107,3 +107,17 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-sheet, .animate-fade { animation: none; }
 }
+
+/* ---------- Printing / Save as PDF ----------
+ * Landscape by default; header colours kept; wide tables are shrunk to the page width by lib/print.ts
+ * (and moved to A3 when A4 would make text too small), so no columns are cut off. */
+@page { size: A4 landscape; margin: 8mm; }
+@media print {
+  *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  html, body { background: #fff !important; color: #000 !important; }
+  thead { display: table-header-group; }   /* repeat column headers on every page */
+  tfoot { display: table-footer-group; }
+  tr, td, th { break-inside: avoid; }
+  table { max-width: none !important; }
+  .overflow-auto, .overflow-x-auto, .overflow-y-auto { overflow: visible !important; max-height: none !important; }
+}

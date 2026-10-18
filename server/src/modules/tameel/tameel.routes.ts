@@ -15,6 +15,7 @@ import { objectId, q, validate } from '../../middleware/validate.js';
 import { Charge, Tameel, TameelFile, TameelSheet, Unit, User } from '../../models/index.js';
 import type { BP } from '../org/blueprint.js';
 import { bpOf } from '../org/service.js';
+import { finishSheet } from '../../lib/xlsxStyle.js';
 import { activeFilter, ancestorAt, canSeeUnit, hasCap, myCharges } from '../revenue/access.js';
 
 const router = Router();
@@ -73,8 +74,7 @@ async function buildWorkbook(t: any, sheets: any[], units: Map<string, any>, use
       ws.addRow([n, unit, ...t.columns.map((c: any) => r.values?.[c.key] ?? ''), s.status, users.get(String(s.submittedBy)) ?? '', s.submittedAt ? new Date(s.submittedAt).toLocaleString('en-GB') : '']);
     }
   }
-  ws.columns.forEach((c, i) => { c.width = i === 0 ? 8 : Math.min(40, Math.max(12, String(ws.getRow(3).getCell(i + 1).value ?? '').length + 4)); });
-  ws.eachRow((row, i) => { if (i >= 3) row.eachCell((c) => { c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } }; }); });
+  finishSheet(ws, { headerRow: 3, keyCols: 2 });
   ws.views = [{ state: 'frozen', ySplit: 3 }];
   return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), rows: n };
 }
