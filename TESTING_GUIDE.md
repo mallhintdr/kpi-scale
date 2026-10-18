@@ -41,7 +41,7 @@ Run these from `server`, with the API running:
 | `node scripts/check-rollups.mjs` | 10 checks passed |
 | `node scripts/e2e-whatsapp.mjs` | 17 checks passed |
 | `node scripts/e2e-litigation.mjs` | 36 checks passed |
-| `node scripts/e2e-stateland.mjs` | 31 checks passed |
+| `node scripts/e2e-stateland.mjs` | 33 checks passed |
 
 ### 0.4 Test accounts — one per role
 | Role | Email (`@bwp.test`) | Works on |
@@ -205,19 +205,19 @@ Use the **current month**; future months are refused.
 | L-13 | New Case › Land: Murabba + Killa / Khasra, add 2 murabbas with their killas; then switch to Khasra Only | Each murabba keeps its own killas on the case page and PDF; khasra-only saves khasras without murabba | ☐ |
 | L-14 | As `admin` › Settings › tick a tehsil under "Tehsils without murabbas"; open New Case for a mouza there | The form opens with Khasra Only | ☐ |
 
-### 12B. State Land Directory
+### 12B. State Land Directory (khasra-wise)
 | ID | Steps | Expected | ☐ |
 |---|---|---|---|
-| S-01 | As `patwari1.hasilpur` › State Land › New Holding: mouza, murabba → killas, area, category, possession, record status | Saved as `HSL-<MOUZA>-SL-0001`, area shown in acres, status "Awaiting verification" | ☐ |
-| S-02 | Choose category "Allotted / Leased Under Scheme", then "Acquired Land" | Only the matching extra section (Allotment / lease, or Acquisition) appears | ☐ |
-| S-03 | Possession "Partly encroached" | Encroachment section: area, encroachers, action; encroached acres counted in the cards | ☐ |
-| S-04 | Tick "under litigation" | Cases of that mouza from the Litigation register can be linked, and show on the holding | ☐ |
-| S-05 | Capture GPS on a phone at the site | Point saved; "map" link opens it | ☐ |
-| S-06 | As the Tehsildar try Approve first; as the Girdawar Verify; then the Tehsildar Approves | Approve needs verification first; then Approved | ☐ |
-| S-07 | The Patwari edits an approved holding | It goes back to "Awaiting verification" | ☐ |
-| S-08 | The Girdawar returns a holding with remarks | Status "Returned"; remarks shown; must be corrected before verification | ☐ |
-| S-09 | Summary tab; Patwari › Mouza Listing › Mark Complete; Girdawar › Confirm | Category and mouza tables; completion counts update | ☐ |
-| S-10 | Excel button; print a holding | Formatted Excel (green headers); holding prints cleanly | ☐ |
+| S-01 | As `patwari1.hasilpur` › State Land › Enter State Land: mouza, khewat / khatauni, murabba 45 | The 25 killas of murabba 45 appear as a grid | ☐ |
+| S-02 | Tick killas 1, 2, 7 and "Select all"; then "+ Sub-killa" on killa 6 | Each ticked killa gets a row (8 kanal by default); killa 6 becomes 6/1 and 6/2, each with its own area; totals in K · M · Ft and acres | ☐ |
+| S-03 | "+ Add another murabba"; tick "Different khewat / khatauni" for it | The second murabba uses its own khewat / khatauni, the first keeps the common one | ☐ |
+| S-04 | Category, sub-type, department: try to type a name that is not in the list | Only listed names can be chosen ("ask the administrator") | ☐ |
+| S-05 | Possession "Partly encroached" | An encroached-area column appears for each khasra | ☐ |
+| S-06 | Save; enter the same murabba again | Saved killas are greyed out; re-entering one is refused | ☐ |
+| S-07 | As the Girdawar tick several khasras in the directory › Verify; as the Tehsildar › Approve | Verified, then approved, in bulk; approving before verification is refused | ☐ |
+| S-08 | The Patwari edits an approved khasra; the Girdawar returns one with remarks | Edit sends it back for verification; returned shows the remarks | ☐ |
+| S-09 | As `admin` › State Land › Settings: add a sub-type and a department | Every user can pick them at once; a category in use cannot be removed | ☐ |
+| S-10 | Summary tab; Mouza Listing (Patwari marks complete, Girdawar confirms); Excel | Mouza-wise murabbas / khasras / acres; Excel has Murabba, Killa, Sub-killa columns | ☐ |
 
 ## 13. Officer profile
 | ID | Steps | Expected | ☐ |

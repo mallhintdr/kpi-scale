@@ -2,6 +2,14 @@
 
 **Status:** built (phases 1–2 and the summary from phase 3).
 
+**Changes after review (19 Oct 2026):**
+- **Khasra-wise records.** The directory now holds one record per khasra: Murabba / Mustateel no. → killa (1–25) → optional sub-killa, each with its own area in Kanal / Marla / Feet.
+- **Entry.** Entering a murabba shows its 25 killas; the user ticks any or all of them and splits a killa into sub-killas where needed. Khewat and khatauni are given once for all the killas, with an override for a murabba.
+- **Removed fields.** GPS, location, boundaries and hadbast are removed; the cadastral mapping system will be linked later.
+- **Uniform type names.** Categories, sub-types and departments come from lists that only the administrator edits, so every user picks the same names. "Provincial Government" is a category and a department.
+- **Lamberdari scheme** is added under schemes.
+- **Bulk verification.** The Girdawar and Tehsildar can verify and approve in bulk.
+
 **Decisions taken (§10):**
 - the categories in §3 are accepted;
 - shamilat deh is included (category J);

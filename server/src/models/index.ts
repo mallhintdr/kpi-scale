@@ -34,6 +34,8 @@ const tenantSchema = new Schema(
     },
     /** Litigation settings: case types and appeal periods (days) per court. */
     litigation: { type: Schema.Types.Mixed, default: {} },
+    /** State Land settings: categories with their sub-types, and departments (admin-managed, uniform names). */
+    stateLand: { type: Schema.Types.Mixed, default: {} },
     /** Daily WhatsApp coaching: morning goals, follow-ups, evening summary, escalation ladder. */
     whatsapp: {
       enabled: { type: Boolean, default: false },
@@ -717,24 +719,21 @@ const areaFields = { kanal: Number, marla: Number, feet: Number };
 const stateLandSchema = new Schema(
   {
     ...tenantField,
-    holdingId: { type: String, required: true }, // TEHSIL-MOUZA-SL-NNNN, permanent
-    serial: { type: Number, required: true }, // per tehsil
+    // One record per khasra: Murabba / Mustateel no. → killa (1–25) → optional sub-killa
+    holdingId: { type: String, required: true }, // TEHSIL-MOUZA-MURABBA//KILLA[/SUB], readable reference
     unitId: ref('Unit', true), // mouza
     anc: [{ type: Schema.Types.ObjectId }],
     tehsilId: ref('Unit'),
-    // Identification and location
-    hadbast: String,
+    murabba: { type: String, required: true },
+    killa: { type: Number, required: true, min: 1, max: 25 },
+    subKilla: { type: String, default: '' },
+    khasraNo: { type: String, required: true }, // "45//12" or "45//12/1"
     khewat: String,
     khatauni: String,
-    land: { murabba: String, khasraNos: { type: [String], default: [] }, parcels: { type: [{ _id: false, murabba: String, khasras: [String] }], default: [] } },
     jamabandiYear: String,
-    location: { type: String, maxlength: 500 },
-    gps: { lat: Number, lng: Number, at: Date },
-    boundaries: { north: String, south: String, east: String, west: String },
-    // Area
+    // Area of this khasra (kanal / marla / square feet)
     area: areaFields,
     acres: Number, // derived from area
-    linear: { lengthFt: Number, widthFt: Number },
     // Classification and ownership
     category: { type: String, required: true },
     subType: String,
@@ -772,7 +771,9 @@ const stateLandSchema = new Schema(
   opts,
 );
 stateLandSchema.plugin(tenantPlugin);
-stateLandSchema.index({ tenantId: 1, holdingId: 1 }, { unique: true });
+// A khasra is entered once per mouza (removed entries do not block re-entry)
+stateLandSchema.index({ tenantId: 1, unitId: 1, murabba: 1, killa: 1, subKilla: 1 }, { unique: true, partialFilterExpression: { deleted: false } });
+stateLandSchema.index({ tenantId: 1, holdingId: 1 });
 stateLandSchema.index({ tenantId: 1, anc: 1, category: 1, status: 1 });
 stateLandSchema.index({ tenantId: 1, deleted: 1, updatedAt: -1 });
 export const StateLand = mongoose.model('StateLand', stateLandSchema);
