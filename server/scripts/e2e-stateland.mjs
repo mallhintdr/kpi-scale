@@ -24,7 +24,7 @@ check(meta.canEnter && !meta.canVerify && meta.categories.some((c) => c.label ==
 check(meta.categories.find((c) => c.key === 'scheme').subTypes.includes('Lamberdari scheme'), 'the Lamberdari scheme is a sub-type');
 const mouzas = (await call(p1, 'GET', '/state-land/mouzas')).b;
 const mouza = mouzas[0]._id;
-const details = { category: 'provincial', subType: 'Banjar qadeem', ownerRecord: 'Sarkar Daulatmadar', custodian: 'Provincial Government', possession: 'department', record: { status: 'mutated', mutationNos: '1234' } };
+const details = { category: 'provincial', subType: 'Banjar qadeem', ownerRecord: 'Sarkar Daulatmadar', custodian: 'Provincial Government', kasht: { type: 'Banjar (no cultivator)' }, site: { possessedBy: 'vacant', nature: ['Tibba (sand dune)'] }, record: { status: 'mutated', mutationNos: '1234' } };
 check((await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '999', killas: [{ killa: 1, area: { kanal: 8 } }] }], details: { ...details, subType: 'Something new' } })).s === 400, 'a sub-type not in the list is refused (ask the admin)');
 
 console.log('Entry: murabba → killas → sub-killas');
@@ -71,12 +71,19 @@ check((await call(g, 'POST', `/state-land/${k31._id}/return`, { remarks: 'Check 
 check((await call(p1, 'DELETE', `/state-land/${rows.find((r) => r.khasraNo === '999/1')._id}`)).s === 403, 'the Patwari cannot remove an approved khasra');
 
 console.log('Encroachment, allotment, litigation, documents');
-const enc = await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '995', killas: [{ killa: 7, area: { kanal: 8 }, encroachedArea: { kanal: 2 } }, { killa: 8, area: { kanal: 8 }, encroachedArea: { kanal: 1 } }] }], details: { ...details, possession: 'part_encroached', encroachment: { encroachers: ['Test Encroacher'], nature: 'Cultivation', action: 'Notice issued' } } });
+const enc = await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '995', killas: [{ killa: 7, area: { kanal: 8 }, encroachedArea: { kanal: 2 } }, { killa: 8, area: { kanal: 8 }, encroachedArea: { kanal: 1 } }] }], details: { ...details, site: { possessedBy: 'unauthorised', names: ['Test Encroacher'], nature: ['Cultivated (crop)'] }, encroachment: { nature: 'Cultivation', action: 'Notice issued' } } });
 check(enc.s === 201, 'partly encroached killas with their own encroached areas');
 const encRows = (await call(adm, 'GET', `/state-land?unitId=${mouza}&search=995`)).b.items;
 made.push(...encRows.map((r) => r._id));
-check(encRows.reduce((s, r) => s + r.encroachment.acres, 0) === 0.375, 'encroached acres per khasra (2 K + 1 K = 0.375 acres)');
-const lam = await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '994', killas: [{ killa: 1, area: { kanal: 8 } }] }], details: { ...details, category: 'scheme', subType: 'Lamberdari scheme', possession: 'allottee', allotment: { scheme: 'Lamberdari scheme', allottee: 'Test Lamberdar', leaseTo: '2024-06-30' }, underLitigation: true } });
+check(encRows.reduce((s, r) => s + r.encroachment.acres, 0) === 0.375 && encRows.every((r) => r.possession === 'part_encroached'), 'unauthorised possession at site → partly encroached, 2 K + 1 K = 0.375 acres');
+check((await call(adm, 'GET', `/state-land/${encRows[0]._id}`)).b.khasra.encroachment.encroachers[0] === 'Test Encroacher', 'the person in possession is recorded as the encroacher');
+const mixed = await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '992', killas: [{ killa: 1, area: { kanal: 8 } }, { killa: 2, area: { kanal: 8 }, possessedBy: 'unauthorised', nature: ['Structure (house / shop / wall)'] }] }], details: { ...details, site: { ...details.site, names: ['Squatter X'] } } });
+check(mixed.s === 201, 'one entry: killa 1 vacant tibba (as below), killa 2 encroached with a structure (per killa)');
+made.push(...mixed.b.ids);
+const mx = (await call(adm, 'GET', `/state-land?unitId=${mouza}&search=992`)).b.items;
+check(mx.find((r) => r.khasraNo === '992/1').possession === 'vacant' && mx.find((r) => r.khasraNo === '992/2').possession === 'encroached' && mx.find((r) => r.khasraNo === '992/2').site.nature[0].startsWith('Structure'), 'per-killa possession and nature are kept');
+check((await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '991', killas: [{ killa: 1, area: { kanal: 8 } }] }], details: { ...details, site: { possessedBy: 'vacant', nature: [] } } })).s === 400, 'both parts are required (nature at site missing → refused)');
+const lam = await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '994', killas: [{ killa: 1, area: { kanal: 8 } }] }], details: { ...details, category: 'scheme', subType: 'Lamberdari scheme', kasht: { type: 'Allottee', names: ['Test Lamberdar'] }, site: { possessedBy: 'recorded', nature: ['Cultivated (crop)'] }, allotment: { scheme: 'Lamberdari scheme', allottee: 'Test Lamberdar', leaseTo: '2024-06-30' }, underLitigation: true } });
 check(lam.s === 201, 'land under the Lamberdari scheme');
 made.push(...lam.b.ids);
 const lit = await call(p1, 'POST', '/litigation', { unitId: mouza, caseType: 'Encroachment / state land', institutedOn: '2025-01-10', court: 'civil_court', courtCaseNo: 'SL-TEST-2', applicants: ['Test Lamberdar'], respondents: ['Province of Punjab'], land: { parcels: [{ murabba: '994', khasras: ['1'] }] } });

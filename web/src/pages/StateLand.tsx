@@ -20,13 +20,15 @@ interface Category { key: string; label: string; subTypes: string[]; owner?: str
 interface Meta {
   categories: Category[]; departments: string[]; possession: [string, string][]; recordStatus: [string, string][]; landClass: string[]; uses: string[];
   encroachmentNature: string[]; encroachmentAction: string[]; docCategories: { key: string; label: string }[]; canEnter: boolean; canVerify: boolean; canApprove: boolean; isAdmin: boolean;
+  owners: string[]; kashtTypes: string[]; possessedBy: [string, string][]; nature: string[];
 }
 type Area = { kanal?: number; marla?: number; feet?: number };
 type Status = 'entered' | 'verified' | 'approved' | 'returned';
 interface Khasra {
   _id: string; holdingId: string; khasraNo: string; murabba: string; killa: number; subKilla?: string; unitId: { _id: string; name: string }; khewat?: string; khatauni?: string; jamabandiYear?: string;
   area: Area; acres: number;
-  category: string; subType?: string; ownerRecord?: string; custodian?: string; landClass?: string; use?: string; structures?: string;
+  category: string; subType?: string; ownerRecord?: string; ownerShare?: string; custodian?: string;
+  kasht?: { type?: string; names: string[] }; site?: { possessedBy?: string; names: string[]; nature: string[] }; landClass?: string; use?: string; structures?: string;
   acquisition?: { department?: string; purpose?: string; awardNo?: string; awardDate?: string; compensation?: 'yes' | 'no' | 'partly' | null; compensationAmount?: number; mutationNo?: string; mutationDate?: string };
   allotment?: { scheme?: string; allottee?: string; parentage?: string; orderNo?: string; orderDate?: string; authority?: string; leaseFrom?: string; leaseTo?: string; conditionsMet?: 'yes' | 'no' | 'review' | null; proprietary?: 'granted' | 'pending' | 'na' | null; mutationNo?: string };
   possession: string; encroachment?: { area?: Area; acres?: number; encroachers: string[]; nature?: string; since?: number; action?: string; retrievedOn?: string; retrievedArea?: Area };
@@ -405,13 +407,64 @@ function AreaBoxes({ value, onChange, labels }: { value: AreaS; onChange: (v: Ar
   );
 }
 
+const OTHER = '__other__';
+/** A list with an "Other" choice that opens a box to type the entry as written. */
+function ListOrOther({ id, options, value, onChange, placeholder }: { id?: string; options: (string | [string, string])[]; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const opts = options.map((o) => (typeof o === 'string' ? ([o, o] as [string, string]) : o));
+  const [other, setOther] = useState(() => !!value && !opts.some(([k]) => k === value));
+  return (
+    <div className="space-y-1">
+      <Select id={id} value={other ? OTHER : value} onChange={(e) => { if (e.target.value === OTHER) { setOther(true); onChange(''); } else { setOther(false); onChange(e.target.value); } }}>
+        <option value="">Choose…</option>
+        {opts.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        <option value={OTHER}>Other — type it…</option>
+      </Select>
+      {other && <Input dir="auto" autoFocus value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder ?? 'Type as written'} />}
+    </div>
+  );
+}
+/** Tick one or more; "Other" adds a typed entry. */
+function MultiPick({ options, value, onChange }: { options: string[]; value: string[]; onChange: (v: string[]) => void }) {
+  const [txt, setTxt] = useState('');
+  const add = () => { const t = txt.trim(); if (t && !value.includes(t)) onChange([...value, t]); setTxt(''); };
+  const toggle = (v: string) => onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {[...options, ...value.filter((v) => !options.includes(v))].map((o) => (
+        <button key={o} type="button" onClick={() => toggle(o)} className={clsx('rounded-full px-2.5 py-1 text-xs ring-1 transition', value.includes(o) ? 'bg-brand-700 text-white ring-brand-700' : 'bg-white ring-slate-400 hover:bg-brand-50 dark:bg-slate-900')}>{o}</button>
+      ))}
+      <span className="flex items-center gap-1">
+        <input value={txt} dir="auto" onChange={(e) => setTxt(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} placeholder="Other…" className="h-7 w-28 rounded-full bg-white px-2.5 text-xs ring-1 ring-slate-400 outline-none focus:ring-brand-500 dark:bg-slate-900" />
+        {txt.trim() && <button type="button" className="text-xs font-semibold text-brand-700 hover:underline" onClick={add}>Add</button>}
+      </span>
+    </div>
+  );
+}
+/** Several names, suggested from those already entered in the mouza; any new name can be typed. */
+function NameList({ value, onChange, unitId, placeholder }: { value: string[]; onChange: (v: string[]) => void; unitId: string; placeholder?: string }) {
+  const names = useQuery({ queryKey: ['sl', 'names', unitId], queryFn: () => get<string[]>(`/state-land/names?unitId=${unitId}`), enabled: !!unitId, staleTime: 60_000 });
+  const rows = value.length ? value : [''];
+  return (
+    <div className="space-y-1.5">
+      {rows.map((v, i) => (
+        <div key={i} className="flex gap-1.5">
+          <div className="flex-1"><AutoInput dir="auto" options={names.data ?? []} value={v} onChange={(x) => onChange(rows.map((y, j) => (j === i ? x : y)))} placeholder={i ? 'Another name' : placeholder ?? 'Name, s/o …'} /></div>
+          {rows.length > 1 && <Button type="button" size="sm" variant="ghost" aria-label="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))}><X className="size-4" /></Button>}
+        </div>
+      ))}
+      <button type="button" className="text-xs font-semibold text-brand-700 hover:underline" onClick={() => onChange([...rows, ''])}>+ Add another name</button>
+    </div>
+  );
+}
+
 function detailsInit(h?: Khasra) {
   return {
     jamabandiYear: h?.jamabandiYear ?? '',
-    category: h?.category ?? '', subType: h?.subType ?? '', ownerRecord: h?.ownerRecord ?? '', custodian: h?.custodian ?? '', landClass: h?.landClass ?? '', use: h?.use ?? '', structures: h?.structures ?? '',
+    category: h?.category ?? '', subType: h?.subType ?? '', ownerRecord: h?.ownerRecord ?? '', ownerShare: h?.ownerShare ?? '', custodian: h?.custodian ?? '',
+    kasht: { type: h?.kasht?.type ?? '', names: h?.kasht?.names?.length ? h.kasht.names : [''] },
+    site: { possessedBy: h?.site?.possessedBy ?? '', names: h?.site?.names?.length ? h.site.names : [''], nature: h?.site?.nature ?? [] }, landClass: h?.landClass ?? '', use: h?.use ?? '', structures: h?.structures ?? '',
     acq: { department: h?.acquisition?.department ?? '', purpose: h?.acquisition?.purpose ?? '', awardNo: h?.acquisition?.awardNo ?? '', awardDate: iso(h?.acquisition?.awardDate), compensation: h?.acquisition?.compensation ?? '', compensationAmount: s0(h?.acquisition?.compensationAmount), mutationNo: h?.acquisition?.mutationNo ?? '', mutationDate: iso(h?.acquisition?.mutationDate) },
     allot: { scheme: h?.allotment?.scheme ?? '', allottee: h?.allotment?.allottee ?? '', parentage: h?.allotment?.parentage ?? '', orderNo: h?.allotment?.orderNo ?? '', orderDate: iso(h?.allotment?.orderDate), authority: h?.allotment?.authority ?? '', leaseFrom: iso(h?.allotment?.leaseFrom), leaseTo: iso(h?.allotment?.leaseTo), conditionsMet: h?.allotment?.conditionsMet ?? '', proprietary: h?.allotment?.proprietary ?? '', mutationNo: h?.allotment?.mutationNo ?? '' },
-    possession: h?.possession ?? '',
     enc: { encroachers: h?.encroachment?.encroachers?.length ? h.encroachment.encroachers : [''], nature: h?.encroachment?.nature ?? '', since: s0(h?.encroachment?.since), action: h?.encroachment?.action ?? '', retrievedOn: iso(h?.encroachment?.retrievedOn), retrievedArea: areaIn(h?.encroachment?.retrievedArea) },
     underLitigation: h?.underLitigation ?? false, litigationIds: (h?.litigationIds ?? []).map((x) => (typeof x === 'string' ? x : x._id)),
     record: { status: h?.record.status ?? '', mutationNos: h?.record.mutationNos ?? '', demarcation: h?.record.demarcation ?? '', demarcationDate: iso(h?.record.demarcationDate), demarcationRef: h?.record.demarcationRef ?? '', computerised: h?.record.computerised ?? '', discrepancy: h?.record.discrepancy ?? '' },
@@ -419,39 +472,83 @@ function detailsInit(h?: Khasra) {
   };
 }
 type DetailsS = ReturnType<typeof detailsInit>;
+const clean = (xs: string[]) => xs.map((x) => x.trim()).filter(Boolean);
 function detailsOut(f: DetailsS, cat?: Category) {
-  const encroached = f.possession === 'encroached' || f.possession === 'part_encroached';
+  const encroached = f.site.possessedBy === 'unauthorised';
   return {
     jamabandiYear: f.jamabandiYear || undefined,
-    category: f.category, subType: f.subType || undefined, ownerRecord: f.ownerRecord || undefined, custodian: f.custodian || undefined, landClass: f.landClass || undefined, use: f.use || undefined, structures: f.structures || undefined,
+    category: f.category, subType: f.subType || undefined, ownerRecord: f.ownerRecord, ownerShare: f.ownerShare || undefined, custodian: f.custodian || undefined,
+    kasht: { type: f.kasht.type, names: clean(f.kasht.names) },
+    site: { possessedBy: f.site.possessedBy, names: f.site.possessedBy === 'department' || f.site.possessedBy === 'vacant' ? [] : clean(f.site.names), nature: f.site.nature }, landClass: f.landClass || undefined, use: f.use || undefined, structures: f.structures || undefined,
     ...(cat?.sections?.includes('acquisition') ? { acquisition: { ...f.acq, awardDate: f.acq.awardDate || null, mutationDate: f.acq.mutationDate || null, compensation: f.acq.compensation || null, compensationAmount: n(f.acq.compensationAmount) ?? null } } : {}),
     ...(cat?.sections?.includes('allotment') ? { allotment: { ...f.allot, orderDate: f.allot.orderDate || null, leaseFrom: f.allot.leaseFrom || null, leaseTo: f.allot.leaseTo || null, conditionsMet: f.allot.conditionsMet || null, proprietary: f.allot.proprietary || null } } : {}),
-    possession: f.possession,
-    ...(encroached ? { encroachment: { encroachers: f.enc.encroachers.map((x) => x.trim()).filter(Boolean), nature: f.enc.nature || undefined, since: n(f.enc.since) ?? null, action: f.enc.action || undefined, retrievedOn: f.enc.retrievedOn || null, retrievedArea: areaOut(f.enc.retrievedArea) } } : {}),
+    ...(encroached ? { encroachment: { encroachers: clean(f.site.names), nature: f.enc.nature || undefined, since: n(f.enc.since) ?? null, action: f.enc.action || undefined, retrievedOn: f.enc.retrievedOn || null, retrievedArea: areaOut(f.enc.retrievedArea) } } : {}),
     underLitigation: f.underLitigation, litigationIds: f.underLitigation ? f.litigationIds : [],
     record: { ...f.record, demarcation: f.record.demarcation || null, demarcationDate: f.record.demarcationDate || null, computerised: f.record.computerised || null },
     lastVisit: f.lastVisit || null, note: f.note || undefined,
   };
 }
-const checkDetails = (f: DetailsS) => (!f.category ? 'Choose the category' : !f.possession ? 'Choose the possession status' : !f.record.status ? 'Choose the record status' : null);
+const checkDetails = (f: DetailsS) =>
+  !f.ownerRecord.trim() ? 'Part A: enter khana malkiyat (ownership as per record)'
+  : !f.kasht.type.trim() ? 'Part A: enter khana kasht (possession as per record)'
+  : !f.site.possessedBy.trim() ? 'Part B: enter who is in possession at site'
+  : !f.site.nature.length ? 'Part B: tick the nature of the land at site'
+  : !f.category ? 'Choose the category'
+  : !f.record.status ? 'Choose the record status' : null;
 
 function DetailsFields({ f, setF, m, unitId, partNote }: { f: DetailsS; setF: (f: DetailsS) => void; m?: Meta; unitId: string; partNote?: string }) {
   const set = <K extends keyof DetailsS>(k: K, v: DetailsS[K]) => setF({ ...f, [k]: v });
   const cat = m?.categories.find((c) => c.key === f.category);
-  const encroached = f.possession === 'encroached' || f.possession === 'part_encroached';
+  const encroached = f.site.possessedBy === 'unauthorised';
   const cases = useQuery({ queryKey: ['sl', 'cases', unitId], queryFn: () => get<{ _id: string; caseId: string; label: string }[]>(`/state-land/mouza-cases?unitId=${unitId}`), enabled: !!unitId && f.underLitigation });
   return (
     <>
-      <Section title="Classification and ownership" note={NOT_IN_LIST}>
+      <Section title="Part A · As per record (jamabandi)">
+        <div className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr]">
+          <Field label="Khana Malkiyat (Ownership)">{(id) => <ListOrOther id={id} options={m?.owners ?? []} value={f.ownerRecord} onChange={(v) => set('ownerRecord', v)} placeholder="Owner as written in the record" />}</Field>
+          <Field label="Share">{(id) => <Input id={id} value={f.ownerShare} onChange={(e) => set('ownerShare', e.target.value)} placeholder="whole / 1/2 …" />}</Field>
+          <Field label="Jamabandi Year">{(id) => <Input id={id} value={f.jamabandiYear} onChange={(e) => set('jamabandiYear', e.target.value)} placeholder="e.g. 2022-23" />}</Field>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Field label="Khana Kasht (Possession as per Record)">{(id) => <ListOrOther id={id} options={m?.kashtTypes ?? []} value={f.kasht.type} onChange={(v) => set('kasht', { ...f.kasht, type: v })} />}</Field>
+          <Field label="Name(s) in Khana Kasht">{() => <NameList unitId={unitId} value={f.kasht.names} onChange={(v) => set('kasht', { ...f.kasht, names: v })} />}</Field>
+        </div>
+      </Section>
+
+      <Section title={`Part B · Physical possession at site${partNote ? '' : ''}`} note={partNote}>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Field label="In Possession Of">{(id) => <ListOrOther id={id} options={m?.possessedBy ?? []} value={f.site.possessedBy} onChange={(v) => set('site', { ...f.site, possessedBy: v })} />}</Field>
+          <Field label="Last Site Visit">{(id) => <Input id={id} type="date" value={f.lastVisit} onChange={(e) => set('lastVisit', e.target.value)} />}</Field>
+        </div>
+        {f.site.possessedBy && !['department', 'vacant', 'recorded'].includes(f.site.possessedBy) && (
+          <Field label={encroached ? 'Name(s) of Person(s) in Unauthorised Possession' : 'Name(s) of Person(s) in Possession'}>{() => <NameList unitId={unitId} value={f.site.names} onChange={(v) => set('site', { ...f.site, names: v })} />}</Field>
+        )}
+        <div>
+          <div className="mb-1 text-[13px] font-semibold">Nature of Land at Site <span className="font-normal text-slate-500">(tick all that apply)</span></div>
+          <MultiPick options={m?.nature ?? []} value={f.site.nature} onChange={(v) => set('site', { ...f.site, nature: v })} />
+        </div>
+        {encroached && (
+          <div className="space-y-2 rounded-md bg-rose-50 p-2 dark:bg-rose-950/30">
+            <div className="text-xs font-semibold text-rose-800 dark:text-rose-300">Possession differs from record — encroachment</div>
+            <div className="grid gap-2 sm:grid-cols-4">
+              <Field label="Use by Encroacher">{(id) => <AutoInput id={id} options={m?.encroachmentNature ?? []} value={f.enc.nature} onChange={(v) => set('enc', { ...f.enc, nature: v })} />}</Field>
+              <Field label="Since (Year)">{(id) => <Input id={id} inputMode="numeric" value={f.enc.since} onChange={(e) => set('enc', { ...f.enc, since: e.target.value.replace(/\D/g, '').slice(0, 4) })} />}</Field>
+              <Field label="Action Taken">{(id) => <Select id={id} value={f.enc.action} onChange={(e) => set('enc', { ...f.enc, action: e.target.value })}><option value="">—</option>{m?.encroachmentAction.map((a) => <option key={a}>{a}</option>)}</Select>}</Field>
+              <Field label="Retrieved On">{(id) => <Input id={id} type="date" value={f.enc.retrievedOn} onChange={(e) => set('enc', { ...f.enc, retrievedOn: e.target.value })} />}</Field>
+            </div>
+            {f.enc.retrievedOn && <div><div className="mb-1 text-[13px] font-semibold">Area Retrieved</div><AreaBoxes labels value={f.enc.retrievedArea} onChange={(v) => set('enc', { ...f.enc, retrievedArea: v })} /></div>}
+          </div>
+        )}
+      </Section>
+
+      <Section title="Classification" note={NOT_IN_LIST}>
         <div className="grid gap-2 sm:grid-cols-2">
           <Field label="Category">{(id) => <Select id={id} required value={f.category} onChange={(e) => { const c = m?.categories.find((x) => x.key === e.target.value); setF({ ...f, category: e.target.value, subType: '', ownerRecord: f.ownerRecord || c?.owner || '' }); }}><option value="">Choose…</option>{m?.categories.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</Select>}</Field>
           <Field label="Sub-type">{(id) => <AutoInput id={id} strict placeholder={cat ? 'Type to search…' : 'Choose category first'} options={cat?.subTypes ?? []} value={f.subType} onChange={(v) => set('subType', v)} />}</Field>
-          <Field label="Owner as per Record">{(id) => <AutoInput id={id} dir="auto" options={['Sarkar Daulatmadar', 'Provincial Government', 'Mehkma Nehar', 'Mehkma Shahrah', 'Mehkma Taleem', 'Mehkma Jangalat', 'Railway', 'WAPDA', 'Auqaf', 'Shamilat Deh']} value={f.ownerRecord} onChange={(v) => set('ownerRecord', v)} placeholder="As written in the jamabandi" />}</Field>
           <Field label="Custodian / User Department">{(id) => <AutoInput id={id} strict options={m?.departments ?? []} value={f.custodian} onChange={(v) => set('custodian', v)} placeholder="Type to search…" />}</Field>
           <Field label="Land Classification">{(id) => <AutoInput id={id} options={m?.landClass ?? []} value={f.landClass} onChange={(v) => set('landClass', v)} placeholder="Type or pick…" />}</Field>
           <Field label="Present Use">{(id) => <AutoInput id={id} options={m?.uses ?? []} value={f.use} onChange={(v) => set('use', v)} placeholder="Type or pick…" />}</Field>
           <Field label="Structures on Land">{(id) => <Input id={id} dir="auto" value={f.structures} onChange={(e) => set('structures', e.target.value)} placeholder="None / pucca building / kacha rooms …" />}</Field>
-          <Field label="Jamabandi Year">{(id) => <Input id={id} value={f.jamabandiYear} onChange={(e) => set('jamabandiYear', e.target.value)} placeholder="e.g. 2022-23" />}</Field>
         </div>
       </Section>
 
@@ -488,35 +585,6 @@ function DetailsFields({ f, setF, m, unitId, partNote }: { f: DetailsS; setF: (f
         </Section>
       )}
 
-      <Section title="Possession">
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Field label="Possession Status">{(id) => <Select id={id} required value={f.possession} onChange={(e) => set('possession', e.target.value)}><option value="">Choose…</option>{m?.possession.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select>}</Field>
-          <Field label="Last Site Visit">{(id) => <Input id={id} type="date" value={f.lastVisit} onChange={(e) => set('lastVisit', e.target.value)} />}</Field>
-        </div>
-        {encroached && (
-          <div className="space-y-2 rounded-md bg-rose-50 p-2 dark:bg-rose-950/30">
-            <div className="text-xs font-semibold text-rose-800 dark:text-rose-300">Encroachment{partNote && <span className="font-normal"> — {partNote}</span>}</div>
-            <div className="space-y-1.5">
-              <div className="text-[13px] font-semibold">Encroacher(s)</div>
-              {f.enc.encroachers.map((x, i) => (
-                <div key={i} className="flex gap-1.5">
-                  <Input dir="auto" value={x} placeholder="Name, s/o …" onChange={(e) => set('enc', { ...f.enc, encroachers: f.enc.encroachers.map((y, j) => (j === i ? e.target.value : y)) })} />
-                  {f.enc.encroachers.length > 1 && <Button type="button" size="sm" variant="ghost" onClick={() => set('enc', { ...f.enc, encroachers: f.enc.encroachers.filter((_, j) => j !== i) })}><X className="size-4" /></Button>}
-                </div>
-              ))}
-              <button type="button" className="text-xs font-semibold text-brand-700 hover:underline" onClick={() => set('enc', { ...f.enc, encroachers: [...f.enc.encroachers, ''] })}>+ Add another</button>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-4">
-              <Field label="Nature">{(id) => <AutoInput id={id} options={m?.encroachmentNature ?? []} value={f.enc.nature} onChange={(v) => set('enc', { ...f.enc, nature: v })} />}</Field>
-              <Field label="Since (Year)">{(id) => <Input id={id} type="number" min={1900} max={2100} value={f.enc.since} onChange={(e) => set('enc', { ...f.enc, since: e.target.value })} />}</Field>
-              <Field label="Action Taken">{(id) => <Select id={id} value={f.enc.action} onChange={(e) => set('enc', { ...f.enc, action: e.target.value })}><option value="">—</option>{m?.encroachmentAction.map((a) => <option key={a}>{a}</option>)}</Select>}</Field>
-              <Field label="Retrieved On">{(id) => <Input id={id} type="date" value={f.enc.retrievedOn} onChange={(e) => set('enc', { ...f.enc, retrievedOn: e.target.value })} />}</Field>
-            </div>
-            {f.enc.retrievedOn && <div><div className="mb-1 text-[13px] font-semibold">Area Retrieved</div><AreaBoxes labels value={f.enc.retrievedArea} onChange={(v) => set('enc', { ...f.enc, retrievedArea: v })} /></div>}
-          </div>
-        )}
-      </Section>
-
       <Section title="Litigation">
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-brand-600" checked={f.underLitigation} onChange={(e) => set('underLitigation', e.target.checked)} />This land is under litigation</label>
         {f.underLitigation && (
@@ -550,7 +618,8 @@ function DetailsFields({ f, setF, m, unitId, partNote }: { f: DetailsS; setF: (f
 /* ================================================================== *
  *  Entry: murabbas → 25 killas → sub-killas, each with its own area
  * ================================================================== */
-interface Row { killa: number; sub: string; area: AreaS; enc: AreaS }
+/** by / nature: '' = as given for the whole entry (Part B). */
+interface Row { killa: number; sub: string; area: AreaS; enc: AreaS; by: string; nature: string }
 type SubStyle = 'num' | 'urdu';
 interface MurabbaBlock { murabba: string; own: boolean; khewat: string; khatauni: string; subStyle: SubStyle; rows: Row[] }
 /** Sub-killa names in order: 1, 2, 3 … or الف، ب، ج، د، ہ … (any name can still be typed). */
@@ -560,7 +629,9 @@ const cleanSub = (v: string) => v.replace(/[^\p{L}\p{N}\p{M}-]/gu, '').slice(0, 
 const WHOLE_KILLA: AreaS = { kanal: '8', marla: '', feet: '' }; // a standard killa: 1 acre
 const blank = (subStyle: SubStyle = 'num'): MurabbaBlock => ({ murabba: '', own: false, khewat: '', khatauni: '', subStyle, rows: [] });
 
-function KillaPicker({ unitId, block, onChange, partEncroached, onRemove }: { unitId: string; block: MurabbaBlock; onChange: (b: MurabbaBlock) => void; partEncroached: boolean; onRemove?: () => void }) {
+function KillaPicker({ unitId, block, onChange, defBy, meta, onRemove }: { unitId: string; block: MurabbaBlock; onChange: (b: MurabbaBlock) => void; defBy: string; meta?: Meta; onRemove?: () => void }) {
+  const effBy = (r: Row) => r.by || defBy;
+  const anyEnc = block.rows.some((r) => effBy(r) === 'unauthorised');
   const mur = useDeferredValue(block.murabba.trim());
   const taken = useQuery({ queryKey: ['sl', 'taken', unitId, mur], queryFn: () => get<{ killa: number; subKilla: string; khasraNo: string }[]>(`/state-land/taken?unitId=${unitId}&murabba=${encodeURIComponent(mur)}`), enabled: !!unitId && !!mur });
   const takenWhole = new Set((taken.data ?? []).filter((t) => !t.subKilla).map((t) => t.killa));
@@ -568,18 +639,18 @@ function KillaPicker({ unitId, block, onChange, partEncroached, onRemove }: { un
   for (const t of taken.data ?? []) if (t.subKilla) takenSubs.set(t.killa, [...(takenSubs.get(t.killa) ?? []), t.subKilla]);
   const chosen = new Set(block.rows.map((r) => r.killa));
   const setRows = (rows: Row[]) => onChange({ ...block, rows: [...rows].sort((a, b) => a.killa - b.killa || a.sub.localeCompare(b.sub, undefined, { numeric: true })) });
-  const toggle = (k: number) => setRows(chosen.has(k) ? block.rows.filter((r) => r.killa !== k) : [...block.rows, { killa: k, sub: '', area: { ...WHOLE_KILLA }, enc: { ...EMPTY } }]);
+  const toggle = (k: number) => setRows(chosen.has(k) ? block.rows.filter((r) => r.killa !== k) : [...block.rows, { killa: k, sub: '', area: { ...WHOLE_KILLA }, enc: { ...EMPTY }, by: '', nature: '' }]);
   const free = Array.from({ length: 25 }, (_, i) => i + 1).filter((k) => !takenWhole.has(k));
-  const all = () => setRows([...block.rows, ...free.filter((k) => !chosen.has(k)).map((k) => ({ killa: k, sub: '', area: { ...WHOLE_KILLA }, enc: { ...EMPTY } }))]);
+  const all = () => setRows([...block.rows, ...free.filter((k) => !chosen.has(k)).map((k) => ({ killa: k, sub: '', area: { ...WHOLE_KILLA }, enc: { ...EMPTY }, by: '', nature: '' }))]);
   const split = (k: number) => {
     const subs = block.rows.filter((r) => r.killa === k);
     const used = new Set([...subs.map((r) => r.sub), ...(takenSubs.get(k) ?? [])]);
     const free = () => { let i = 0; while (used.has(subName(block.subStyle, i))) i++; const name = subName(block.subStyle, i); used.add(name); return name; };
     if (subs.length === 1 && !subs[0].sub) {
       // A whole killa becomes its first two sub-killas (1, 2 or الف، ب)
-      return setRows([...block.rows.filter((r) => r.killa !== k), { killa: k, sub: free(), area: { ...EMPTY }, enc: { ...EMPTY } }, { killa: k, sub: free(), area: { ...EMPTY }, enc: { ...EMPTY } }]);
+      return setRows([...block.rows.filter((r) => r.killa !== k), { killa: k, sub: free(), area: { ...EMPTY }, enc: { ...EMPTY }, by: '', nature: '' }, { killa: k, sub: free(), area: { ...EMPTY }, enc: { ...EMPTY }, by: '', nature: '' }]);
     }
-    setRows([...block.rows, { killa: k, sub: free(), area: { ...EMPTY }, enc: { ...EMPTY } }]);
+    setRows([...block.rows, { killa: k, sub: free(), area: { ...EMPTY }, enc: { ...EMPTY }, by: '', nature: '' }]);
   };
   // Switching the style renames the sub-killas not yet saved, in their order
   const restyle = (style: SubStyle) => {
@@ -634,7 +705,8 @@ function KillaPicker({ unitId, block, onChange, partEncroached, onRemove }: { un
                 <thead className="bg-brand-700 text-center text-[12px] text-white">
                   <tr>
                     <th className={th}>Khasra</th><th className={th}>Sub-killa</th><th className={th}>Area (K · M · Ft)</th>
-                    {partEncroached && <th className={th}>Encroached (K · M · Ft)</th>}
+                    <th className={th} title="Physical possession at site, if different for this killa">At Site</th><th className={th} title="Nature of land at site, if different for this killa">Nature</th>
+                    {anyEnc && <th className={th}>Encroached (K · M · Ft)</th>}
                     <th className={clsx(th, 'border-r-0')} />
                   </tr>
                 </thead>
@@ -646,7 +718,17 @@ function KillaPicker({ unitId, block, onChange, partEncroached, onRemove }: { un
                         <td className={clsx(td, 'whitespace-nowrap font-mono text-xs font-semibold')} dir="ltr">{block.murabba}/{r.killa}{r.sub && <>/<span dir="auto">{r.sub}</span></>}</td>
                         <td className={clsx(td, 'w-20')}>{r.sub ? <input value={r.sub} dir="auto" onChange={(e) => update(i, { ...r, sub: cleanSub(e.target.value) })} title="Edit the sub-killa name if it is written differently" className="h-8 w-16 rounded-md bg-white px-1 text-center text-sm ring-1 ring-slate-400 outline-none focus:ring-2 focus:ring-brand-500 dark:bg-slate-900 dark:ring-slate-500" aria-label="Sub-killa name" /> : <span className="text-xs text-slate-400">whole</span>}</td>
                         <td className={td}><AreaBoxes value={r.area} onChange={(a) => update(i, { ...r, area: a })} /></td>
-                        {partEncroached && <td className={td}><AreaBoxes value={r.enc} onChange={(a) => update(i, { ...r, enc: a })} /></td>}
+                        <td className={td}>
+                          <select value={r.by} onChange={(e) => update(i, { ...r, by: e.target.value })} className={clsx('h-8 w-24 rounded-md bg-white px-0.5 text-[11px] ring-1 outline-none focus:ring-2 focus:ring-brand-500 dark:bg-slate-900', r.by ? 'font-semibold ring-brand-600' : 'text-slate-500 ring-slate-300')}>
+                            <option value="">Same</option>{meta?.possessedBy.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                          </select>
+                        </td>
+                        <td className={td}>
+                          <select value={r.nature} onChange={(e) => update(i, { ...r, nature: e.target.value })} className={clsx('h-8 w-24 rounded-md bg-white px-0.5 text-[11px] ring-1 outline-none focus:ring-2 focus:ring-brand-500 dark:bg-slate-900', r.nature ? 'font-semibold ring-brand-600' : 'text-slate-500 ring-slate-300')}>
+                            <option value="">Same</option>{meta?.nature.map((x) => <option key={x}>{x}</option>)}
+                          </select>
+                        </td>
+                        {anyEnc && <td className={td}>{effBy(r) === 'unauthorised' ? <AreaBoxes value={r.enc} onChange={(a) => update(i, { ...r, enc: a })} /> : <span className="text-xs text-slate-300">—</span>}</td>}
                         <td className={clsx(td, 'whitespace-nowrap border-r-0 text-xs')}>
                           {first && <button type="button" className="mr-2 font-semibold text-brand-700 hover:underline" onClick={() => split(r.killa)}>+ Sub-killa</button>}
                           <button type="button" className="text-slate-400 hover:text-rose-600" aria-label="Remove" onClick={() => remove(i)}><X className="inline size-4" /></button>
@@ -665,6 +747,24 @@ function KillaPicker({ unitId, block, onChange, partEncroached, onRemove }: { un
   );
 }
 
+const LAST_KEY = 'sl-last-entry';
+/** One-click fills for the common cases (only the fields they name are changed). */
+type Preset = { label: string; set: { category?: string; subType?: string; ownerRecord?: string; kashtType?: string; by?: string; nature?: string[]; record?: string } };
+const PRESETS: Preset[] = [
+  { label: 'Sarkar · Banjar · vacant tibba', set: { category: 'provincial', subType: 'Banjar qadeem', ownerRecord: 'Sarkar Daulatmadar', kashtType: 'Banjar (no cultivator)', by: 'vacant', nature: ['Tibba (sand dune)'], record: 'mutated' } },
+  { label: 'Department in own use', set: { ownerRecord: 'Provincial Government', kashtType: 'Department (in its own use)', by: 'department', nature: ['Structure (house / shop / wall)'], record: 'mutated' } },
+  { label: 'Leased · cultivated by lessee', set: { ownerRecord: 'Sarkar Daulatmadar', kashtType: 'Mustajir (lessee)', by: 'recorded', nature: ['Cultivated (crop)'], record: 'mutated' } },
+  { label: 'Encroached · cultivated', set: { ownerRecord: 'Sarkar Daulatmadar', kashtType: 'Banjar (no cultivator)', by: 'unauthorised', nature: ['Cultivated (crop)'] } },
+];
+const applyPreset = (d: DetailsS, x: Preset['set']): DetailsS => ({
+  ...d,
+  ...(x.category ? { category: x.category, subType: x.subType ?? '' } : {}),
+  ...(x.ownerRecord ? { ownerRecord: x.ownerRecord } : {}),
+  kasht: x.kashtType ? { ...d.kasht, type: x.kashtType } : d.kasht,
+  site: { ...d.site, ...(x.by ? { possessedBy: x.by } : {}), ...(x.nature ? { nature: x.nature } : {}) },
+  record: x.record ? { ...d.record, status: x.record } : d.record,
+});
+
 function EntryForm({ onClose }: { onClose: () => void }) {
   const meta = useMeta();
   const qc = useQueryClient();
@@ -679,9 +779,9 @@ function EntryForm({ onClose }: { onClose: () => void }) {
   const [khatauni, setKhatauni] = useState('');
   const [blocks, setBlocks] = useState<MurabbaBlock[]>([blank()]);
   const [d, setD] = useState(() => detailsInit());
+  const [last] = useState<DetailsS | null>(() => { try { return JSON.parse(localStorage.getItem(LAST_KEY) ?? 'null'); } catch { return null; } });
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const part = d.possession === 'part_encroached';
   const count = blocks.reduce((s, b) => s + b.rows.length, 0);
   const total = useMemo(() => blocks.reduce((s, b) => s + b.rows.reduce((t, r) => t + sqft(areaOut(r.area)), 0), 0), [blocks]);
 
@@ -698,9 +798,13 @@ function EntryForm({ onClose }: { onClose: () => void }) {
     try {
       const r = await post<{ created: number; acres: number }>('/state-land/batch', {
         unitId, khewat: khewat || undefined, khatauni: khatauni || undefined,
-        murabbas: used.map((b) => ({ murabba: b.murabba, ...(b.own ? { khewat: b.khewat || undefined, khatauni: b.khatauni || undefined } : {}), killas: b.rows.map((x) => ({ killa: x.killa, subKilla: x.sub, area: areaOut(x.area), ...(part ? { encroachedArea: areaOut(x.enc) } : {}) })) })),
+        murabbas: used.map((b) => ({ murabba: b.murabba, ...(b.own ? { khewat: b.khewat || undefined, khatauni: b.khatauni || undefined } : {}), killas: b.rows.map((x) => ({
+          killa: x.killa, subKilla: x.sub, area: areaOut(x.area), ...(x.by ? { possessedBy: x.by } : {}), ...(x.nature ? { nature: [x.nature] } : {}),
+          ...((x.by || d.site.possessedBy) === 'unauthorised' ? { encroachedArea: areaOut(x.enc) } : {}),
+        })) })),
         details: detailsOut(d, m?.categories.find((c) => c.key === d.category)),
       });
+      try { localStorage.setItem(LAST_KEY, JSON.stringify(d)); } catch { /* storage unavailable */ }
       qc.invalidateQueries({ queryKey: ['sl'] });
       toast(`${r.created} khasra(s) entered · ${acres(r.acres)} acres — sent for verification`);
       onClose();
@@ -708,7 +812,7 @@ function EntryForm({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <LSheet open onClose={onClose} title="Enter State Land" footer={<Button form="sl-entry" type="submit" block loading={busy} disabled={!count}>{count ? `Save ${count} ${count === 1 ? 'Khasra' : 'Khasras'} · ${acres(total / 43_560)} acres` : 'Save'}</Button>}>
+    <LSheet open wide onClose={onClose} title="Enter State Land" footer={<Button form="sl-entry" type="submit" block loading={busy} disabled={!count}>{count ? `Save ${count} ${count === 1 ? 'Khasra' : 'Khasras'} · ${acres(total / 43_560)} acres` : 'Save'}</Button>}>
       <form id="sl-entry" onSubmit={save} className="space-y-3">
         <Section title="Mouza and record">
           <div className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr]">
@@ -724,14 +828,19 @@ function EntryForm({ onClose }: { onClose: () => void }) {
         <Section title="Murabba → Killa → Sub-killa" note="Area of each khasra in Kanal · Marla · Feet (a whole killa starts at 8 kanal)">
           {!unitId ? <p className="text-xs text-slate-500">Choose the mouza first.</p> : (
             <>
-              {blocks.map((b, i) => <KillaPicker key={i} unitId={unitId} block={b} partEncroached={part} onChange={(nb) => setBlocks(blocks.map((x, j) => (j === i ? nb : x)))} onRemove={blocks.length > 1 ? () => setBlocks(blocks.filter((_, j) => j !== i)) : undefined} />)}
+              {blocks.map((b, i) => <KillaPicker key={i} unitId={unitId} block={b} defBy={d.site.possessedBy} meta={m} onChange={(nb) => setBlocks(blocks.map((x, j) => (j === i ? nb : x)))} onRemove={blocks.length > 1 ? () => setBlocks(blocks.filter((_, j) => j !== i)) : undefined} />)}
               <button type="button" className="text-xs font-semibold text-brand-700 hover:underline" onClick={() => setBlocks([...blocks, blank(blocks[blocks.length - 1]?.subStyle)])}>+ Add another murabba (same khewat / khatauni)</button>
               {count > 0 && <div className="rounded-md bg-brand-50 px-3 py-1.5 text-sm dark:bg-brand-900/30">Total: <b>{count}</b> khasra(s) · <b>{kmf(fromSqft(total))}</b> = <b>{acres(total / 43_560)}</b> acres</div>}
             </>
           )}
         </Section>
-        <p className="text-xs text-slate-500">The details below apply to every khasra ticked above; a single khasra can be changed later from its own page.</p>
-        <DetailsFields f={d} setF={setD} m={m} unitId={unitId} partNote={part ? 'enter the encroached area of each khasra in the table above' : d.possession === 'encroached' ? 'the whole area of each khasra' : undefined} />
+        <Card className="flex flex-wrap items-center gap-2 p-2.5 text-xs">
+          <b className="text-slate-600 dark:text-slate-300">Quick fill:</b>
+          {PRESETS.map((x) => <Button key={x.label} type="button" size="sm" variant="secondary" onClick={() => setD((cur) => applyPreset(cur, x.set))}>{x.label}</Button>)}
+          {last && <Button type="button" size="sm" variant="ghost" onClick={() => setD({ ...detailsInit(), ...last })}><RotateCcw className="size-4" />Same as last entry</Button>}
+        </Card>
+        <p className="text-xs text-slate-500">The details below apply to every khasra ticked above. Where possession or nature differs for a killa, choose it in the killa table. A single khasra can also be changed later from its own page.</p>
+        <DetailsFields f={d} setF={setD} m={m} unitId={unitId} partNote={d.site.possessedBy === 'unauthorised' ? 'encroached area per killa in the table above (blank = whole killa)' : 'applies to all killas unless set per killa above'} />
         <FormError error={error} />
       </form>
     </LSheet>
@@ -756,7 +865,7 @@ function KhasraEdit({ h, onClose }: { h: Khasra; onClose: () => void }) {
     if (msg) return setError(new Error(msg));
     setBusy(true); setError(null);
     try {
-      await patch(`/state-land/${h._id}`, { ...detailsOut(d, meta.data?.categories.find((c) => c.key === d.category)), khewat: khewat || undefined, khatauni: khatauni || undefined, area: areaOut(areaS), ...(d.possession === 'part_encroached' ? { encroachedArea: areaOut(enc) } : {}) });
+      await patch(`/state-land/${h._id}`, { ...detailsOut(d, meta.data?.categories.find((c) => c.key === d.category)), khewat: khewat || undefined, khatauni: khatauni || undefined, area: areaOut(areaS), ...(d.site.possessedBy === 'unauthorised' ? { encroachedArea: areaOut(enc) } : {}) });
       qc.invalidateQueries({ queryKey: ['sl'] }); toast('Khasra updated — sent for verification'); onClose();
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
@@ -769,7 +878,7 @@ function KhasraEdit({ h, onClose }: { h: Khasra; onClose: () => void }) {
             <Field label="Khatauni No(s).">{(id) => <Input id={id} value={khatauni} onChange={(e) => setKhatauni(e.target.value)} />}</Field>
             <div><div className="mb-1 text-[13px] font-semibold">Area (Kanal · Marla · Feet)</div><AreaBoxes value={areaS} onChange={setAreaS} /></div>
           </div>
-          {d.possession === 'part_encroached' && <div className="sm:w-1/2"><div className="mb-1 text-[13px] font-semibold text-rose-700">Encroached Area</div><AreaBoxes value={enc} onChange={setEnc} /></div>}
+          {d.site.possessedBy === 'unauthorised' && <div className="sm:w-1/2"><div className="mb-1 text-[13px] font-semibold text-rose-700">Encroached Area <span className="font-normal text-slate-500">(blank = whole khasra)</span></div><AreaBoxes value={enc} onChange={setEnc} /></div>}
         </Section>
         <DetailsFields f={d} setF={setD} m={meta.data} unitId={h.unitId._id} />
         <FormError error={error} />
@@ -852,18 +961,30 @@ export function StateLandHoldingPage() {
           <SectionTitle>Classification and Ownership</SectionTitle>
           {row('Category', data.categoryLabel)}
           {row('Sub-type', h.subType)}
-          {row('Owner as per Record', h.ownerRecord)}
           {row('Custodian Department', h.custodian)}
           {row('Land Classification', h.landClass)}
           {row('Present Use', h.use)}
           {row('Structures', h.structures)}
-          {row('Possession', <span className={clsx(encroached && 'font-semibold text-rose-700')}>{label(m?.possession, h.possession)}</span>)}
           {row('Record Status', <span className={clsx(h.record.status !== 'mutated' && 'text-amber-700')}>{label(m?.recordStatus, h.record.status)}</span>)}
           {row('Mutation No(s).', h.record.mutationNos)}
           {row('Demarcation', h.record.demarcation === 'yes' ? `Done${h.record.demarcationDate ? ` on ${fmt(h.record.demarcationDate)}` : ''}${h.record.demarcationRef ? ` (${h.record.demarcationRef})` : ''}` : h.record.demarcation === 'no' ? 'Not done' : '')}
           {row('Computerised Record', map({ yes: 'Matches', no: 'Does not match', unchecked: 'Not checked' }, h.record.computerised))}
           {row('Discrepancy', h.record.discrepancy)}
           {row('Last Site Visit', h.lastVisit ? fmt(h.lastVisit) : '')}
+        </Card>
+
+        <Card className="p-4">
+          <SectionTitle>Part A · As per Record</SectionTitle>
+          {row('Khana Malkiyat (Ownership)', [h.ownerRecord, h.ownerShare && `share ${h.ownerShare}`].filter(Boolean).join(' · '))}
+          {row('Khana Kasht', h.kasht?.type)}
+          {row('Name(s) in Khana Kasht', (h.kasht?.names ?? []).join('; '))}
+        </Card>
+        <Card className={clsx('p-4', encroached && 'border-l-4 border-rose-500')}>
+          <SectionTitle>Part B · Physical Possession</SectionTitle>
+          {row('In Possession Of', <span className={clsx(encroached && 'font-semibold text-rose-700')}>{label(m?.possessedBy, h.site?.possessedBy)}</span>)}
+          {row('Name(s)', (h.site?.names ?? []).join('; '))}
+          {row('Nature of Land at Site', (h.site?.nature ?? []).join(', '))}
+          {row('Status', <span className={clsx(encroached && 'font-semibold text-rose-700')}>{label(m?.possession, h.possession)}{encroached ? ' — differs from record' : ''}</span>)}
         </Card>
 
         {h.acquisition && Object.values(h.acquisition).some(Boolean) && (

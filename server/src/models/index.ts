@@ -737,7 +737,12 @@ const stateLandSchema = new Schema(
     // Classification and ownership
     category: { type: String, required: true },
     subType: String,
+    // As per record (jamabandi): khana malkiyat (ownership) and khana kasht (possession as recorded)
     ownerRecord: { type: String, maxlength: 200 },
+    ownerShare: String,
+    kasht: { type: { type: String }, names: { type: [String], default: [] } },
+    // Physical possession at site, and the nature of the land there
+    site: { possessedBy: String, names: { type: [String], default: [] }, nature: { type: [String], default: [] } },
     custodian: { type: String, maxlength: 200 },
     landClass: String,
     use: String,

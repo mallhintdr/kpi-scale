@@ -222,7 +222,7 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
 /** `tone="form"`: data-entry dialog — green title bar, wider, compact fields with darker outlines. */
 const formBody =
   'space-y-3 pt-3 [&_input:not([type=checkbox]):not([type=file])]:h-9 [&_select]:h-9 [&_input]:rounded-lg [&_select]:rounded-lg [&_textarea]:rounded-lg [&_textarea]:min-h-16 [&_textarea]:py-1.5 [&_input]:px-2.5 [&_textarea]:px-2.5 [&_input]:text-sm [&_select]:text-sm [&_textarea]:text-sm [&_input]:ring-slate-400 [&_select]:ring-slate-400 [&_textarea]:ring-slate-400 dark:[&_input]:ring-slate-500 dark:[&_select]:ring-slate-500 dark:[&_textarea]:ring-slate-500 [&_label]:text-[13px] [&_label]:font-semibold';
-export function Sheet({ open, onClose, title, children, footer, tone }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; tone?: 'form' }) {
+export function Sheet({ open, onClose, title, children, footer, tone, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; tone?: 'form'; wide?: boolean }) {
   const form = tone === 'form';
   useEffect(() => {
     if (!open) return;
@@ -239,7 +239,7 @@ export function Sheet({ open, onClose, title, children, footer, tone }: { open: 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label={titleCase(title)}>
       <div className="animate-fade absolute inset-0 bg-slate-950/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className={clsx('animate-sheet relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl dark:bg-slate-900', form ? 'sm:max-w-2xl sm:rounded-2xl' : 'sm:max-w-lg')}>
+      <div className={clsx('animate-sheet relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl dark:bg-slate-900', form ? clsx(wide ? 'sm:max-w-5xl' : 'sm:max-w-2xl', 'sm:rounded-2xl') : 'sm:max-w-lg')}>
         {!form && <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-slate-200 sm:hidden dark:bg-slate-700" />}
         <div className={clsx('flex items-center justify-between', form ? 'bg-brand-700 px-4 py-2.5 text-white' : 'px-5 pb-2 pt-3')}>
           <h2 className={clsx('font-semibold', form ? 'text-base' : 'text-lg')}>{title}</h2>

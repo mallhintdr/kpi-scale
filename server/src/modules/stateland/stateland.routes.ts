@@ -27,8 +27,8 @@ import { ancestorAt, hasCap, scopeRoots } from '../revenue/access.js';
 import { codeOf, courtName } from '../litigation/litigation.routes.js';
 import { imagesToPdf, pdfPages } from '../litigation/pdf.js';
 import {
-  DOC_CATEGORIES, ENCROACHMENT_ACTION, ENCROACHMENT_NATURE, LAND_CLASS, POSSESSION, POSSESSION_LABEL, RECORD_LABEL, RECORD_STATUS, USES,
-  isEncroached, labelIn, slSettings, toAcres, type Category,
+  DOC_CATEGORIES, ENCROACHMENT_ACTION, ENCROACHMENT_NATURE, KASHT_TYPES, LAND_CLASS, NATURE, OWNERS, POSSESSED_BY, POSSESSED_LABEL, POSSESSION, POSSESSION_LABEL,
+  RECORD_LABEL, RECORD_STATUS, USES, labelIn, possessionFrom, slSettings, toAcres, type Category,
 } from './lists.js';
 
 const router = Router();
@@ -67,7 +67,7 @@ router.get('/meta', async (req, res) => {
   const bp = bpOf(req);
   const s = await slSettings(me.tenantId);
   res.json({
-    categories: s.categories, departments: s.departments, possession: POSSESSION, recordStatus: RECORD_STATUS, landClass: LAND_CLASS, uses: USES,
+    categories: s.categories, departments: s.departments, possession: POSSESSION, owners: OWNERS, kashtTypes: KASHT_TYPES, possessedBy: POSSESSED_BY, nature: NATURE, recordStatus: RECORD_STATUS, landClass: LAND_CLASS, uses: USES,
     encroachmentNature: ENCROACHMENT_NATURE, encroachmentAction: ENCROACHMENT_ACTION, docCategories: DOC_CATEGORIES.map(([key, label]) => ({ key, label })),
     canEnter: await can(me, bp, 'state_land'), canVerify: await can(me, bp, 'state_land_verify'), canApprove: await can(me, bp, 'state_land_approve'), isAdmin: isAdmin(me),
   });
@@ -111,6 +111,13 @@ router.get('/taken', validate({ query: z.object({ unitId: objectId, murabba: z.s
   const { unitId, murabba } = q<{ unitId: string; murabba: string }>(req);
   const rows = await StateLand.find({ deleted: { $ne: true }, unitId, murabba, ...(await scopeFilter(req.user!, bpOf(req))) }).select('killa subKilla khasraNo khewat khatauni').lean();
   res.json(rows.map((r) => ({ _id: r._id, killa: r.killa, subKilla: r.subKilla, khasraNo: r.khasraNo })));
+});
+
+/** Names already entered in a mouza (recorded cultivators, possessors, encroachers), for suggestions. */
+router.get('/names', validate({ query: z.object({ unitId: objectId }) }), async (req, res) => {
+  const base = { deleted: { $ne: true }, unitId: new Types.ObjectId(q<{ unitId: string }>(req).unitId), ...(await scopeFilter(req.user!, bpOf(req))) };
+  const [kasht, site, enc] = await Promise.all([StateLand.distinct('kasht.names', base), StateLand.distinct('site.names', base), StateLand.distinct('encroachment.encroachers', base)]);
+  res.json([...new Set([...kasht, ...site, ...enc].filter(Boolean))].sort().slice(0, 500));
 });
 
 /** Litigation cases on a mouza, to link to khasras. */
@@ -157,7 +164,7 @@ router.get('/', validate({ query: listQuery }), async (req, res) => {
   const filter = await listFilter(me, bpOf(req), f);
   const s = await slSettings(me.tenantId);
   const [items, total] = await Promise.all([
-    StateLand.find(filter).select('holdingId khasraNo murabba killa subKilla unitId category subType custodian khewat khatauni area acres possession encroachment.acres underLitigation record.status status allotment.leaseTo updatedAt').populate('unitId', 'name')
+    StateLand.find(filter).select('holdingId khasraNo murabba killa subKilla unitId category subType custodian ownerRecord kasht site khewat khatauni area acres possession encroachment.acres underLitigation record.status status allotment.leaseTo updatedAt').populate('unitId', 'name')
       .collation({ locale: 'en', numericOrdering: true }).sort({ unitId: 1, murabba: 1, killa: 1, subKilla: 1 }).skip((f.page - 1) * 100).limit(100).lean(),
     StateLand.countDocuments(filter),
   ]);
@@ -227,10 +234,15 @@ const subNo = z.string().trim().max(12).regex(/^[\p{L}\p{N}\p{M}-]*$/u, 'Sub-kil
 const details = z.object({
   jamabandiYear: str(20),
   category: z.string().max(40),
-  subType: str(120), ownerRecord: str(200), custodian: str(200), landClass: str(80), use: str(80), structures: str(500),
+  subType: str(120), custodian: str(200), landClass: str(80), use: str(80), structures: str(500),
+  // As per record: khana malkiyat (ownership) and khana kasht (possession as recorded)
+  ownerRecord: z.string().trim().min(1, 'Enter the ownership as per record (khana malkiyat)').max(200),
+  ownerShare: str(40),
+  kasht: z.object({ type: z.string().trim().min(1, 'Enter khana kasht').max(80), names: z.array(z.string().trim().min(1).max(200)).max(100).default([]) }),
+  // Physical possession at site and the nature of the land
+  site: z.object({ possessedBy: z.string().trim().min(1, 'Enter who is in possession at site').max(80), names: z.array(z.string().trim().min(1).max(200)).max(100).default([]), nature: z.array(z.string().trim().min(1).max(80)).min(1, 'Enter the nature of the land at site').max(12) }),
   acquisition: z.object({ department: str(), purpose: str(), awardNo: str(80), awardDate: date, compensation: z.enum(['yes', 'no', 'partly']).nullish(), compensationAmount: z.number().min(0).max(1e13).nullish(), mutationNo: str(80), mutationDate: date }).optional(),
   allotment: z.object({ scheme: str(120), allottee: str(), parentage: str(), orderNo: str(80), orderDate: date, authority: str(), leaseFrom: date, leaseTo: date, conditionsMet: z.enum(['yes', 'no', 'review']).nullish(), proprietary: z.enum(['granted', 'pending', 'na']).nullish(), mutationNo: str(80) }).optional(),
-  possession: z.string().max(40),
   encroachment: z.object({ encroachers: z.array(z.string().trim().min(1).max(200)).max(100).default([]), nature: str(80), since: z.number().int().min(1900).max(2100).nullish(), action: str(80), retrievedOn: date, retrievedArea: area.optional() }).optional(),
   underLitigation: z.boolean().default(false),
   litigationIds: z.array(objectId).max(50).default([]),
@@ -246,7 +258,7 @@ const batchBody = z.object({
   murabbas: z.array(z.object({
     murabba: z.string().trim().min(1).max(40),
     khewat: str(60), khatauni: str(60), // when different from the entry's
-    killas: z.array(z.object({ killa: killaNo, subKilla: subNo, area, encroachedArea: area.optional() })).min(1).max(250),
+    killas: z.array(z.object({ killa: killaNo, subKilla: subNo, area, encroachedArea: area.optional(), possessedBy: z.string().trim().max(80).optional(), nature: z.array(z.string().trim().min(1).max(80)).max(12).optional() })).min(1).max(250),
   })).min(1).max(40),
   details,
 });
@@ -259,20 +271,26 @@ async function checkDetails(tenantId: string, d: Partial<Details>) {
     if (d.subType && cat && !cat.subTypes.includes(d.subType)) throw badRequest(`"${d.subType}" is not a sub-type of ${cat.label}. Ask the administrator to add it.`);
     if (d.custodian && !s.departments.includes(d.custodian)) throw badRequest(`"${d.custodian}" is not in the department list. Ask the administrator to add it.`);
   }
-  if (d.possession !== undefined && !POSSESSION_LABEL.has(d.possession)) throw badRequest('Choose the possession status');
   if (d.record && !RECORD_LABEL.has(d.record.status)) throw badRequest('Choose the record status');
   if (d.allotment?.leaseFrom && d.allotment.leaseTo && d.allotment.leaseTo < d.allotment.leaseFrom) throw badRequest('Lease end must be after lease start');
 }
-/** Derived fields: acres, encroached acres (whole khasra when fully encroached), litigation flag. */
+/**
+ * Derived fields: acres; the possession status from who holds the land at site (an unauthorised person =
+ * encroached — fully, or partly when a smaller encroached area is given); encroached acres; litigation flag.
+ */
 function derive(h: any, encroachedArea?: { kanal?: number; marla?: number; feet?: number }) {
   h.acres = toAcres(h.area);
-  if (isEncroached(h.possession)) {
+  let possession = possessionFrom(h.site?.possessedBy);
+  if (possession === 'encroached') {
     const enc = h.encroachment ?? {};
-    if (encroachedArea) enc.area = encroachedArea;
-    if (h.possession === 'encroached') enc.area = h.area;
+    if (encroachedArea && toAcres(encroachedArea)) enc.area = encroachedArea;
+    if (!enc.area || !toAcres(enc.area) || toAcres(enc.area) >= h.acres) enc.area = h.area;
+    else possession = 'part_encroached';
     enc.acres = toAcres(enc.area);
+    if (!enc.encroachers?.length) enc.encroachers = h.site?.names ?? [];
     h.encroachment = enc;
   } else h.encroachment = undefined;
+  h.possession = possession;
   if (h.litigationIds?.length) h.underLitigation = true;
 }
 
@@ -289,7 +307,7 @@ router.post('/batch', validate({ body: batchBody }), async (req, res) => {
   const prefix = `${tehsil ? await codeOf(tehsil as any, 'tehsil') : 'X'}-${await codeOf(mouza as any, 'mouza')}`;
 
   // Every khasra must have an area; a killa is entered either whole or as sub-killas, never both; no repeats
-  const rows: { murabba: string; killa: number; subKilla: string; area: any; encroachedArea?: any; khewat?: string; khatauni?: string }[] = [];
+  const rows: { murabba: string; killa: number; subKilla: string; area: any; encroachedArea?: any; possessedBy?: string; nature?: string[]; khewat?: string; khatauni?: string }[] = [];
   const seen = new Set<string>();
   for (const m of b.murabbas) {
     for (const k of m.killas) {
@@ -297,8 +315,7 @@ router.post('/batch', validate({ body: batchBody }), async (req, res) => {
       if (seen.has(key)) throw badRequest(`${key} is entered twice`);
       seen.add(key);
       if (!toAcres(k.area)) throw badRequest(`Enter the area of ${key}`);
-      if (b.details.possession === 'part_encroached' && !toAcres(k.encroachedArea)) throw badRequest(`Enter the encroached area of ${key}`);
-      rows.push({ murabba: m.murabba, killa: k.killa, subKilla: k.subKilla, area: k.area, encroachedArea: k.encroachedArea, khewat: m.khewat || b.khewat, khatauni: m.khatauni || b.khatauni });
+      rows.push({ murabba: m.murabba, killa: k.killa, subKilla: k.subKilla, area: k.area, encroachedArea: k.encroachedArea, possessedBy: k.possessedBy, nature: k.nature, khewat: m.khewat || b.khewat, khatauni: m.khatauni || b.khatauni });
     }
     const whole = new Set(m.killas.filter((k) => !k.subKilla).map((k) => k.killa));
     const split = m.killas.find((k) => k.subKilla && whole.has(k.killa));
@@ -315,6 +332,7 @@ router.post('/batch', validate({ body: batchBody }), async (req, res) => {
   const docs = rows.map((r) => {
     const d: any = {
       ...b.details, encroachment: b.details.encroachment ? { ...b.details.encroachment } : undefined,
+      site: { ...b.details.site, possessedBy: r.possessedBy || b.details.site.possessedBy, nature: r.nature?.length ? r.nature : b.details.site.nature },
       unitId: mouza._id, anc: mouza.anc, tehsilId, murabba: r.murabba, killa: r.killa, subKilla: r.subKilla, khasraNo: khasraLabel(r.murabba, r.killa, r.subKilla),
       holdingId: `${prefix}-${khasraLabel(r.murabba, r.killa, r.subKilla)}`, khewat: r.khewat, khatauni: r.khatauni, area: r.area,
       status: 'entered', createdBy: me.id, updatedBy: me.id, history: [{ at: now, by: me.id, action: 'entered' }],
@@ -353,9 +371,9 @@ router.patch('/:id', validate({ params: z.object({ id: objectId }), body: patchB
   await checkDetails(me.tenantId, b);
   if (b.area && !toAcres(b.area)) throw badRequest('Enter the area (kanal / marla / feet)');
   const wasChecked = h.status !== 'entered';
-  const next: any = { ...h.toObject(), ...b };
+  const next: any = { ...h.toObject(), ...b, encroachment: b.encroachment ?? h.toObject().encroachment };
   derive(next, encroachedArea);
-  h.set({ ...b, acres: next.acres, encroachment: next.encroachment, underLitigation: next.underLitigation, updatedBy: me.id, status: 'entered', returnRemarks: undefined, verifiedBy: undefined, verifiedAt: undefined, approvedBy: undefined, approvedAt: undefined });
+  h.set({ ...b, acres: next.acres, possession: next.possession, encroachment: next.encroachment, underLitigation: next.underLitigation, updatedBy: me.id, status: 'entered', returnRemarks: undefined, verifiedBy: undefined, verifiedAt: undefined, approvedBy: undefined, approvedAt: undefined });
   h.history.push({ at: new Date(), by: me.id, action: wasChecked ? 'edited — sent for verification again' : 'edited' });
   await h.save();
   res.json(h);
@@ -534,14 +552,15 @@ router.get('/export/xlsx', validate({ query: listQuery }), async (req, res) => {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('State Land');
   const d = (x?: Date | null) => (x ? new Date(x) : '');
-  ws.addRow(['S.No', 'Tehsil', 'Mouza', 'Murabba / Mustateel', 'Killa', 'Sub-killa', 'Khasra No.', 'Khewat', 'Khatauni', 'Kanal', 'Marla', 'Feet', 'Acres', 'Category', 'Sub-type', 'Owner as per Record', 'Custodian Department', 'Land Class', 'Present Use', 'Possession', 'Encroached Acres', 'Encroachers', 'Action on Encroachment', 'Record Status', 'Mutation Nos.', 'Demarcation', 'Under Litigation', 'Litigation Cases', 'Allottee / Lessee', 'Scheme', 'Lease To', 'Award No.', 'Status', 'Last Site Visit']);
+  ws.addRow(['S.No', 'Tehsil', 'Mouza', 'Murabba / Mustateel', 'Killa', 'Sub-killa', 'Khasra No.', 'Khewat', 'Khatauni', 'Kanal', 'Marla', 'Feet', 'Acres', 'Category', 'Sub-type', 'Khana Malkiyat (Ownership)', 'Share', 'Khana Kasht', 'Recorded Cultivator / Possessor', 'Physical Possession', 'Possessor at Site', 'Nature of Land at Site', 'Custodian Department', 'Land Class', 'Present Use', 'Possession Status', 'Encroached Acres', 'Encroachers', 'Action on Encroachment', 'Record Status', 'Mutation Nos.', 'Demarcation', 'Under Litigation', 'Litigation Cases', 'Allottee / Lessee', 'Scheme', 'Lease To', 'Award No.', 'Status', 'Last Site Visit']);
   rows.forEach((h: any, i) => ws.addRow([
     i + 1, h.tehsilId?.name, h.unitId?.name, h.murabba, h.killa, h.subKilla || '', h.khasraNo, h.khewat, h.khatauni, h.area?.kanal, h.area?.marla, h.area?.feet, h.acres,
-    labelIn(s.categories, h.category), h.subType, h.ownerRecord, h.custodian, h.landClass, h.use, POSSESSION_LABEL.get(h.possession) ?? h.possession, h.encroachment?.acres ?? '', (h.encroachment?.encroachers ?? []).join('; '), h.encroachment?.action,
+    labelIn(s.categories, h.category), h.subType, h.ownerRecord, h.ownerShare, h.kasht?.type, (h.kasht?.names ?? []).join('; '), POSSESSED_LABEL.get(h.site?.possessedBy) ?? h.site?.possessedBy, (h.site?.names ?? []).join('; '), (h.site?.nature ?? []).join(', '),
+    h.custodian, h.landClass, h.use, POSSESSION_LABEL.get(h.possession) ?? h.possession, h.encroachment?.acres ?? '', (h.encroachment?.encroachers ?? []).join('; '), h.encroachment?.action,
     RECORD_LABEL.get(h.record?.status) ?? '', h.record?.mutationNos, h.record?.demarcation === 'yes' ? 'Done' : h.record?.demarcation === 'no' ? 'Not done' : '', h.underLitigation ? 'Yes' : 'No', (h.litigationIds ?? []).map((c: any) => c.caseId).join(', '),
     h.allotment?.allottee, h.allotment?.scheme, d(h.allotment?.leaseTo), h.acquisition?.awardNo, STATUS_LABEL[h.status as string], d(h.lastVisit),
   ]));
-  finishSheet(ws, { headerRow: 1, keyCols: 7 });
+  finishSheet(ws, { headerRow: 1, keyCols: 7, maxWidth: 30 });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="state-land-directory.xlsx"');
   res.send(Buffer.from(await wb.xlsx.writeBuffer()));

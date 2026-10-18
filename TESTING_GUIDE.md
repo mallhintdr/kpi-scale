@@ -41,7 +41,7 @@ Run these from `server`, with the API running:
 | `node scripts/check-rollups.mjs` | 10 checks passed |
 | `node scripts/e2e-whatsapp.mjs` | 17 checks passed |
 | `node scripts/e2e-litigation.mjs` | 36 checks passed |
-| `node scripts/e2e-stateland.mjs` | 33 checks passed |
+| `node scripts/e2e-stateland.mjs` | 39 checks passed |
 
 ### 0.4 Test accounts — one per role
 | Role | Email (`@bwp.test`) | Works on |
@@ -217,7 +217,9 @@ Use the **current month**; future months are refused.
 | S-02 | Tick killas 1, 2, 7 and "Select all"; then "+ Sub-killa" on killa 6 | Each ticked killa gets a row (8 kanal by default); killa 6 becomes 6/1 and 6/2, each with its own area; totals in K · M · Ft and acres | ☐ |
 | S-03 | "+ Add another murabba"; tick "Different khewat / khatauni" for it | The second murabba uses its own khewat / khatauni, the first keeps the common one | ☐ |
 | S-04 | Category, sub-type, department: try to type a name that is not in the list | Only listed names can be chosen ("ask the administrator") | ☐ |
-| S-05 | Possession "Partly encroached" | An encroached-area column appears for each khasra | ☐ |
+| S-05 | **Part A**: khana malkiyat, khana kasht (pick, or "Other" to type as written) and names; **Part B**: in possession of, names, nature at site (tick several) | Both parts are required; names already entered in the mouza are suggested | ☐ |
+| S-05a | Part B "Unauthorised person"; in the killa table set one killa to "Vacant" and "Tibba" | Encroached-area column per killa; that killa is saved vacant / tibba, the others encroached ("differs from record") | ☐ |
+| S-05b | Quick fill buttons; then "Same as last entry" after saving once | The common cases fill in one click; the previous entry's details come back | ☐ |
 | S-06 | Save; enter the same murabba again | Saved killas are greyed out; re-entering one is refused | ☐ |
 | S-07 | As the Girdawar tick several khasras in the directory › Verify; as the Tehsildar › Approve | Verified, then approved, in bulk; approving before verification is refused | ☐ |
 | S-08 | The Patwari edits an approved khasra; the Girdawar returns one with remarks | Edit sends it back for verification; returned shows the remarks | ☐ |

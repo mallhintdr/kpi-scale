@@ -58,3 +58,20 @@ export async function slSettings(tenantId: string): Promise<{ categories: Catego
   return { categories: x.categories?.length ? x.categories : CATEGORIES, departments: x.departments?.length ? x.departments : DEPARTMENTS };
 }
 export const labelIn = (cats: Category[], k?: string | null) => cats.find((c) => c.key === k)?.label ?? k ?? '';
+
+/* ---------- As per record (jamabandi) ---------- */
+/** Khana Malkiyat: owner as entered in the record (a pick, or "Other" typed as written). */
+export const OWNERS = ['Sarkar Daulatmadar', 'Provincial Government', 'Federal Government', 'Board of Revenue', 'Colonies Department', 'Mehkma Nehar (Irrigation)', 'Mehkma Shahrah (Highways)', 'Mehkma Taleem (Education)', 'Mehkma Jangalat (Forest)', 'Pakistan Railways', 'WAPDA', 'Auqaf Department', 'Evacuee Trust Property Board', 'Cholistan Development Authority', 'Shamilat Deh'];
+/** Khana Kasht: possession as entered in the revenue record. */
+export const KASHT_TYPES = ['Khud kasht (owner)', 'Mustajir (lessee)', 'Allottee', 'Abadkar', 'Maurusi', 'Ghair maurusi', 'Bila lagan', 'Banjar (no cultivator)', 'Department (in its own use)'];
+
+/* ---------- Physical possession (at site) ---------- */
+export const POSSESSED_BY: [string, string][] = [
+  ['department', 'Owner department'], ['recorded', 'As per khana kasht (recorded person)'], ['allottee', 'Allottee / lessee'],
+  ['unauthorised', 'Unauthorised person (encroacher)'], ['vacant', 'Nobody (vacant)'],
+];
+export const NATURE = ['Tibba (sand dune)', 'Cultivated (crop)', 'Banjar / barren', 'Structure (house / shop / wall)', 'Road / path', 'Water channel / pond', 'Graveyard', 'Orchard / plantation'];
+/** Possession status (used by filters and totals) follows from who holds the land at site. */
+export const possessionFrom = (by?: string | null) =>
+  ({ department: 'department', recorded: 'allottee', allottee: 'allottee', unauthorised: 'encroached', vacant: 'vacant' } as Record<string, string>)[by ?? ''] ?? 'mixed';
+export const POSSESSED_LABEL = new Map(POSSESSED_BY);
