@@ -49,6 +49,9 @@ const CAP_LABEL: Record<string, string> = {
   compare: 'Compares areas',
   manage_registers: 'Manages registers',
   litigation: 'Enters litigation cases',
+  state_land: 'Enters state land holdings',
+  state_land_verify: 'Verifies state land holdings',
+  state_land_approve: 'Approves state land holdings',
 };
 const KIND_LABEL: Record<BlockD['kind'], string> = {
   target: 'Target vs achieved',

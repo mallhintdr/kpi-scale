@@ -41,6 +41,20 @@ async function main() {
         const r = await saveBlueprint(String(t._id), { ...(row.doc as object), terms: (tpl.blueprint as any).terms }, { note: 'Added organisation terms', skipUsageCheck: true });
         logger.info({ tenant: t.slug, version: r.version }, 'terms added');
       }
+      // Capabilities added to the template later (e.g. state land) are added to the same posts of a live blueprint
+      if (row && tpl) {
+        const doc: any = row.doc;
+        let changed = false;
+        for (const tp of (tpl.blueprint as any).posts ?? []) {
+          const live = doc.posts?.find((p: any) => p.key === tp.key);
+          if (!live) continue;
+          for (const cap of tp.caps ?? []) if (!(live.caps ?? []).includes(cap)) { live.caps = [...(live.caps ?? []), cap]; changed = true; }
+        }
+        if (changed) {
+          const r = await saveBlueprint(String(t._id), doc, { note: 'Added new capabilities from the template', skipUsageCheck: true });
+          logger.info({ tenant: t.slug, version: r.version }, 'capabilities added');
+        }
+      }
       // The Revenue Department pilot keeps the Government of the Punjab identity, now as organisation branding
       if (row?.template === 'revenue_department' && !t.branding?.logoUrl) {
         await runUnscoped(() => Tenant.updateOne({ _id: t._id }, { $set: { 'branding.logoUrl': '/punjab-logo-white.png', 'branding.tagline': 'Government of the Punjab', 'branding.shortName': 'Board of Revenue' } }));

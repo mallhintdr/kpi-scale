@@ -27,8 +27,8 @@ interface Case {
 }
 interface Doc { _id: string; category: string; title?: string; docDate?: string; pages?: number; size: number; createdAt: string; uploadedBy?: { name: string } }
 
-const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
-const iso = (d?: string | null) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+export const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+export const iso = (d?: string | null) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 const useMeta = () => useQuery({ queryKey: ['lit', 'meta'], queryFn: () => get<Meta>('/litigation/meta'), staleTime: 300_000 });
 const courtLabel = (m: Meta | undefined, code?: string, other?: string) => (code === 'other' ? other || 'Other' : m?.courts.flatMap((g) => g.items).find(([k]) => k === code)?.[1] ?? code ?? '—');
 const StatusBadge = ({ s }: { s: string }) => <Badge tone={s === 'decided' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>{s === 'decided' ? 'Decided' : 'Pending'}</Badge>;
@@ -43,7 +43,7 @@ function CourtSelect({ meta, value, other, onChange, id }: { meta?: Meta; value:
 }
 
 /** Entry dialogs share the green-titled compact form style. */
-const LSheet = (p: Parameters<typeof Sheet>[0]) => <Sheet {...p} tone="form" />;
+export const LSheet = (p: Parameters<typeof Sheet>[0]) => <Sheet {...p} tone="form" />;
 
 /** Values already used in this jurisdiction (types, benches, parties…), for suggestions while typing. */
 type Suggest = Record<string, string[]>;
@@ -55,7 +55,7 @@ interface Opt { value: string; label: string; hint?: string }
  * Free mode: whatever is typed is the value (suggestions only help keep entries uniform).
  * `strict`: the value must be picked from the list (court, mouza).
  */
-function AutoInput({ id, options, value, onChange, strict, placeholder, onQuery, required, dir }: {
+export function AutoInput({ id, options, value, onChange, strict, placeholder, onQuery, required, dir }: {
   id?: string; options: (Opt | string)[]; value: string; onChange: (v: string) => void; strict?: boolean; placeholder?: string; onQuery?: (q: string) => void; required?: boolean; dir?: string;
 }) {
   const opts = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
@@ -465,7 +465,7 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
 }
 
 /* ---------- New / edit case ---------- */
-const splitNos = (x: string) => x.split(/[,;\n]+/).map((y) => y.trim()).filter(Boolean);
+export const splitNos = (x: string) => x.split(/[,;\n]+/).map((y) => y.trim()).filter(Boolean);
 /** Land layout of an existing case: its parcels, or (older entries) the single murabba + khasras. */
 function landInit(c?: Case): Pick<FormState, 'landMode' | 'parcels' | 'khasraNos'> {
   const l = c?.land;
@@ -739,7 +739,7 @@ export function LitigationCasePage() {
       {sheet === 'hearing' && <HearingSheet c={c} onDone={() => { setSheet(null); refresh(); }} />}
       {sheet === 'decision' && <DecisionSheet c={c} meta={meta.data} onDone={() => { setSheet(null); refresh(); }} />}
       {sheet === 'stage' && <StageSheet c={c} meta={meta.data} onDone={() => { setSheet(null); refresh(); }} />}
-      {sheet === 'doc' && <DocSheet c={c} meta={meta.data} onDone={() => { setSheet(null); refresh(); }} />}
+      {sheet === 'doc' && <DocSheet uploadUrl={`/litigation/${c._id}/docs`} label={c.caseId} categories={meta.data?.categories ?? []} onDone={() => { setSheet(null); refresh(); }} />}
     </>
   );
 }
@@ -849,10 +849,11 @@ async function compress(file: File, colour: boolean): Promise<{ blob: Blob; url:
   return { blob, url: URL.createObjectURL(blob) };
 }
 
-function DocSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => void }) {
+/** Attach a document (camera pages → one compact PDF, or a PDF file); shared with the State Land Directory. */
+export function DocSheet({ uploadUrl, label, categories, onDone }: { uploadUrl: string; label: string; categories: { key: string; label: string }[]; onDone: () => void }) {
   const toast = useToast();
   const cam = useRef<HTMLInputElement>(null);
-  const [category, setCategory] = useState('plaint');
+  const [category, setCategory] = useState(categories[0]?.key ?? 'other');
   const [title, setTitle] = useState('');
   const [docDate, setDocDate] = useState('');
   const [colour, setColour] = useState(false);
@@ -873,15 +874,15 @@ function DocSheet({ c, meta, onDone }: { c: Case; meta?: Meta; onDone: () => voi
     setBusy(true); setError(null);
     try {
       const files = pdf ? [{ name: pdf.name, mime: 'application/pdf', data: await readB64(pdf) }] : await Promise.all(pages.map(async (p, i) => ({ name: `page-${i + 1}.jpg`, mime: 'image/jpeg', data: await readB64(p.blob) })));
-      await post(`/litigation/${c._id}/docs`, { category, title: title || undefined, docDate: docDate || null, files });
+      await post(uploadUrl, { category, title: title || undefined, docDate: docDate || null, files });
       toast('Document attached');
       onDone();
     } catch (e) { setError(e); } finally { setBusy(false); }
   };
   return (
-    <LSheet open onClose={onDone} title={`Attach Document · ${c.caseId}`} footer={<Button block disabled={!pages.length && !pdf} loading={busy} onClick={save}><Upload className="size-4" />Attach{pages.length > 1 ? ` (${pages.length} pages)` : ''}</Button>}>
+    <LSheet open onClose={onDone} title={`Attach Document · ${label}`} footer={<Button block disabled={!pages.length && !pdf} loading={busy} onClick={save}><Upload className="size-4" />Attach{pages.length > 1 ? ` (${pages.length} pages)` : ''}</Button>}>
       <div className="space-y-3">
-        <Field label="Document">{(id) => <Select id={id} value={category} onChange={(e) => setCategory(e.target.value)}>{meta?.categories.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</Select>}</Field>
+        <Field label="Document">{(id) => <Select id={id} value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</Select>}</Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Title (optional)">{(id) => <Input id={id} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Order dated…" />}</Field>
           <Field label="Date (optional)">{(id) => <Input id={id} type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} />}</Field>

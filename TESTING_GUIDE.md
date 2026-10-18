@@ -41,6 +41,7 @@ Run these from `server`, with the API running:
 | `node scripts/check-rollups.mjs` | 10 checks passed |
 | `node scripts/e2e-whatsapp.mjs` | 17 checks passed |
 | `node scripts/e2e-litigation.mjs` | 36 checks passed |
+| `node scripts/e2e-stateland.mjs` | 31 checks passed |
 
 ### 0.4 Test accounts — one per role
 | Role | Email (`@bwp.test`) | Works on |
@@ -203,6 +204,20 @@ Use the **current month**; future months are refused.
 | L-12 | As `admin` › Settings: appeal period for a court | Cases decided in that court show "Appeal period ending" alerts | ☐ |
 | L-13 | New Case › Land: Murabba + Killa / Khasra, add 2 murabbas with their killas; then switch to Khasra Only | Each murabba keeps its own killas on the case page and PDF; khasra-only saves khasras without murabba | ☐ |
 | L-14 | As `admin` › Settings › tick a tehsil under "Tehsils without murabbas"; open New Case for a mouza there | The form opens with Khasra Only | ☐ |
+
+### 12B. State Land Directory
+| ID | Steps | Expected | ☐ |
+|---|---|---|---|
+| S-01 | As `patwari1.hasilpur` › State Land › New Holding: mouza, murabba → killas, area, category, possession, record status | Saved as `HSL-<MOUZA>-SL-0001`, area shown in acres, status "Awaiting verification" | ☐ |
+| S-02 | Choose category "Allotted / Leased Under Scheme", then "Acquired Land" | Only the matching extra section (Allotment / lease, or Acquisition) appears | ☐ |
+| S-03 | Possession "Partly encroached" | Encroachment section: area, encroachers, action; encroached acres counted in the cards | ☐ |
+| S-04 | Tick "under litigation" | Cases of that mouza from the Litigation register can be linked, and show on the holding | ☐ |
+| S-05 | Capture GPS on a phone at the site | Point saved; "map" link opens it | ☐ |
+| S-06 | As the Tehsildar try Approve first; as the Girdawar Verify; then the Tehsildar Approves | Approve needs verification first; then Approved | ☐ |
+| S-07 | The Patwari edits an approved holding | It goes back to "Awaiting verification" | ☐ |
+| S-08 | The Girdawar returns a holding with remarks | Status "Returned"; remarks shown; must be corrected before verification | ☐ |
+| S-09 | Summary tab; Patwari › Mouza Listing › Mark Complete; Girdawar › Confirm | Category and mouza tables; completion counts update | ☐ |
+| S-10 | Excel button; print a holding | Formatted Excel (green headers); holding prints cleanly | ☐ |
 
 ## 13. Officer profile
 | ID | Steps | Expected | ☐ |

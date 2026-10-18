@@ -17,7 +17,7 @@ const key = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/, 'Use lower-case letters, 
 const code = z.string().regex(/^[A-Z][A-Z0-9_]{0,39}$/, 'Use upper-case letters, digits and _ (start with a letter)');
 const label = z.string().trim().min(1).max(80);
 
-export const CAPS = ['set_targets', 'assign_targets', 'compare', 'manage_registers', 'litigation'] as const;
+export const CAPS = ['set_targets', 'assign_targets', 'compare', 'manage_registers', 'litigation', 'state_land', 'state_land_verify', 'state_land_approve'] as const;
 export type Cap = (typeof CAPS)[number];
 export const BLOCK_KINDS = ['target', 'arrears', 'flow', 'register', 'tasks'] as const;
 export type BlockKind = (typeof BLOCK_KINDS)[number];

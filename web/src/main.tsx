@@ -38,6 +38,8 @@ const AdminImport = lazy(() => import('./pages/admin/Import'));
 const Platform = lazy(() => import('./pages/platform/Platform'));
 const Trends = lazy(() => import('./pages/Trends'));
 const LitigationList = lazy(() => import('./pages/Litigation').then((x) => ({ default: x.LitigationList })));
+const StateLandList = lazy(() => import('./pages/StateLand').then((x) => ({ default: x.StateLandList })));
+const StateLandHoldingPage = lazy(() => import('./pages/StateLand').then((x) => ({ default: x.StateLandHoldingPage })));
 const LitigationCasePage = lazy(() => import('./pages/Litigation').then((x) => ({ default: x.LitigationCasePage })));
 const TameelList = lazy(() => import('./pages/Tameel').then((x) => ({ default: x.TameelList })));
 const TameelDetail = lazy(() => import('./pages/Tameel').then((x) => ({ default: x.TameelDetail })));
@@ -106,6 +108,8 @@ function App() {
           <Route path="tameel" element={<TameelList />} />
           <Route path="litigation" element={<LitigationList />} />
           <Route path="litigation/:id" element={<LitigationCasePage />} />
+          <Route path="state-land" element={<StateLandList />} />
+          <Route path="state-land/:id" element={<StateLandHoldingPage />} />
           <Route path="tameel/:id" element={<TameelDetail />} />
           <Route path="staff" element={<Staff />} />
           <Route path="officers/:id" element={<Officer />} />

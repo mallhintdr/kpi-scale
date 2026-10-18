@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import {
-  Award, Bell, ClipboardList, Scale, KeyRound, MessageCircle, BarChart3, CalendarRange, Gauge, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
+  Award, Bell, ClipboardList, Scale, Landmark, KeyRound, MessageCircle, BarChart3, CalendarRange, Gauge, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
   Crosshair, FileSpreadsheet, GitCompareArrows, Network, ShieldCheck, SlidersHorizontal, Table2, Target, Upload, UserCog, Workflow,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
@@ -39,6 +39,7 @@ export const NAV: NavItem[] = [
   { to: '/targets', label: 'Annual targets', icon: Target, show: (c) => c.canSetTargets && !c.isAdmin },
   { to: '/tameel', label: 'Tameel / Tasks', icon: ClipboardList },
   { to: '/litigation', label: 'Litigation', icon: Scale },
+  { to: '/state-land', label: 'State Land', icon: Landmark },
   { to: '/notifications', label: 'Alerts', icon: Bell },
   { to: '/admin/org', label: 'Organisation setup', icon: Workflow, show: (c) => c.isAdmin, group: 'admin' },
   { to: '/admin/units', label: 'Hierarchy', icon: Network, show: (c) => c.isAdmin, group: 'admin' },

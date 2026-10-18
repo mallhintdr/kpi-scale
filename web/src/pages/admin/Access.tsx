@@ -23,6 +23,9 @@ export const RIGHTS: { key: string; label: string; hint: string }[] = [
   { key: 'compare', label: 'Compare areas', hint: 'Use the comparison page' },
   { key: 'manage_registers', label: 'Manage registers', hint: 'Record, edit and delete register items' },
   { key: 'litigation', label: 'Litigation entry', hint: 'Add and update court cases and their documents' },
+  { key: 'state_land', label: 'State land entry', hint: 'Add and update state land holdings in the State Land Directory' },
+  { key: 'state_land_verify', label: 'State land verification', hint: 'Verify or return state land holdings (first check)' },
+  { key: 'state_land_approve', label: 'State land approval', hint: 'Approve verified state land holdings (final check)' },
 ];
 const LABEL = Object.fromEntries(RIGHTS.map((r) => [r.key, r.label]));
 

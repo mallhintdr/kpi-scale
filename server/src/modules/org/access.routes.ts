@@ -29,6 +29,9 @@ export const RIGHT_LABEL: Record<(typeof GRANT_RIGHTS)[number], string> = {
   compare: 'Compare areas',
   manage_registers: 'Manage registers',
   litigation: 'Litigation entry',
+  state_land: 'State land entry',
+  state_land_verify: 'State land verification',
+  state_land_approve: 'State land approval',
 };
 
 /** Drop a person's cached grants on every API instance. */

@@ -13,12 +13,21 @@ let onUnauthorized: () => void = () => {};
 export const setAccessToken = (t: string | null) => (accessToken = t);
 export const setUnauthorizedHandler = (fn: () => void) => (onUnauthorized = fn);
 
-export async function refreshSession(): Promise<any | null> {
-  const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
-  if (!res.ok) return null;
-  const data = await res.json();
-  accessToken = data.accessToken;
-  return data;
+/**
+ * One refresh at a time: the refresh token rotates on use, so two parallel calls (app start-up twice in
+ * development, several expired requests at once) would make the second fail and sign the user out —
+ * landing them on Home instead of the page they opened. Callers share the request in flight.
+ */
+let inflight: Promise<any | null> | null = null;
+export function refreshSession(): Promise<any | null> {
+  inflight ??= (async () => {
+    const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    accessToken = data.accessToken;
+    return data;
+  })().finally(() => setTimeout(() => (inflight = null), 0));
+  return inflight;
 }
 
 async function tryRefresh() {

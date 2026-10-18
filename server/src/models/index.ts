@@ -474,7 +474,7 @@ export const WaState = mongoose.model('WaState', waStateSchema);
 /* ---------------- Access grants: rights given to a person directly, on top of their posts ----------------
  * A grant covers a unit and everything below it, optionally only some KPIs, optionally until a date.
  */
-export const GRANT_RIGHTS = ['view', 'enter', 'edit', 'verify', 'set_targets', 'assign_targets', 'compare', 'manage_registers', 'litigation'] as const;
+export const GRANT_RIGHTS = ['view', 'enter', 'edit', 'verify', 'set_targets', 'assign_targets', 'compare', 'manage_registers', 'litigation', 'state_land', 'state_land_verify', 'state_land_approve'] as const;
 export type GrantRight = (typeof GRANT_RIGHTS)[number];
 const accessGrantSchema = new Schema(
   {
@@ -711,3 +711,108 @@ const litigationDocSchema = new Schema(
 litigationDocSchema.plugin(tenantPlugin);
 litigationDocSchema.index({ tenantId: 1, caseRef: 1, category: 1 });
 export const LitigationDoc = mongoose.model('LitigationDoc', litigationDocSchema);
+
+/* ---------------- State Land Directory: every state-owned holding in each mouza ---------------- */
+const areaFields = { kanal: Number, marla: Number, feet: Number };
+const stateLandSchema = new Schema(
+  {
+    ...tenantField,
+    holdingId: { type: String, required: true }, // TEHSIL-MOUZA-SL-NNNN, permanent
+    serial: { type: Number, required: true }, // per tehsil
+    unitId: ref('Unit', true), // mouza
+    anc: [{ type: Schema.Types.ObjectId }],
+    tehsilId: ref('Unit'),
+    // Identification and location
+    hadbast: String,
+    khewat: String,
+    khatauni: String,
+    land: { murabba: String, khasraNos: { type: [String], default: [] }, parcels: { type: [{ _id: false, murabba: String, khasras: [String] }], default: [] } },
+    jamabandiYear: String,
+    location: { type: String, maxlength: 500 },
+    gps: { lat: Number, lng: Number, at: Date },
+    boundaries: { north: String, south: String, east: String, west: String },
+    // Area
+    area: areaFields,
+    acres: Number, // derived from area
+    linear: { lengthFt: Number, widthFt: Number },
+    // Classification and ownership
+    category: { type: String, required: true },
+    subType: String,
+    ownerRecord: { type: String, maxlength: 200 },
+    custodian: { type: String, maxlength: 200 },
+    landClass: String,
+    use: String,
+    structures: { type: String, maxlength: 500 },
+    // Acquisition (Land Acquisition Act)
+    acquisition: { department: String, purpose: String, awardNo: String, awardDate: Date, compensation: { type: String, enum: ['yes', 'no', 'partly', null] }, compensationAmount: Number, mutationNo: String, mutationDate: Date },
+    // Allotment / lease (rent and arrears stay with the Lease Money KPI)
+    allotment: { scheme: String, allottee: String, parentage: String, orderNo: String, orderDate: Date, authority: String, leaseFrom: Date, leaseTo: Date, conditionsMet: { type: String, enum: ['yes', 'no', 'review', null] }, proprietary: { type: String, enum: ['granted', 'pending', 'na', null] }, mutationNo: String },
+    // Possession and encroachment
+    possession: { type: String, required: true },
+    encroachment: { area: areaFields, acres: Number, encroachers: { type: [String], default: [] }, nature: String, since: Number, action: String, retrievedOn: Date, retrievedArea: areaFields },
+    // Litigation
+    underLitigation: { type: Boolean, default: false },
+    litigationIds: [{ type: Schema.Types.ObjectId, ref: 'LitigationCase' }],
+    // Record and digitisation
+    record: { status: { type: String, required: true }, mutationNos: String, demarcation: { type: String, enum: ['yes', 'no', null] }, demarcationDate: Date, demarcationRef: String, computerised: { type: String, enum: ['yes', 'no', 'unchecked', null] }, discrepancy: { type: String, maxlength: 1000 } },
+    lastVisit: Date,
+    note: { type: String, maxlength: 2000 },
+    // Two-step verification: Girdawar verifies, Tehsildar / Naib Tehsildar approves
+    status: { type: String, enum: ['entered', 'verified', 'approved', 'returned'], default: 'entered' },
+    verifiedBy: ref('User'),
+    verifiedAt: Date,
+    approvedBy: ref('User'),
+    approvedAt: Date,
+    returnRemarks: { type: String, maxlength: 1000 },
+    history: [{ at: Date, by: ref('User'), action: String, remarks: String, _id: false }],
+    createdBy: ref('User'),
+    updatedBy: ref('User'),
+    deleted: { type: Boolean, default: false },
+  },
+  opts,
+);
+stateLandSchema.plugin(tenantPlugin);
+stateLandSchema.index({ tenantId: 1, holdingId: 1 }, { unique: true });
+stateLandSchema.index({ tenantId: 1, anc: 1, category: 1, status: 1 });
+stateLandSchema.index({ tenantId: 1, deleted: 1, updatedAt: -1 });
+export const StateLand = mongoose.model('StateLand', stateLandSchema);
+
+const stateLandDocSchema = new Schema(
+  {
+    ...tenantField,
+    holdingRef: ref('StateLand', true),
+    category: { type: String, enum: ['fard', 'shajra', 'mutation', 'award', 'allotment', 'demarcation', 'photo', 'other'], required: true },
+    title: { type: String, maxlength: 200 },
+    docDate: Date,
+    backend: { type: String, default: 'gridfs' },
+    storageKey: { type: String, required: true },
+    mime: { type: String, required: true },
+    size: Number,
+    pages: Number,
+    uploadedBy: ref('User'),
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+stateLandDocSchema.plugin(tenantPlugin);
+stateLandDocSchema.index({ tenantId: 1, holdingRef: 1, category: 1 });
+export const StateLandDoc = mongoose.model('StateLandDoc', stateLandDocSchema);
+
+/** Per mouza: the Patwari marks the state land listing complete, the Girdawar confirms it. */
+const stateLandMouzaSchema = new Schema(
+  {
+    ...tenantField,
+    unitId: ref('Unit', true),
+    anc: [{ type: Schema.Types.ObjectId }],
+    complete: { type: Boolean, default: false },
+    completedBy: ref('User'),
+    completedAt: Date,
+    confirmed: { type: Boolean, default: false },
+    confirmedBy: ref('User'),
+    confirmedAt: Date,
+  },
+  opts,
+);
+stateLandMouzaSchema.plugin(tenantPlugin);
+stateLandMouzaSchema.index({ tenantId: 1, unitId: 1 }, { unique: true });
+stateLandMouzaSchema.index({ tenantId: 1, anc: 1 });
+export const StateLandMouza = mongoose.model('StateLandMouza', stateLandMouzaSchema);
