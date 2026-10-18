@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "seed": "tsx src/seed.ts",
     "seed:assigned": "tsx src/seed-assigned.ts",
+    "seed:cda": "tsx src/seed-cda.ts",
     "worker": "tsx src/worker.ts",
     "worker:prod": "node dist/worker.js",
     "migrate": "tsx src/migrate.ts"

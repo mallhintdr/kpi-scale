@@ -57,6 +57,11 @@ Run these from `server`, with the API running:
 | Service Centre In-charge | `sci.hasilpur` | Tehsil: GPC, Inheritance, KMI, Missing mutations |
 | Girdawar | `girdawar1.hasilpur` | Qanungoi |
 | Patwari | `patwari1.hasilpur`, `patwari2.hasilpur` | Patwar circle |
+| **CDA** — Managing Director | `md.cda` | Cholistan Development Authority (like a DC) |
+| CDA — Director Revenue & Colonies | `drc.cda` | CDA (like an ADC Revenue) |
+| CDA — Colonization Officer | `co1.cda`, `co2.cda` | Colonization Officer-I / II (like an AC) |
+| CDA — Tehsildar / Naib Tehsildar | `tehsildar.cda`, `naib1.cda` … `naib3.cda` | Both CO units / their qanungois |
+| CDA — Girdawar / Patwari | `girdawar1.cda` … `girdawar18.cda`, `patwari1.cda` … `patwari200.cda` | Qanungoi / patwar circle |
 
 Use **separate browsers or private windows** for different accounts, so their sessions don't overwrite each other.
 
