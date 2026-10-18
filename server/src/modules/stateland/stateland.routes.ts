@@ -35,7 +35,8 @@ const router = Router();
 const isAdmin = (me: AuthUser) => atLeast(me.role, 'admin');
 const DAY = 86_400_000;
 const STATUS_LABEL: Record<string, string> = { entered: 'Entered', verified: 'Verified', approved: 'Approved', returned: 'Returned' };
-export const khasraLabel = (murabba: string, killa: number, sub?: string | null) => `${murabba}//${killa}${sub ? `/${sub}` : ''}`;
+/** Khasra no. as written: murabba/killa, with the sub-killa after another slash — 45/6, 45/6/1, 45/6/الف. */
+export const khasraLabel = (murabba: string, killa: number, sub?: string | null) => `${murabba}/${killa}${sub ? `/${sub}` : ''}`;
 
 /* ---------- access ---------- */
 const can = (me: AuthUser, bp: BP, cap: Cap, unit?: { anc: Types.ObjectId[] }) => (isAdmin(me) ? Promise.resolve(true) : hasCap(me, bp, cap, unit));
@@ -219,7 +220,8 @@ const area = z.object({ kanal: z.number().min(0).max(1e7).optional(), marla: z.n
 const date = z.coerce.date().nullish();
 const str = (n = 200) => z.string().trim().max(n).optional();
 const killaNo = z.number().int().min(1).max(25);
-const subNo = z.string().trim().max(10).regex(/^[0-9A-Za-z-]*$/, 'Sub-killa: digits or letters only').default('');
+// Sub-killa names: 1, 2, 3 … or الف، ب، ج … or any local style (letters / digits of any script)
+const subNo = z.string().trim().max(12).regex(/^[\p{L}\p{N}\p{M}-]*$/u, 'Sub-killa: letters or digits only').default('');
 
 /** Details shared by every khasra of an entry (and editable per khasra later). */
 const details = z.object({
