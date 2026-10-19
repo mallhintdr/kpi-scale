@@ -228,7 +228,7 @@ export default function StateLandEntry() {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={clsx(r._err && 'bg-rose-50 dark:bg-rose-950/30', sel.has(i) && 'bg-brand-50 dark:bg-brand-900/30', r.subKilla && 'text-slate-700')} title={r._err}>
-                <td className={clsx('sticky left-0 z-10 whitespace-nowrap border-b border-r border-slate-300 px-2 font-mono text-[12px] font-semibold dark:border-slate-600', r._err ? 'bg-rose-50 text-rose-800 dark:bg-rose-950' : 'bg-white dark:bg-slate-900')} dir="ltr">{r.murabba || r.killa ? <>{r.murabba || '?'}/{r.killa || '?'}{r.subKilla && <>/<span dir="auto">{r.subKilla}</span></>}</> : <span className="text-slate-300">—</span>}</td>
+                <td className={clsx('sticky left-0 z-10 whitespace-nowrap border-b border-r border-slate-300 px-2 font-mono text-[12px] font-semibold dark:border-slate-600', r._err ? 'bg-rose-50 text-rose-800 dark:bg-rose-950' : 'bg-inherit')} dir="ltr">{r.murabba || r.killa ? <>{r.murabba || '?'}/{r.killa || '?'}{r.subKilla && <>/<span dir="auto">{r.subKilla}</span></>}</> : <span className="text-slate-300">—</span>}</td>
                 <td className="border-b border-r border-slate-200 px-1 text-center dark:border-slate-700"><input type="checkbox" className="size-4 accent-brand-600" checked={sel.has(i)} onChange={() => setSel((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; })} /></td>
                 <td className={clsx('border-b border-r border-slate-200 px-1 text-center text-[11px] text-slate-500 dark:border-slate-700', r._err && 'font-bold text-rose-700')}>{i + 1}</td>
                 {COLS.map((c, ci) => (

@@ -314,7 +314,7 @@ function MouzaListingSheet({ onClose }: { onClose: () => void }) {
       <Field label="Mouza">{(id) => <AutoInput id={id} strict placeholder="Type mouza name…" onQuery={setMq} value={unitId} options={(mouzas.data ?? []).map((x) => ({ value: x._id, label: x.name, hint: x.tehsil }))} onChange={setUnitId} />}</Field>
       {unitId && (
         <Card className="space-y-2 p-3 text-sm">
-          <div>Status: {m?.confirmed ? <b className="text-emerald-700">Confirmed by {m.confirmedBy?.name}</b> : m?.complete ? <b className="text-sky-700">Marked complete by {m.completedBy?.name} on {fmt(m.completedAt)}</b> : <b className="text-slate-500">In progress</b>}</div>
+          <div>Status: {m?.confirmed ? <b className="text-emerald-700">Confirmed by {m.confirmedBy?.name}</b> : m?.complete ? <b className="text-sky-700">Marked complete by {m.completedBy?.name} on <span className="font-semibold">{fmt(m.completedAt)}</span></b> : <b className="text-slate-500">In progress</b>}</div>
           {m?.complete ? <Button variant="secondary" onClick={() => act('reopen')}><RotateCcw className="size-4" />Reopen Listing</Button> : <Button onClick={() => act('complete')}><CheckCircle2 className="size-4" />Mark Listing Complete</Button>}
         </Card>
       )}
@@ -695,7 +695,7 @@ export function StateLandHoldingPage() {
       <Card className={clsx('mb-3 flex flex-wrap items-center gap-3 border-l-4 p-3 text-sm', h.status === 'approved' ? 'border-emerald-500' : h.status === 'returned' ? 'border-rose-500' : 'border-amber-500')}>
         <StatusBadge s={h.status} />
         <span className="text-slate-600 dark:text-slate-300">
-          Entered by {h.createdBy?.name ?? '—'} on {fmt(h.createdAt)}
+          Entered by {h.createdBy?.name ?? '—'} on <span className="font-semibold">{fmt(h.createdAt)}</span>
           {h.verifiedBy && ` · verified by ${h.verifiedBy.name} on ${fmt(h.verifiedAt)}`}
           {h.approvedBy && ` · approved by ${h.approvedBy.name} on ${fmt(h.approvedAt)}`}
         </span>
@@ -763,7 +763,7 @@ export function StateLandHoldingPage() {
             {row('Scheme', h.allotment.scheme)}
             {row('Allottee / Lessee', [h.allotment.allottee, h.allotment.parentage].filter(Boolean).join(' '))}
             {row('Order', [h.allotment.orderNo, h.allotment.orderDate && fmt(h.allotment.orderDate), h.allotment.authority].filter(Boolean).join(' · '))}
-            {row('Lease Period', h.allotment.leaseFrom || h.allotment.leaseTo ? <span className={clsx(leaseExpired && 'font-semibold text-rose-700')}>{fmt(h.allotment.leaseFrom)} to {fmt(h.allotment.leaseTo)}{leaseExpired && ' — expired'}</span> : '')}
+            {row('Lease Period', h.allotment.leaseFrom || h.allotment.leaseTo ? <span className={clsx(leaseExpired && 'font-semibold text-rose-700')}><span className="font-semibold">{fmt(h.allotment.leaseFrom)}</span> to <span className="font-semibold">{fmt(h.allotment.leaseTo)}</span>{leaseExpired && ' — expired'}</span> : '')}
             {row('Conditions Met', map({ yes: 'Yes', no: 'No', review: 'Under review' }, h.allotment.conditionsMet))}
             {row('Proprietary Rights', map({ granted: 'Granted', pending: 'Pending', na: 'Not applicable' }, h.allotment.proprietary))}
             {row('Mutation No.', h.allotment.mutationNo)}
@@ -804,7 +804,7 @@ export function StateLandHoldingPage() {
             <button className="min-w-0 flex-1 truncate text-left hover:underline" onClick={() => download(`/state-land/${h._id}/docs/${d._id}`, `${h.khasraNo.replace(/\//g, '-')} ${d.title ?? d.category}.pdf`)}>
               <b>{m?.docCategories.find((c) => c.key === d.category)?.label ?? d.category}</b>{d.title && ` — ${d.title}`}
             </button>
-            <span className="text-xs text-slate-500">{d.pages ?? 1} p · {Math.round(d.size / 1024)} KB · {fmt(d.docDate ?? d.createdAt)}</span>
+            <span className="text-xs text-slate-500">{d.pages ?? 1} p · {Math.round(d.size / 1024)} KB · <span className="font-semibold">{fmt(d.docDate ?? d.createdAt)}</span></span>
             {data.canEdit && <button className="text-slate-400 hover:text-rose-600 print:hidden" onClick={() => removeDoc(d)} aria-label="Remove"><Trash2 className="size-4" /></button>}
           </div>
         ))}
@@ -813,7 +813,7 @@ export function StateLandHoldingPage() {
       <SectionTitle>History</SectionTitle>
       <Card className="p-3 text-sm">
         {[...h.history].reverse().map((x, i) => (
-          <div key={i} className="flex gap-2 border-b border-slate-100 py-1 last:border-0 dark:border-slate-800"><span className="w-36 shrink-0 text-xs text-slate-500">{new Date(x.at).toLocaleString('en-GB')}</span><span><b>{x.by?.name ?? '—'}</b> {x.action}{x.remarks && <span className="text-slate-500"> — {x.remarks}</span>}</span></div>
+          <div key={i} className="flex gap-2 border-b border-slate-100 py-1 last:border-0 dark:border-slate-800"><span className="w-36 shrink-0 text-xs text-slate-500"><span className="font-semibold">{new Date(x.at).toLocaleString('en-GB')}</span></span><span><b>{x.by?.name ?? '—'}</b> {x.action}{x.remarks && <span className="text-slate-500"> — {x.remarks}</span>}</span></div>
         ))}
       </Card>
 

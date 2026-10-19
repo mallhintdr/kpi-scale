@@ -126,7 +126,7 @@ export default function Staff() {
         <>
           <div className="hidden print:mb-2 print:block">
             <div className="text-lg font-bold">Staff Performance · {data?.postLabel} · {unit?.name} · FY {fy}</div>
-            <div className="text-xs">{rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS} · generated {new Date().toLocaleString()}</div>
+            <div className="text-xs">{rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS} · generated <span className="font-semibold">{new Date().toLocaleString()}</span></div>
           </div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500 print:hidden">
             <span>
@@ -179,7 +179,7 @@ export default function Staff() {
                   {rows.map((r) => {
                     const key = `${r.user._id}-${r.unitId}`;
                     const on = selected === key;
-                    const stickyBg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800';
+                    const stickyBg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-inherit';
                     const ts = tsum.get(`${r.user._id}|${r.unitId}`);
                     return (
                     <tr key={key} onClick={() => setSelected(on ? null : key)} aria-selected={on}
@@ -188,7 +188,7 @@ export default function Staff() {
                       {groupCols.map((l) => <td key={l} className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[13px] dark:border-slate-700">{r.areas?.[l]}</td>)}
                       <td className={`sticky left-10 z-10 border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 dark:border-slate-700 ${stickyBg}`}>
                         <Link to={`/officers/${r.user._id}?fy=${fy}`} onClick={(e) => e.stopPropagation()} title={`Open ${r.user.name}'s profile`}
-                          className={`block max-w-[7.5rem] truncate font-medium text-slate-900 sm:max-w-48 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline ${on ? 'underline' : ''}`}>
+                          className={`block max-w-[7.5rem] truncate font-bold text-slate-900 sm:max-w-48 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline ${on ? 'underline' : ''}`}>
                           {r.user.name}
                         </Link>
                       </td>

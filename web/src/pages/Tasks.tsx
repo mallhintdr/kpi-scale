@@ -62,8 +62,8 @@ function TaskCard({ t, box }: { t: Task; box: 'mine' | 'assigned' }) {
           {t.details && <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{t.details}</p>}
           <div className="mt-1.5 text-xs">
             {t.status === 'done'
-              ? <span className={late ? 'text-amber-600' : 'text-emerald-600'}>Completed {fmtDate(t.completedAt)}{late ? ' (late)' : ' on time'}</span>
-              : <span className={overdue ? 'font-semibold text-rose-600' : 'text-slate-500'}>Due {fmtDate(t.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}{overdue && ' · overdue'}</span>}
+              ? <span className={late ? 'text-amber-600' : 'text-emerald-600'}>Completed <span className="font-semibold">{fmtDate(t.completedAt)}</span>{late ? ' (late)' : ' on time'}</span>
+              : <span className={overdue ? 'font-semibold text-rose-600' : 'text-slate-500'}>Due <span className="font-semibold">{fmtDate(t.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</span>{overdue && ' · overdue'}</span>}
           </div>
         </div>
       </div>
@@ -91,7 +91,7 @@ function NewTask({ onClose }: { onClose: () => void }) {
       <form id="task-form" onSubmit={submit} className="space-y-4">
         {who ? (
           <Card className="flex items-center gap-3 p-3">
-            <div className="min-w-0 flex-1"><div className="font-medium">{who.name}</div><div className="text-xs text-slate-500">{who.postLabel} · {who.unitName}</div></div>
+            <div className="min-w-0 flex-1"><div className="font-bold">{who.name}</div><div className="text-xs text-slate-500">{who.postLabel} · {who.unitName}</div></div>
             <Button type="button" size="sm" variant="ghost" onClick={() => setWho(null)}>Change</Button>
           </Card>
         ) : (
@@ -103,7 +103,7 @@ function NewTask({ onClose }: { onClose: () => void }) {
             <Card className="max-h-64 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
               {isLoading ? <div className="p-4"><Loading /></div> : people.map((p) => (
                 <button type="button" key={`${p.userId}${p.unitId}`} onClick={() => setWho(p)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800">
-                  <div className="min-w-0"><div className="truncate text-sm font-medium">{p.name}</div><div className="truncate text-xs text-slate-500">{p.postLabel} · {p.unitName}</div></div>
+                  <div className="min-w-0"><div className="truncate text-sm font-bold">{p.name}</div><div className="truncate text-xs text-slate-500">{p.postLabel} · {p.unitName}</div></div>
                 </button>
               ))}
             </Card>

@@ -202,7 +202,7 @@ export function LitigationList() {
                       <td className="border-b border-r border-slate-200 px-3 py-2">{c.caseType}</td>
                       <td className="border-b border-r border-slate-200 px-3 py-2">{c.courtName}</td>
                       <td className="border-b border-r border-slate-200 px-3 py-2 text-xs" dir="auto">{c.applicants[0]}{c.applicants.length > 1 && ` +${c.applicants.length - 1}`} <span className="text-slate-400">v.</span> {c.respondents[0]}{c.respondents.length > 1 && ` +${c.respondents.length - 1}`}</td>
-                      <td className={clsx('whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 text-center', overdue && 'font-semibold text-rose-700')}>{c.status === 'decided' ? <span className="text-slate-400">Decided {fmt(c.decision?.date)}</span> : fmt(c.nextHearing)}</td>
+                      <td className={clsx('whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 text-center font-semibold', overdue && 'text-rose-700')}>{c.status === 'decided' ? <span className="text-slate-400">Decided <span className="font-semibold">{fmt(c.decision?.date)}</span></span> : fmt(c.nextHearing)}</td>
                       <td className="border-b border-slate-200 px-3 py-2 text-center"><StatusBadge s={c.status} /></td>
                     </tr>
                   );
@@ -238,12 +238,12 @@ function CauseList({ area }: { area: UnitRef | null }) {
         <Field label="To">{(id) => <Input id={id} type="date" value={to} onChange={(e) => setTo(e.target.value)} />}</Field>
         <Button variant="secondary" onClick={() => window.print()}><FileText className="size-4" />Print Cause List</Button>
       </Card>
-      <div className="hidden print:block print:mb-2"><b>Cause List</b> · {fmt(from)} to {fmt(to)}{area && ` · ${area.name}`}</div>
+      <div className="hidden print:block print:mb-2"><b>Cause List</b> · <span className="font-semibold">{fmt(from)}</span> to <span className="font-semibold">{fmt(to)}</span>{area && ` · ${area.name}`}</div>
       {isLoading ? <Loading /> : !days.length ? <Card><Empty title="No hearings in these dates" /></Card> : days.map((d) => {
         const rows = data!.items.filter((c) => c.nextHearing.slice(0, 10) === d);
         return (
           <div key={d} className="mb-3 break-inside-avoid">
-            <SectionTitle>{new Date(d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {rows.length} case(s)</SectionTitle>
+            <SectionTitle><span className="font-semibold">{new Date(d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span> · {rows.length} case(s)</SectionTitle>
             <Card className="overflow-x-auto">
               <table className="w-full min-w-[720px] border-separate border-spacing-0 text-[13px]">
                 <thead className="bg-brand-700 text-center text-[12.5px] text-white print:bg-slate-200 print:text-black">
@@ -290,7 +290,7 @@ function HearingCalendar({ area }: { area: UnitRef | null }) {
     <Card className="p-3">
       <div className="mb-3 flex items-center justify-between">
         <Button size="sm" variant="ghost" onClick={() => shift(-1)}>‹ Previous</Button>
-        <b>{month.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}{isLoading && ' …'}</b>
+        <b><span className="font-semibold">{month.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</span>{isLoading && ' …'}</b>
         <Button size="sm" variant="ghost" onClick={() => shift(1)}>Next ›</Button>
       </div>
       <div className="grid grid-cols-7 gap-1 text-[12px]">
@@ -647,7 +647,7 @@ export function LitigationCasePage() {
           {canEdit && <Button size="sm" onClick={() => setSheet('hearing')}><Plus className="size-4" />Record Hearing</Button>}
         </Card>
       )}
-      {appealDeadline && c.appeal.filed === 'undecided' && <Card className="mb-3 border-l-4 border-rose-500 p-3 text-sm"><AlarmClock className="mr-1 inline size-4 text-rose-600" />Appeal period ends on <b>{fmt(appealDeadline)}</b>. Record whether an appeal is filed.</Card>}
+      {appealDeadline && c.appeal.filed === 'undecided' && <Card className="mb-3 border-l-4 border-rose-500 p-3 text-sm"><AlarmClock className="mr-1 inline size-4 text-rose-600" />Appeal period ends on <b><span className="font-semibold">{fmt(appealDeadline)}</span></b>. Record whether an appeal is filed.</Card>}
 
       <div className="grid gap-3 lg:grid-cols-2">
         <div>
@@ -684,7 +684,7 @@ export function LitigationCasePage() {
             <>
               <SectionTitle>Court History</SectionTitle>
               <Card className="divide-y divide-slate-100 dark:divide-slate-800">
-                {c.stages.map((s) => <div key={s.stage} className="px-4 py-2 text-sm"><b>Stage {s.stage}:</b> {courtLabel(meta.data, s.court, s.courtOther)}{s.courtCaseNo && ` (${s.courtCaseNo})`}<div className="text-xs text-slate-500">Instituted {fmt(s.institutedOn)} · decided {fmt(s.decidedOn)}{s.result && ` · ${s.result}`}</div></div>)}
+                {c.stages.map((s) => <div key={s.stage} className="px-4 py-2 text-sm"><b>Stage {s.stage}:</b> {courtLabel(meta.data, s.court, s.courtOther)}{s.courtCaseNo && ` (${s.courtCaseNo})`}<div className="text-xs text-slate-500">Instituted <span className="font-semibold">{fmt(s.institutedOn)}</span> · decided <span className="font-semibold">{fmt(s.decidedOn)}</span>{s.result && ` · ${s.result}`}</div></div>)}
                 <div className="px-4 py-2 text-sm"><b>Stage {c.stage} (current):</b> {data!.courtName}</div>
               </Card>
             </>
@@ -698,7 +698,7 @@ export function LitigationCasePage() {
             {[...c.hearings].sort((a, b) => +new Date(b.date) - +new Date(a.date)).map((h) => (
               <div key={h._id} className="px-4 py-2.5 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <b>{fmt(h.date)}</b>
+                  <b><span className="font-semibold">{fmt(h.date)}</span></b>
                   <span className="text-xs text-slate-500">{h.nextDate && `next ${fmt(h.nextDate)}`}{canEdit && <button className="ml-2 text-rose-500" onClick={() => removeHearing(h)}><Trash2 className="inline size-3.5" /></button>}</span>
                 </div>
                 {h.proceedingsDone && <div dir="auto"><span className="text-slate-500">Proceedings:</span> {h.proceedingsDone}</div>}
@@ -728,7 +728,7 @@ export function LitigationCasePage() {
 
           <SectionTitle>Notes</SectionTitle>
           <Card className="space-y-2 p-3">
-            {c.notes.map((n, i) => <div key={i} className="text-sm" dir="auto">{n.text}<div className="text-[11px] text-slate-400">{n.by?.name} · {new Date(n.at).toLocaleString()}</div></div>)}
+            {c.notes.map((n, i) => <div key={i} className="text-sm" dir="auto">{n.text}<div className="text-[11px] text-slate-400"><b>{n.by?.name}</b> · <span className="font-semibold">{new Date(n.at).toLocaleString()}</span></div></div>)}
             <div className="flex gap-2"><Input dir="auto" placeholder="Add a note…" value={note} onChange={(e) => setNote(e.target.value)} /><Button variant="secondary" onClick={addNote}>Add</Button></div>
           </Card>
           <p className="mt-2 text-[11px] text-slate-400">History: {c.history.slice(-6).reverse().map((h) => `${h.action} (${h.by?.name ?? ''}, ${new Date(h.at).toLocaleDateString()})`).join(' · ')}</p>

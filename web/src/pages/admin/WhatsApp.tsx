@@ -251,7 +251,7 @@ function Log() {
         <Card className="divide-y divide-slate-100 dark:divide-slate-800">
           {data.items.map((m) => (
             <div key={m._id} className="flex gap-3 px-3 py-2 text-sm">
-              <div className="w-28 shrink-0 text-xs text-slate-500">{new Date(m.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+              <div className="w-28 shrink-0 text-xs text-slate-500"><span className="font-semibold">{new Date(m.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <b>{m.userId?.name ?? m.phone}</b>

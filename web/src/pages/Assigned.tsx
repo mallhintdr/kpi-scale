@@ -120,7 +120,7 @@ function Drives({ viewer }: { viewer: string }) {
               <div className="mt-2"><Bullet value={d.pct} pace={d.state === 'running' ? d.elapsed : null} height={7} /></div>
               <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-500">
                 <span className="flex items-center gap-1.5"><StateChip state={d.state} />{PERIOD_LABEL[d.period]}{d.pending > 0 && <span className="text-amber-700">· {fmt(d.pending)} awaiting verification</span>}</span>
-                <span className="tabular-nums">{fmtDate(d.startDate)} – {d.state === 'stopped' && d.stoppedAt ? <>stopped {fmtDate(d.stoppedAt)}</> : fmtDate(d.endDate)}</span>
+                <span className="tabular-nums"><span className="font-semibold">{fmtDate(d.startDate)}</span> – {d.state === 'stopped' && d.stoppedAt ? <>stopped <span className="font-semibold">{fmtDate(d.stoppedAt)}</span></> : fmtDate(d.endDate)}</span>
               </div>
               <div className="mt-1 text-center text-[10px] font-medium text-slate-400">{d.money ? MILLIONS : '(Cases)'}</div>
             </button>

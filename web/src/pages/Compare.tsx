@@ -171,7 +171,7 @@ export default function Compare() {
                   <tbody>
                     {items.map((u, idx) => {
                       const on = picked2 === u._id;
-                      const bg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-white dark:bg-slate-900';
+                      const bg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-inherit';
                       return (
                       <tr key={u._id} onClick={() => setPicked2(on ? null : u._id)} className={clsx('cursor-pointer', on ? 'bg-amber-100 outline outline-2 -outline-offset-2 outline-amber-400 dark:bg-amber-500/25' : 'hover:bg-slate-50')}>
                         <td className={clsx('sticky left-0 z-10 w-10 min-w-10 border-b border-r border-b-slate-200 border-r-slate-400 text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700', bg)}>{idx + 1}</td>

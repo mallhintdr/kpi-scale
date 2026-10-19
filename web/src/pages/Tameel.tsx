@@ -41,7 +41,7 @@ function Due({ deadline }: { deadline: string }) {
   const late = days < 0;
   return (
     <span className={clsx('inline-flex items-center gap-1 text-xs font-medium', late ? 'text-rose-700' : days <= 2 ? 'text-amber-700' : 'text-slate-600')}>
-      <CalendarClock className="size-3.5" />Due {d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+      <CalendarClock className="size-3.5" />Due <span className="font-semibold">{d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
       {late ? ` · ${-days} day(s) overdue` : days === 0 ? ' · today' : ` · ${days} day(s) left`}
     </span>
   );
@@ -263,7 +263,7 @@ export function TameelDetail() {
                 {t.files.map((f) => (
                   <div key={f._id} className="flex items-center gap-3 px-3 py-2 text-sm">
                     <FileSpreadsheet className="size-5 text-emerald-600" />
-                    <div className="min-w-0 flex-1"><b>{f.groupId?.name}</b><div className="text-xs text-slate-500">{f.rows} rows · updated {new Date(f.builtAt).toLocaleString()}</div></div>
+                    <div className="min-w-0 flex-1"><b>{f.groupId?.name}</b><div className="text-xs text-slate-500">{f.rows} rows · updated <span className="font-semibold">{new Date(f.builtAt).toLocaleString()}</span></div></div>
                     <Button size="sm" variant="secondary" onClick={() => download(`/tameel/${t._id}/files/${f.groupId._id}`, f.name)}><Download className="size-4" />Excel</Button>
                   </div>
                 ))}

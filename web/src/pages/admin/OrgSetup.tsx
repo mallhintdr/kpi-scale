@@ -505,7 +505,7 @@ function HistorySheet({ onClose, onRestored }: { onClose: () => void; onRestored
               <div className="grid size-9 place-items-center rounded-lg bg-brand-50 text-sm font-bold text-brand-700">v{v.version}</div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{v.note ?? 'Saved'}</div>
-                <div className="text-xs text-slate-500">{new Date(v.createdAt).toLocaleString()}{v.updatedBy && ` · ${v.updatedBy.name}`}</div>
+                <div className="text-xs text-slate-500"><span className="font-semibold">{new Date(v.createdAt).toLocaleString()}</span>{v.updatedBy && ` · ${v.updatedBy.name}`}</div>
               </div>
               {i > 0 && <Button size="sm" variant="secondary" loading={restore.isPending && restore.variables === v.version} onClick={() => confirm(`Restore version ${v.version}? It becomes a new version; nothing is lost.`) && restore.mutate(v.version)}>Restore</Button>}
               {i === 0 && <Badge tone="bg-emerald-100 text-emerald-800">Current</Badge>}

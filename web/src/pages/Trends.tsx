@@ -134,7 +134,7 @@ export default function Trends() {
                     const on = r.key === selected;
                     return (
                       <tr key={r.key} onClick={() => setPicked(r.key)} className={clsx('cursor-pointer', on ? 'bg-amber-100 dark:bg-amber-500/25' : 'hover:bg-slate-50 dark:hover:bg-slate-800/60')}>
-                        <td className={clsx('sticky left-0 z-10 whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-400 px-3 py-1.5 font-medium dark:border-slate-700', on ? 'bg-amber-100 dark:bg-amber-900' : 'bg-white dark:bg-slate-900')}>{r.label}</td>
+                        <td className={clsx('sticky left-0 z-10 whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-400 px-3 py-1.5 font-medium dark:border-slate-700', on ? 'bg-amber-100 dark:bg-amber-900' : 'bg-inherit')}>{r.label}</td>
                         <td className={sub(0)}>{r.money.of ? fmtPKR(r.money.of) : '—'}</td>
                         <td className={clsx(sub(1), 'font-semibold')}>{fmtPKR(r.money.done)}</td>
                         <td className={sub(2)}><Pct v={r.money.pct} /></td>
@@ -155,7 +155,7 @@ export default function Trends() {
             </div>
             <div className="border-t border-slate-200 px-3 py-1.5 text-[11px] text-slate-500 dark:border-slate-700">
               Tap a period to rank the {children.data?.items[0] ? UNIT_LABEL[children.data.items[0].type].toLowerCase() : 'units'}s below for it · <span className="text-amber-600">*</span> more awaiting verification
-              {series.data?.builtAt && <> · updated {new Date(series.data.builtAt).toLocaleString()}</>}
+              {series.data?.builtAt && <> · updated <span className="font-semibold">{new Date(series.data.builtAt).toLocaleString()}</span></>}
             </div>
           </Card>
 

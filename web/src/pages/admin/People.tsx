@@ -41,7 +41,7 @@ export default function People() {
               <button key={u._id} onClick={() => setEditing(u)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-slate-50 dark:active:bg-slate-800">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className={`truncate font-medium ${u.status === 'disabled' ? 'text-slate-400 line-through' : ''}`}>{u.name}</span>
+                    <span className={`truncate font-bold ${u.status === 'disabled' ? 'text-slate-400 line-through' : ''}`}>{u.name}</span>
                     {u.role !== 'employee' && <Badge className="capitalize">{u.role}</Badge>}
                   </div>
                   <div className="truncate text-xs text-slate-500">{u.charges?.length ? u.charges.map((c) => `${c.postLabel}, ${c.unit}`).join(' · ') : <span className="text-amber-600">{u.designation ?? 'Not posted'}</span>}</div>

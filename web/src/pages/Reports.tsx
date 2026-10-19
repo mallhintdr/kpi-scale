@@ -240,7 +240,7 @@ export default function Reports() {
           <div className="hidden print:block print:mb-3">
             <div className="text-xs font-bold uppercase tracking-wide">{[session?.tenant.branding?.tagline, session?.tenant.name].filter(Boolean).join(' · ')}</div>
             <div className="text-lg font-bold">{data?.postLabel} report · {unit?.name} · FY {generated.fy}</div>
-            <div className="text-xs">Generated {new Date().toLocaleString()} · {generated.mode === 'aggregate' ? 'Aggregated per officer' : 'Unit-wise'} · {perf ? 'Performance mode' : 'KPI evaluation mode'}{anyMoney && ` · amounts ${MILLIONS}`}</div>
+            <div className="text-xs">Generated <span className="font-semibold">{new Date().toLocaleString()}</span> · {generated.mode === 'aggregate' ? 'Aggregated per officer' : 'Unit-wise'} · {perf ? 'Performance mode' : 'KPI evaluation mode'}{anyMoney && ` · amounts ${MILLIONS}`}</div>
           </div>
 
           <Card className={clsx('overflow-hidden print:rounded-none print:shadow-none print:ring-0', full && 'flex min-h-0 flex-1 flex-col')}>
@@ -275,7 +275,7 @@ export default function Reports() {
                   {rows.map((r, idx) => {
                     const key = `${r.user._id}-${r.unitId}`;
                     const on = selected === key;
-                    const stickyBg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-white dark:bg-slate-900';
+                    const stickyBg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-inherit';
                     return (
                     <tr key={key} onClick={() => setSelected(on ? null : key)} aria-selected={on}
                       className={clsx('cursor-pointer', on ? 'bg-amber-100 outline outline-2 -outline-offset-2 outline-amber-400 dark:bg-amber-500/25' : idx % 2 ? 'bg-slate-50/50 hover:bg-slate-100 dark:bg-slate-800/30' : 'hover:bg-slate-50')}>
@@ -283,7 +283,7 @@ export default function Reports() {
                       {groupCols.map((l) => <td key={l} className="whitespace-nowrap border-b border-r border-b-slate-200 border-r-slate-500 px-2.5 py-1.5 dark:border-slate-700">{r.areas?.[l]}</td>)}
                       <td className={clsx('sticky left-10 z-10 border-b border-r border-b-slate-200 border-r-slate-500 px-3 py-1.5 dark:border-slate-700 print:static', stickyBg)}>
                         <Link to={`/officers/${r.user._id}`} onClick={(e) => e.stopPropagation()} title={`Open ${r.user.name}'s profile`}
-                          className={clsx('whitespace-nowrap font-medium text-slate-900 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline', on && 'underline')}>
+                          className={clsx('whitespace-nowrap font-bold text-slate-900 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline', on && 'underline')}>
                           {r.user.name}
                         </Link>
                       </td>

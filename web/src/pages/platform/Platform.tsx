@@ -79,7 +79,7 @@ export default function Platform() {
                   <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700 dark:bg-brand-500/15"><Building2 className="size-5" /></div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{t.name}</div>
-                    <div className="truncate text-xs text-slate-500">{t.industry ?? '—'} · {t.slug} · since {new Date(t.createdAt).toLocaleDateString()}</div>
+                    <div className="truncate text-xs text-slate-500">{t.industry ?? '—'} · {t.slug} · since <span className="font-semibold">{new Date(t.createdAt).toLocaleDateString()}</span></div>
                   </div>
                   <Badge tone={t.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}>{t.status}</Badge>
                 </div>

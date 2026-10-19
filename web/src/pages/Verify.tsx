@@ -141,8 +141,8 @@ function TargetQueue() {
           <label key={key(p)} className="flex cursor-pointer items-center gap-3 px-4 py-3">
             <input type="checkbox" className="size-5 accent-brand-600" checked={selected.has(key(p))} onChange={(e) => setSelected((s) => { const n = new Set(s); e.target.checked ? n.add(key(p)) : n.delete(key(p)); return n; })} />
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium">{p.assignee?.name} · {p.headName}</div>
-              <div className="text-xs text-slate-500">{p.unit?.name} · {fmtDate(p.date)}{p.note && <> · {p.note}</>}</div>
+              <div className="text-sm"><b>{p.assignee?.name}</b> · {p.headName}</div>
+              <div className="text-xs text-slate-500">{p.unit?.name} · <span className="font-semibold">{fmtDate(p.date)}</span>{p.note && <> · {p.note}</>}</div>
             </div>
             <div className="text-right text-sm tabular-nums">
               <b>{p.money ? fmtFull(p.value) : p.value}</b>

@@ -38,8 +38,8 @@ export default function Postings() {
               {active.map((c) => (
                 <div key={c._id} className="flex items-center gap-3 px-4 py-3">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{c.userId.name}{c.userId.bps && <span className="ml-1 text-xs text-slate-400">BPS-{c.userId.bps}</span>}</div>
-                    <div className="text-xs text-slate-500">{c.postLabel} · since {fmtDate(c.from, { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                    <div className="truncate font-bold">{c.userId.name}{c.userId.bps && <span className="ml-1 text-xs text-slate-400">BPS-{c.userId.bps}</span>}</div>
+                    <div className="text-xs text-slate-500">{c.postLabel} · since <span className="font-semibold">{fmtDate(c.from, { day: 'numeric', month: 'short', year: 'numeric' })}</span></div>
                   </div>
                   {c.chargeType !== 'regular' && <Badge>{c.chargeType === 'additional' ? 'Addl. charge' : 'Look after'}</Badge>}
                   <Button size="sm" variant="ghost" onClick={() => confirm(`End ${c.userId.name}'s charge as ${c.postLabel}?`) && end.mutate(c._id)}><UserMinus className="size-4" /></Button>
@@ -53,7 +53,7 @@ export default function Postings() {
               <Card className="divide-y divide-slate-100 dark:divide-slate-800">
                 {past.map((c) => (
                   <div key={c._id} className="px-4 py-2.5 text-sm text-slate-500">
-                    {c.userId.name} · {c.postLabel} · {fmtDate(c.from)} – {fmtDate(c.to)}
+                    {c.userId.name} · {c.postLabel} · <span className="font-semibold">{fmtDate(c.from)}</span> – <span className="font-semibold">{fmtDate(c.to)}</span>
                   </div>
                 ))}
               </Card>
@@ -87,7 +87,7 @@ function PostSheet({ unit, onClose }: { unit: UnitRef; onClose: () => void }) {
         </div>
         {who ? (
           <Card className="flex items-center gap-3 p-3">
-            <div className="min-w-0 flex-1"><div className="font-medium">{who.name}</div><div className="text-xs text-slate-500">{who.designation} · {who.email}</div></div>
+            <div className="min-w-0 flex-1"><div className="font-bold">{who.name}</div><div className="text-xs text-slate-500">{who.designation} · {who.email}</div></div>
             <Button type="button" size="sm" variant="ghost" onClick={() => setWho(null)}>Change</Button>
           </Card>
         ) : (
@@ -100,7 +100,7 @@ function PostSheet({ unit, onClose }: { unit: UnitRef; onClose: () => void }) {
               <Card className="max-h-60 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
                 {users.data.items.map((u) => (
                   <button type="button" key={u._id} onClick={() => setWho(u)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800">
-                    <div className="min-w-0"><div className="truncate text-sm font-medium">{u.name}</div><div className="truncate text-xs text-slate-500">{u.designation} · {u.email}</div></div>
+                    <div className="min-w-0"><div className="truncate text-sm font-bold">{u.name}</div><div className="truncate text-xs text-slate-500">{u.designation} · {u.email}</div></div>
                   </button>
                 ))}
               </Card>

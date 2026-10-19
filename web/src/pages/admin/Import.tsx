@@ -153,7 +153,7 @@ export default function Import() {
           <div key={h._id} className="flex items-center gap-3 px-3 py-2 text-sm">
             <Badge>{h.kind}</Badge>
             <span className="flex-1 truncate">{h.dryRun ? 'Check' : 'Import'} · {h.total} rows · {h.created} created, {h.updated} updated</span>
-            <span className="text-xs text-slate-500">{new Date(h.createdAt).toLocaleString()}</span>
+            <span className="text-xs text-slate-500"><span className="font-semibold">{new Date(h.createdAt).toLocaleString()}</span></span>
             <Badge tone={h.status === 'done' ? 'bg-emerald-100 text-emerald-800' : h.status === 'failed' ? 'bg-rose-100 text-rose-800' : undefined}>{h.status}</Badge>
           </div>
         ))}

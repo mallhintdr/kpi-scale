@@ -50,7 +50,7 @@ export function TargetCard({ t, viewer, compact }: { t: AssignedTarget; viewer: 
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{t.headName}</div>
           <div className="truncate text-[11px] text-slate-500">
-            {mine ? `From ${t.assignedBy.name}` : `To ${t.assigneeId.name}`} · {t.unitId?.name?.replace(' (test)', '')}
+            {mine ? <>From <b>{t.assignedBy.name}</b></> : <>To <b>{t.assigneeId.name}</b></>} · {t.unitId?.name?.replace(' (test)', '')}
             {t.driveId && <span className="ml-1 rounded bg-brand-50 px-1 font-semibold text-brand-700">Area share</span>}
           </div>
         </div>
@@ -70,7 +70,7 @@ export function TargetCard({ t, viewer, compact }: { t: AssignedTarget; viewer: 
       )}
       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-slate-500">
         <span className="flex items-center gap-1.5"><StateChip state={t.state} /><span>{PERIOD_LABEL[t.period]}</span></span>
-        <span className="tabular-nums">{fmtDate(t.startDate)} – {fmtDate(t.endDate)}{t.state === 'running' && <b className="ml-1 text-slate-700 dark:text-slate-200">· {t.daysLeft}d left</b>}</span>
+        <span className="tabular-nums"><span className="font-semibold">{fmtDate(t.startDate)}</span> – <span className="font-semibold">{fmtDate(t.endDate)}</span>{t.state === 'running' && <b className="ml-1 text-slate-700 dark:text-slate-200">· {t.daysLeft}d left</b>}</span>
       </div>
       {t.remainingAtAssign != null && <div className="mt-1 text-[11px] text-slate-400 tabular-nums">Share of remaining balance {fmt(t.remainingAtAssign)}</div>}
       <div className="mt-auto pt-2 text-center text-[10px] font-medium text-slate-400">{t.money ? MILLIONS : '(Cases)'}</div>
@@ -108,7 +108,7 @@ function ProgressSheet({ t, onClose }: { t: AssignedTarget; onClose: () => void 
             <div className="divide-y divide-slate-100 rounded-lg ring-1 ring-slate-200 dark:divide-slate-800 dark:ring-slate-700">
               {t.progress.slice().reverse().map((p) => (
                 <div key={p._id} className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm tabular-nums">
-                  <span>{fmtDate(p.date)}{p.note && <span className="ml-1 text-xs text-slate-500">· {p.note}</span>}</span>
+                  <span><span className="font-semibold">{fmtDate(p.date)}</span>{p.note && <span className="ml-1 text-xs text-slate-500">· {p.note}</span>}</span>
                   <span className="flex items-center gap-2">
                     <span className={clsx('text-[11px] font-semibold capitalize', PSTATUS[p.status ?? 'submitted'])}>{p.status ?? 'submitted'}</span>
                     <b>{t.money ? fmtFull(p.value) : p.value}</b>

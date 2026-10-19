@@ -80,6 +80,15 @@
     @apply bg-[#f6f8f5] text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
     overscroll-behavior-y: none;
   }
+  /* Tables across the app: zebra rows and bold headers. In the base layer, so a row's own colour
+     (selected, error, hover) always wins; fixed (sticky) cells use bg-inherit to follow their row. */
+  :root { --row: #ffffff; --row-alt: #f1f6f2; }
+  :root:where(.dark, [data-theme='dark']) { --row: #0f172a; --row-alt: #162236; }
+  @media (prefers-color-scheme: dark) { :root:where(:not([data-theme='light'])) { --row: #0f172a; --row-alt: #162236; } }
+  table > tbody > tr { background-color: var(--row); }
+  table > tbody > tr:nth-child(even) { background-color: var(--row-alt); }
+  table > thead th { font-weight: 700; }
+  @media print { table > tbody > tr:nth-child(even) { background-color: #f1f6f2; } }
   /* 16px inputs stop iOS from zooming on focus */
   input, select, textarea {
     font-size: 16px;

@@ -262,7 +262,7 @@ function Ranking({ data }: { data: UnitData }) {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{c.name}</div>
                 <div className="truncate text-[11px] text-slate-500">
-                  {h.length ? h.map((x) => x.user.name).join(', ') : staffedLevel(c.type) ? <span className="text-amber-600">Vacant</span> : '—'}
+                  {h.length ? <b>{h.map((x) => x.user.name).join(', ')}</b> : staffedLevel(c.type) ? <span className="text-amber-600">Vacant</span> : '—'}
                 </div>
               </div>
               {perf ? <span className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{v == null ? '—' : `${Math.round(v)}%`}</span> : <BandChip band={c.band} />}
@@ -334,7 +334,7 @@ function Officers({ data }: { data: UnitData }) {
       {all.map((h, i) => (
         <div key={i} className="flex items-center gap-3 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <Link to={`/officers/${h.user._id}`} className="block truncate font-medium hover:text-brand-700 hover:underline">{h.user.name}{h.user.bps && <span className="ml-1.5 text-xs text-slate-400">BPS-{h.user.bps}</span>}</Link>
+            <Link to={`/officers/${h.user._id}`} className="block truncate font-bold hover:text-brand-700 hover:underline">{h.user.name}{h.user.bps && <span className="ml-1.5 text-xs text-slate-400">BPS-{h.user.bps}</span>}</Link>
             <div className="truncate text-xs text-slate-500">{h.postLabel} · {unitName(h.unitId)}</div>
           </div>
           {h.chargeType !== 'regular' && <Badge>{h.chargeType === 'additional' ? 'Addl. charge' : 'Look after'}</Badge>}
