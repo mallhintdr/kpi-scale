@@ -256,23 +256,31 @@ export async function leagueView(bp: BP, unit: any, post: string, fy: string, mo
 
   const [facts, resolve] = await Promise.all([loadFacts(unit._id, fy, bp), configResolver(bp)]);
   const subtree = [...facts.units.keys()];
-  const rows = await Charge.find({ post, unitId: { $in: subtree }, ...activeFilter() }).lean();
+  // Posts ranked together (e.g. ADC Revenue with DRC, DC with MD) share one league
+  post = bp.leagueOf(post);
+  const group = bp.leaguePosts(post);
+  const rows = await Charge.find({ post: { $in: group }, unitId: { $in: subtree }, ...activeFilter() }).lean();
+  // Keyed by officer and post: someone holding two ranked posts is listed under each
   const byUser = new Map<string, OfficerCharge[]>();
   for (const r of rows) {
     const anc = facts.units.get(String(r.unitId))?.anc ?? [];
-    const list = byUser.get(String(r.userId)) ?? [];
+    const k = `${r.userId}|${r.post}`;
+    const list = byUser.get(k) ?? [];
     list.push({ userId: String(r.userId), post: r.post, unitId: String(r.unitId), anc });
-    byUser.set(String(r.userId), list);
+    byUser.set(k, list);
   }
-  const users = new Map((await User.find({ _id: { $in: [...byUser.keys()] } }).select('name designation bps phone').lean()).map((u) => [String(u._id), u]));
+  const users = new Map((await User.find({ _id: { $in: [...new Set(rows.map((r) => String(r.userId)))] } }).select('name designation bps phone').lean()).map((u) => [String(u._id), u]));
   const unitName = (id: string) => facts.units.get(id)?.name;
   const typeOf = (id: string) => facts.units.get(id)?.type ?? '';
   const chargeType = new Map(rows.map((r) => [`${r.userId}|${r.unitId}`, r.chargeType]));
-  const isHolderPost = bp.holderPosts.has(post);
-  const oversight = bp.post.get(post)?.oversightAt ?? [];
+
   // One row per charge: an officer with an additional charge is listed (and scored) once per unit held.
   const items = [...byUser.entries()]
-    .flatMap(([uid, charges]) => {
+    .flatMap(([k, charges]) => {
+      const [uid, own_post] = k.split('|');
+      const isHolderPost = bp.holderPosts.has(own_post);
+      const oversight = bp.post.get(own_post)?.oversightAt ?? [];
+      const rowPost = { post: own_post, postLabel: bp.post.get(own_post)?.label ?? own_post };
       // A supervisory (oversight-level) charge is not a row of its own when the officer also holds units directly.
       const own = isHolderPost && charges.some((c) => !oversight.includes(typeOf(c.unitId))) ? charges.filter((c) => !oversight.includes(typeOf(c.unitId))) : charges;
       if (mode === 'aggregate') {
@@ -286,7 +294,8 @@ export async function leagueView(bp: BP, unit: any, post: string, fy: string, mo
           chargeCount: own.length,
           areas: areasOf(facts, first.unitId),
           context: facts.units.get(first.unitId)?.anc.slice(1, -1).map((a) => unitName(String(a))).filter(Boolean).slice(-2).join(' › '),
-          ...officerScore(bp, facts, resolve, own, post, true),
+          ...rowPost,
+          ...officerScore(bp, facts, resolve, own, own_post, true),
         }];
       }
       return own.map((c, i) => {
@@ -302,14 +311,16 @@ export async function leagueView(bp: BP, unit: any, post: string, fy: string, mo
           areas,
           context,
           // Per-holder rows belong to the person, not a unit: counted on their first row only
-          ...officerScore(bp, facts, resolve, [c], post, i === 0),
+          ...rowPost,
+          ...officerScore(bp, facts, resolve, [c], own_post, i === 0),
         };
       });
     })
     .filter((x) => x.user)
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
     .map((x, i) => ({ ...x, rank: x.score == null ? null : i + 1 }));
-  return { fy, unit: { _id: unit._id, name: unit.name, type: unit.type }, post, postLabel: bp.postLabel(post), items };
+  const labels = group.map((p) => bp.postLabel(p));
+  return { fy, unit: { _id: unit._id, name: unit.name, type: unit.type }, post, postLabel: labels.join(' / '), posts: group, items };
 }
 
 /* My own officer score(s), one per post held */

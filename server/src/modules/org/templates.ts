@@ -49,9 +49,9 @@ export const revenueDepartment: Blueprint = {
     { key: 'adc_rev', label: 'ADC (Revenue)', levels: ['district'], single: true, scored: true, profile: 'district', oversightAt: [], caps: ['assign_targets', 'compare'] },
     { key: 'ac', label: 'Assistant Commissioner', levels: ['tehsil'], single: true, scored: true, profile: 'tehsil', oversightAt: [], caps: ['assign_targets'] },
     // Cholistan Development Authority: a district-level unit of the division with its own officers
-    { key: 'md_cda', label: 'Managing Director (CDA)', levels: ['district'], single: true, scored: true, profile: 'district', oversightAt: [], caps: ['assign_targets', 'compare'] },
-    { key: 'drc', label: 'Director Revenue & Colonies (DRC)', levels: ['district'], single: true, scored: true, profile: 'district', oversightAt: [], caps: ['assign_targets', 'compare'] },
-    { key: 'co', label: 'Colonization Officer (CO)', levels: ['tehsil'], single: true, scored: true, profile: 'tehsil', oversightAt: [], caps: ['assign_targets'] },
+    { key: 'md_cda', label: 'Managing Director (CDA)', levels: ['district'], single: true, scored: true, profile: 'district', oversightAt: [], caps: ['assign_targets', 'compare'], rankWith: 'dc' },
+    { key: 'drc', label: 'Director Revenue & Colonies (DRC)', levels: ['district'], single: true, scored: true, profile: 'district', oversightAt: [], caps: ['assign_targets', 'compare'], rankWith: 'adc_rev' },
+    { key: 'co', label: 'Colonization Officer (CO)', levels: ['tehsil'], single: true, scored: true, profile: 'tehsil', oversightAt: [], caps: ['assign_targets'], rankWith: 'ac' },
     { key: 'tehsildar', label: 'Tehsildar', levels: ['tehsil', 'qanungoi'], single: true, exclusiveWith: ['naib_tehsildar'], scored: true, profile: 'ro', widenTo: 'tehsil', oversightAt: ['tehsil'], caps: ['assign_targets', 'state_land_approve'] },
     { key: 'naib_tehsildar', label: 'Naib Tehsildar', levels: ['qanungoi'], single: true, exclusiveWith: ['tehsildar'], scored: true, profile: 'ro', widenTo: 'tehsil', oversightAt: [], caps: ['assign_targets', 'state_land_approve'] },
     { key: 'girdawar', label: 'Girdawar', levels: ['qanungoi'], single: false, scored: true, profile: 'girdawar', oversightAt: [], caps: ['assign_targets', 'state_land_verify'] },

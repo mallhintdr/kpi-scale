@@ -48,6 +48,8 @@ export const postSchema = z.object({
   /** Levels at which holding this post is supervisory only and is not counted as the holder's own area. */
   oversightAt: z.array(key).default([]),
   caps: z.array(z.enum(CAPS)).default([]),
+  /** Ranked in the league of this post (e.g. DRC with ADC Revenue, MD with DC): one table, one ranking. */
+  rankWith: key.optional(),
 });
 
 export const blockSchema = z.object({ key, label, kind: z.enum(BLOCK_KINDS) });
@@ -265,6 +267,10 @@ export interface BP {
   holderPosts: Set<string>;
   dataPosts: Set<string>;
   postsWithCap(cap: Cap): string[];
+  /** The post whose league this post is ranked in (itself unless rankWith is set). */
+  leagueOf(post: string): string;
+  /** All posts ranked together in a league: the post and those ranked with it. */
+  leaguePosts(post: string): string[];
   bands: { key: string; label: string; min: number }[];
   band(score: number | null): string;
   fy: FyHelpers;
@@ -317,6 +323,11 @@ export function compile(raw: Blueprint, version: number): BP {
     holderPosts: new Set(active.filter((m) => m.perHolder).flatMap((m) => m.holderPosts)),
     dataPosts: new Set(raw.posts.filter((p) => !p.scored).map((p) => p.key)),
     postsWithCap: (cap) => raw.posts.filter((p) => p.caps.includes(cap)).map((p) => p.key),
+    leagueOf: (post) => raw.posts.find((p) => p.key === post)?.rankWith ?? post,
+    leaguePosts: (post) => {
+      const base = raw.posts.find((p) => p.key === post)?.rankWith ?? post;
+      return [base, ...raw.posts.filter((p) => p.rankWith === base && p.key !== base).map((p) => p.key)];
+    },
     bands,
     band: (s) => (s == null ? 'n/a' : (bands.find((b) => s >= b.min)?.key ?? bands[bands.length - 1].key)),
     fy: fyHelpers(raw.calendar.fyStartMonth),

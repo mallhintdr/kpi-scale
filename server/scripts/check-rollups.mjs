@@ -55,7 +55,7 @@ const weeks = (await get(`/rev/stats?unitId=${div}&period=w&fy=${fy}`)).rows;
 const fort = (await get(`/rev/stats?unitId=${div}&period=f&fy=${fy}`)).rows;
 check(weeks.length > 0 && fort.length > 0, `${weeks.length} weeks and ${fort.length} fifteen-day periods so far this year`);
 const kids = await get(`/rev/stats/children?unitId=${div}&period=m&key=${months[0].key}&fy=${fy}`);
-check(kids.items.length === 3, `districts ranked for ${kids.label}`);
+check(kids.items.length === 4, `4 district-level units (3 districts + CDA) ranked for ${kids.label}`);
 
 // Speed: series reads
 const time = async (p) => { const s = performance.now(); await get(p); return Math.round(performance.now() - s); };

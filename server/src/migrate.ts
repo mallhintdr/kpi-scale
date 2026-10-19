@@ -50,6 +50,7 @@ async function main() {
           // Posts added to the template later (e.g. the CDA officers) are added in the same place
           if (!live) { doc.posts.splice(Math.min(i, doc.posts.length), 0, structuredClone(tp)); changed = true; continue; }
           for (const cap of tp.caps ?? []) if (!(live.caps ?? []).includes(cap)) { live.caps = [...(live.caps ?? []), cap]; changed = true; }
+          if (tp.rankWith && !live.rankWith) { live.rankWith = tp.rankWith; changed = true; }
         }
         if (changed) {
           const r = await saveBlueprint(String(t._id), doc, { note: 'Added new capabilities from the template', skipUsageCheck: true });

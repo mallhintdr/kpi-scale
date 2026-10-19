@@ -21,7 +21,7 @@ export interface HeadDef {
 export interface LevelDef { key: string; label: string; plural?: string; profile?: string }
 export interface PostDef {
   key: string; label: string; levels: string[]; single: boolean; scored: boolean; profile?: string; widenTo?: string;
-  oversightAt: string[]; exclusiveWith: string[]; caps: string[];
+  oversightAt: string[]; exclusiveWith: string[]; caps: string[]; rankWith?: string;
 }
 export interface BlockDef { key: string; label: string; kind: 'target' | 'arrears' | 'flow' | 'register' | 'tasks' }
 export interface RegisterDef { key: string; label: string; block: string; levels: string[]; enterPosts: string[]; categories: string[]; amountLabel: string }
@@ -108,7 +108,10 @@ export const compareLevelsUnder = (k: string) => levels().filter((_l, i) => i > 
 export const compareAreaLevels = () => levels().filter((_l, i) => i < deepestMetricLevel() - 1).map((l) => l.key);
 /** Scored posts that sit below a unit of level `k` (for leagues and staff lists). */
 export const postsUnder = (k: string) =>
-  (org?.posts ?? []).filter((p) => p.scored && p.levels.some((l) => levelIndex(l) > levelIndex(k))).map((p) => ({ code: p.key, label: postPlural(p.key) }));
+  (org?.posts ?? []).filter((p) => p.scored && !p.rankWith && p.levels.some((l) => levelIndex(l) > levelIndex(k))).map((p) => {
+    const peers = (org?.posts ?? []).filter((x) => x.rankWith === p.key);
+    return { code: p.key, label: [postPlural(p.key), ...peers.map((x) => postPlural(x.key))].join(' / ') };
+  });
 /** Hierarchy columns shown in lists (e.g. District, Tehsil): levels below the top, above the KPI units' parents. */
 export const groupLevels = () => levels().slice(1, Math.max(2, deepestMetricLevel() - 1)).map((l) => l.key);
 /** Scored posts with holders at this level (a unit there with none is "vacant"). */
