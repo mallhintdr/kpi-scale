@@ -10,7 +10,7 @@ You end up with:
 The dashboard will be at **https://kpi-bwp.naqsha-zameen.pk**.
 
 **Your other apps are not touched.**
-- The dashboard lives in `/opt/kpi`.
+- The dashboard lives in `/var/www/kpi-bwp`.
 - It uses its own database name, its own Redis database number and its own PM2 processes (`kpi-api`, `kpi-worker`).
 - It runs on the Node already installed (v20.18), so nothing changes for your other apps.
 - Its API listens on a free port (4100), on `127.0.0.1` only.
@@ -63,9 +63,10 @@ free -h && df -h /
 
 **On the VPS**:
 ```bash
-cd /opt
-git clone https://github.com/mallhintdr/kpi-scale.git kpi
-cd /opt/kpi
+mkdir -p /var/www
+cd /var/www
+git clone https://github.com/mallhintdr/kpi-scale.git kpi-bwp
+cd /var/www/kpi-bwp
 ```
 If asked, enter your GitHub username, then the access token as the password.
 
@@ -87,7 +88,7 @@ If `mongosh` asks for a password, your MongoDB has authentication on. See *Mongo
 
 ### 3.2 App settings
 ```bash
-cd /opt/kpi/server
+cd /var/www/kpi-bwp/server
 cp .env.example .env
 openssl rand -hex 48     # copy: first secret
 openssl rand -hex 48     # copy: second secret
@@ -120,10 +121,10 @@ What some of these settings do:
 
 ### 3.3 Build
 ```bash
-cd /opt/kpi/server && npm ci && npm run build
-cd /opt/kpi/web && npm ci && npm run build
+cd /var/www/kpi-bwp/server && npm ci && npm run build
+cd /var/www/kpi-bwp/web && npm ci && npm run build
 ```
-The server build creates `/opt/kpi/server/dist`, and the website build creates `/opt/kpi/web/dist`. Together they take 2–5 minutes.
+The server build creates `/var/www/kpi-bwp/server/dist`, and the website build creates `/var/www/kpi-bwp/web/dist`. Together they take 2–5 minutes.
 
 ---
 
@@ -133,12 +134,12 @@ The server build creates `/opt/kpi/server/dist`, and the website build creates `
 ```powershell
 cd "D:\KPI Dashboard"
 & "C:\Program Files\MongoDB\Tools\100\bin\mongodump.exe" --uri mongodb://127.0.0.1:27017/kpi_dashboard --archive=deploy-backup\kpi.gz --gzip
-scp deploy-backup\kpi.gz root@<VPS-IP>:/opt/kpi/kpi.gz
+scp deploy-backup\kpi.gz root@<VPS-IP>:/var/www/kpi-bwp/kpi.gz
 ```
 
 **On the VPS.** Restore into the new `kpi_dashboard` database only:
 ```bash
-cd /opt/kpi
+cd /var/www/kpi-bwp
 mongorestore --uri mongodb://127.0.0.1:27017 --archive=kpi.gz --gzip --nsInclude='kpi_dashboard.*'
 ```
 It should end with `… documents restored successfully`.
@@ -147,7 +148,7 @@ It should end with `… documents restored successfully`.
 
 Then update the database indexes:
 ```bash
-cd /opt/kpi/server && node dist/migrate.js
+cd /var/www/kpi-bwp/server && node dist/migrate.js
 ```
 
 ---
@@ -156,7 +157,7 @@ cd /opt/kpi/server && node dist/migrate.js
 
 **On the VPS**:
 ```bash
-cd /opt/kpi
+cd /var/www/kpi-bwp
 pm2 start ecosystem.config.cjs           # runs with the server's own node
 pm2 save
 pm2 ls                                   # kpi-api and kpi-worker: "online"
@@ -177,7 +178,7 @@ server {
     listen 80;
     server_name kpi-bwp.naqsha-zameen.pk;
 
-    root /opt/kpi/web/dist;
+    root /var/www/kpi-bwp/web/dist;
     client_max_body_size 20m;              # litigation documents and Excel imports
 
     # API (Node under PM2)
@@ -198,7 +199,7 @@ server {
 }
 EOF
 ln -s /etc/nginx/sites-available/kpi /etc/nginx/sites-enabled/kpi
-chmod o+x /opt /opt/kpi /opt/kpi/web    # nginx must be able to read the website folder
+chmod o+x /var/www /var/www/kpi-bwp /var/www/kpi-bwp/web    # nginx must be able to read the website folder
 nginx -t && systemctl reload nginx
 ```
 `nginx -t` must report `syntax is ok` and `test is successful`. If it doesn't, nothing is reloaded and your other sites keep running.
@@ -263,7 +264,7 @@ pm2 restart kpi-api kpi-worker
 
 **On the VPS**:
 ```bash
-cd /opt/kpi && git pull
+cd /var/www/kpi-bwp && git pull
 cd server && npm ci && npm run build && node dist/migrate.js
 cd ../web && npm ci && npm run build
 pm2 restart kpi-api kpi-worker
@@ -281,7 +282,7 @@ The data is kept. `migrate.js` only updates indexes.
 | Worker (reminders, jobs) | `pm2 logs kpi-worker --lines 100` |
 | Restart the dashboard | `pm2 restart kpi-api kpi-worker` |
 | Stop the dashboard only | `pm2 stop kpi-api kpi-worker` |
-| Turn the guest link off | Clear `GUEST_EMAIL=` in `/opt/kpi/server/.env`, then `pm2 restart kpi-api` |
+| Turn the guest link off | Clear `GUEST_EMAIL=` in `/var/www/kpi-bwp/server/.env`, then `pm2 restart kpi-api` |
 | Nginx errors | `tail -50 /var/log/nginx/error.log` |
 
 ---
@@ -292,9 +293,9 @@ The data is kept. `migrate.js` only updates indexes.
 |---|---|
 | Signed out on every reload | The site is opened over `http://`. Use `https://` (step 6). |
 | "Invalid email or password" for every account | The database wasn't restored into `kpi_dashboard`. Repeat step 4, then `pm2 restart kpi-api`. |
-| Guest link says "Guest account not found" | `GUEST_EMAIL` doesn't match an active account. Fix `/opt/kpi/server/.env`, then `pm2 restart kpi-api`. |
+| Guest link says "Guest account not found" | `GUEST_EMAIL` doesn't match an active account. Fix `/var/www/kpi-bwp/server/.env`, then `pm2 restart kpi-api`. |
 | `502 Bad Gateway` | The API isn't running, or nginx points to the wrong port. Check `pm2 logs kpi-api` and that `PORT` in `.env` matches `proxy_pass`. |
-| `500` or a blank page, with nginx error "Permission denied" | Run `chmod o+x /opt /opt/kpi /opt/kpi/web`, then `chmod -R o+r /opt/kpi/web/dist`. |
+| `500` or a blank page, with nginx error "Permission denied" | Run `chmod o+x /var/www /var/www/kpi-bwp /var/www/kpi-bwp/web`, then `chmod -R o+r /var/www/kpi-bwp/web/dist`. |
 | `413 Request Entity Too Large` on upload | `client_max_body_size 20m;` is missing from `/etc/nginx/sites-available/kpi`. |
 | The domain opens one of your other apps | `server_name` doesn't exactly match the domain, or the `sites-enabled/kpi` link is missing. Fix it, then `nginx -t && systemctl reload nginx`. |
 | `kpi-api` keeps restarting with `SyntaxError` / "Unexpected token" | The Node in use is older than v20.18 (`node -v`). Send me the output of `pm2 logs kpi-api --lines 30`. |
