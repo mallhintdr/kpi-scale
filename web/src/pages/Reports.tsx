@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/AppShell';
 import { FyPicker, UnitField } from '../components/rev';
-import { Button, Card, Empty, ErrorState, Field, Loading, Select } from '../components/ui';
+import { Button, Card, Empty, ErrorState, Field, Loading, Segmented, Select } from '../components/ui';
 import { get } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { achievement, useViewMode } from '../lib/mode';
@@ -95,11 +95,13 @@ export default function Reports() {
   const [measures, setMeasures] = useState<Set<Measure>>(new Set(['target', 'achieved', 'balance', 'pct']));
   const [details, setDetails] = useState<Set<Detail>>(new Set(['rank', 'overall']));
   const [sortBy, setSortBy] = useState('overall');
-  const [generated, setGenerated] = useState<{ unitId: string; post: Post; fy: string } | null>(null);
+  // unit: one row per unit held (an officer with 3 qanungois = 3 rows); aggregate: one combined row per officer
+  const [rowMode, setRowMode] = useState<'unit' | 'aggregate'>('unit');
+  const [generated, setGenerated] = useState<{ unitId: string; post: Post; fy: string; mode: 'unit' | 'aggregate' } | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['rev', 'league', generated?.unitId, generated?.post, generated?.fy],
-    queryFn: () => get<{ items: Row[]; postLabel: string }>(`/rev/league?unitId=${generated!.unitId}&post=${generated!.post}&fy=${generated!.fy}`),
+    queryKey: ['rev', 'league', generated?.unitId, generated?.post, generated?.fy, generated?.mode],
+    queryFn: () => get<{ items: Row[]; postLabel: string }>(`/rev/league?unitId=${generated!.unitId}&post=${generated!.post}&fy=${generated!.fy}&mode=${generated!.mode}`),
     enabled: !!generated,
   });
 
@@ -145,7 +147,7 @@ export default function Reports() {
   const exportXlsx = () => exportTableXlsx(tableRef.current, {
     filename: `report-${data?.postLabel ?? post}-${unit?.name}-${fy}`, sheet: data?.postLabel ?? 'Report', freezeCols: 2 + groupCols.length,
     title: `${data?.postLabel} report · ${unit?.name} · FY ${generated?.fy ?? fy}`,
-    subtitle: `Generated ${new Date().toLocaleString()} · ${perf ? 'Performance mode' : 'KPI evaluation mode'}${anyMoney ? ` · amounts ${MILLIONS}` : ''}`,
+    subtitle: `Generated ${new Date().toLocaleString()} · ${generated?.mode === 'aggregate' ? 'Aggregated per officer' : 'Unit-wise'} · ${perf ? 'Performance mode' : 'KPI evaluation mode'}${anyMoney ? ` · amounts ${MILLIONS}` : ''}`,
   });
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -179,7 +181,7 @@ export default function Reports() {
         </div>
       </div>
 
-      <Card className="mt-3 grid gap-3 p-4 print:hidden md:grid-cols-[1fr_1fr_1fr_auto] md:items-end">
+      <Card className="mt-3 grid gap-3 p-4 print:hidden md:grid-cols-[1fr_1fr_1fr_auto_auto] md:items-end">
         <Field label="Area">{() => <UnitField value={unit} onChange={setUnit} accept={parentLevels()} />}</Field>
         <Field label="Employees">{(id) => <Select id={id} value={post} onChange={(e) => setPost(e.target.value as Post)}>{options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}</Select>}</Field>
         <Field label="Sort by">
@@ -191,7 +193,14 @@ export default function Reports() {
             </Select>
           )}
         </Field>
-        <Button disabled={!canGenerate} onClick={() => setGenerated({ unitId: unit!._id, post, fy })}>
+        <Field label="Rows">
+          {() => (
+            <div title="Unit-wise: an officer holding several units gets one row per unit. Aggregated: one row per officer, all units combined.">
+              <Segmented value={rowMode} onChange={setRowMode} options={[{ value: 'unit', label: 'Unit-wise' }, { value: 'aggregate', label: 'Aggregated' }]} />
+            </div>
+          )}
+        </Field>
+        <Button disabled={!canGenerate} onClick={() => setGenerated({ unitId: unit!._id, post, fy, mode: rowMode })}>
           <FileSpreadsheet className="size-4" />Generate
         </Button>
       </Card>
@@ -218,7 +227,7 @@ export default function Reports() {
           <div className="hidden print:block print:mb-3">
             <div className="text-xs font-bold uppercase tracking-wide">{[session?.tenant.branding?.tagline, session?.tenant.name].filter(Boolean).join(' · ')}</div>
             <div className="text-lg font-bold">{data?.postLabel} report · {unit?.name} · FY {generated.fy}</div>
-            <div className="text-xs">Generated {new Date().toLocaleString()} · {perf ? 'Performance mode' : 'KPI evaluation mode'}{anyMoney && ` · amounts ${MILLIONS}`}</div>
+            <div className="text-xs">Generated {new Date().toLocaleString()} · {generated.mode === 'aggregate' ? 'Aggregated per officer' : 'Unit-wise'} · {perf ? 'Performance mode' : 'KPI evaluation mode'}{anyMoney && ` · amounts ${MILLIONS}`}</div>
           </div>
 
           <Card className="overflow-hidden print:rounded-none print:shadow-none print:ring-0">

@@ -238,17 +238,21 @@ const areasOf = (facts: FactSet, unitId: string) => {
 };
 
 /* League table of officers of one post within a unit */
-router.get('/league', validate({ query: fyQuery.extend({ unitId: objectId, post: z.string().max(40) }) }), async (req, res) => {
+router.get('/league', validate({ query: fyQuery.extend({ unitId: objectId, post: z.string().max(40), mode: z.enum(['unit', 'aggregate']).default('unit') }) }), async (req, res) => {
   const bp = bpOf(req);
-  const { unitId, post } = q<{ unitId: string; post: string }>(req);
+  const { unitId, post, mode } = q<{ unitId: string; post: string; mode: 'unit' | 'aggregate' }>(req);
   if (!bp.post.has(post)) throw badRequest('Unknown post');
   const fy = resolveFy(bp, q<any>(req).fy);
   const unit = await assertCanRead(req.user!, unitId);
   if (bp.dataPosts.has(post)) throw badRequest(`${bp.postLabel(post)} is not scored`);
-  res.json(await view(req, bp, `league:${unit._id}:${post}:${fy}`, () => leagueView(bp, unit, post, fy)));
+  res.json(await view(req, bp, `league:${unit._id}:${post}:${fy}:${mode}`, () => leagueView(bp, unit, post, fy, mode)));
 });
 
-export async function leagueView(bp: BP, unit: any, post: string, fy: string) {
+/**
+ * mode 'unit' (default): one row per charge — an officer holding 3 qanungois is listed and scored 3 times.
+ * mode 'aggregate': one row per officer — all the units held are scored together, listed in one column.
+ */
+export async function leagueView(bp: BP, unit: any, post: string, fy: string, mode: 'unit' | 'aggregate' = 'unit') {
 
   const [facts, resolve] = await Promise.all([loadFacts(unit._id, fy, bp), configResolver(bp)]);
   const subtree = [...facts.units.keys()];
@@ -271,6 +275,20 @@ export async function leagueView(bp: BP, unit: any, post: string, fy: string) {
     .flatMap(([uid, charges]) => {
       // A supervisory (oversight-level) charge is not a row of its own when the officer also holds units directly.
       const own = isHolderPost && charges.some((c) => !oversight.includes(typeOf(c.unitId))) ? charges.filter((c) => !oversight.includes(typeOf(c.unitId))) : charges;
+      if (mode === 'aggregate') {
+        const first = own[0];
+        const types = new Set(own.map((c) => chargeType.get(`${uid}|${c.unitId}`) ?? 'regular'));
+        return [{
+          user: users.get(uid),
+          unitId: first.unitId,
+          charges: own.map((c) => unitName(c.unitId)).filter(Boolean),
+          chargeType: types.size === 1 ? [...types][0] : 'regular',
+          chargeCount: own.length,
+          areas: areasOf(facts, first.unitId),
+          context: facts.units.get(first.unitId)?.anc.slice(1, -1).map((a) => unitName(String(a))).filter(Boolean).slice(-2).join(' › '),
+          ...officerScore(bp, facts, resolve, own, post, true),
+        }];
+      }
       return own.map((c, i) => {
         const u = facts.units.get(c.unitId);
         const context = u?.anc.slice(1, -1).map((a) => unitName(String(a))).filter(Boolean).slice(-2).join(' › ');
