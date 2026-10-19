@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { FileSpreadsheet, Printer, Sheet as SheetIcon } from 'lucide-react';
+import { FileSpreadsheet, Maximize2, Minimize2, Printer, Sheet as SheetIcon } from 'lucide-react';
 import { exportTableXlsx } from '../lib/xlsx';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
@@ -144,6 +144,16 @@ export default function Reports() {
   const anyMoney = chosenHeads.some((h) => h.money);
 
   const tableRef = useRef<HTMLTableElement>(null);
+  // Full screen: the report fills the window; Esc or "Exit Full Screen" returns to the normal view
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setFull(false);
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [full]);
   const exportXlsx = () => exportTableXlsx(tableRef.current, {
     filename: `report-${data?.postLabel ?? post}-${unit?.name}-${fy}`, sheet: data?.postLabel ?? 'Report', freezeCols: 2 + groupCols.length,
     title: `${data?.postLabel} report · ${unit?.name} · FY ${generated?.fy ?? fy}`,
@@ -210,13 +220,16 @@ export default function Reports() {
       ) : isLoading ? <div className="mt-3"><Loading /></div> : error ? <ErrorState error={error} retry={refetch} /> : !rows.length ? (
         <Card className="mt-3"><Empty title="No employees found" /></Card>
       ) : (
-        <div className="mt-3">
+        <div className={clsx('mt-3', full && 'fixed inset-0 z-50 !mt-0 flex flex-col bg-slate-50 p-3 dark:bg-slate-950 print:static print:block print:bg-white print:p-0')}>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 print:hidden">
             <span className="text-sm text-slate-600 dark:text-slate-300">
               <b>{rows.length}</b> {data?.postLabel} · {unit?.name} · FY {generated.fy}
               {anyMoney && <span className="ml-1 text-xs text-slate-400">· amounts {MILLIONS}</span>}
             </span>
             <div className="flex gap-2">
+              {full
+                ? <Button size="sm" onClick={() => setFull(false)} title="Back to the normal view (Esc)"><Minimize2 className="size-4" />Exit Full Screen</Button>
+                : <Button variant="secondary" size="sm" onClick={() => setFull(true)}><Maximize2 className="size-4" />Full Screen</Button>}
               <Button variant="secondary" size="sm" onClick={() => window.print()}><Printer className="size-4" />Print</Button>
               <Button variant="secondary" size="sm" onClick={exportXlsx}><SheetIcon className="size-4" />Excel</Button>
               <Button variant="ghost" size="sm" onClick={exportCsv}>CSV</Button>
@@ -230,8 +243,8 @@ export default function Reports() {
             <div className="text-xs">Generated {new Date().toLocaleString()} · {generated.mode === 'aggregate' ? 'Aggregated per officer' : 'Unit-wise'} · {perf ? 'Performance mode' : 'KPI evaluation mode'}{anyMoney && ` · amounts ${MILLIONS}`}</div>
           </div>
 
-          <Card className="overflow-hidden print:rounded-none print:shadow-none print:ring-0">
-            <div className="max-h-[70vh] overflow-auto print:max-h-none print:overflow-visible">
+          <Card className={clsx('overflow-hidden print:rounded-none print:shadow-none print:ring-0', full && 'flex min-h-0 flex-1 flex-col')}>
+            <div className={clsx('overflow-auto print:max-h-none print:overflow-visible', full ? 'min-h-0 flex-1' : 'max-h-[70vh]')}>
               <table ref={tableRef} className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
                 <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white print:static">
                   <tr>
