@@ -761,6 +761,9 @@ const stateLandSchema = new Schema(
     record: { status: { type: String, required: true }, mutationNos: String, demarcation: { type: String, enum: ['yes', 'no', null] }, demarcationDate: Date, demarcationRef: String, computerised: { type: String, enum: ['yes', 'no', 'unchecked', null] }, discrepancy: { type: String, maxlength: 1000 } },
     lastVisit: Date,
     note: { type: String, maxlength: 2000 },
+    /** Note on litigation / encroachment, and encumbrance (mortgage, stay order, lease …) as entered in the table. */
+    issueNote: { type: String, maxlength: 1000 },
+    encumbrance: { type: String, maxlength: 500 },
     // Two-step verification: Girdawar verifies, Tehsildar / Naib Tehsildar approves
     status: { type: String, enum: ['entered', 'verified', 'approved', 'returned'], default: 'entered' },
     verifiedBy: ref('User'),

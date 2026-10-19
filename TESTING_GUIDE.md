@@ -41,7 +41,7 @@ Run these from `server`, with the API running:
 | `node scripts/check-rollups.mjs` | 10 checks passed |
 | `node scripts/e2e-whatsapp.mjs` | 17 checks passed |
 | `node scripts/e2e-litigation.mjs` | 36 checks passed |
-| `node scripts/e2e-stateland.mjs` | 39 checks passed |
+| `node scripts/e2e-stateland.mjs` | 44 checks passed |
 
 ### 0.4 Test accounts — one per role
 | Role | Email (`@bwp.test`) | Works on |
@@ -213,13 +213,13 @@ Use the **current month**; future months are refused.
 ### 12B. State Land Directory (khasra-wise)
 | ID | Steps | Expected | ☐ |
 |---|---|---|---|
-| S-01 | As `patwari1.hasilpur` › State Land › Enter State Land: mouza, khewat / khatauni, murabba 45 | The 25 killas of murabba 45 appear as a grid | ☐ |
-| S-02 | Tick killas 1, 2, 7 and "Select all"; then "+ Sub-killa" on killa 6 | Each ticked killa gets a row (8 kanal by default); killa 6 becomes 6/1 and 6/2, each with its own area; totals in K · M · Ft and acres | ☐ |
-| S-03 | "+ Add another murabba"; tick "Different khewat / khatauni" for it | The second murabba uses its own khewat / khatauni, the first keeps the common one | ☐ |
-| S-04 | Category, sub-type, department: try to type a name that is not in the list | Only listed names can be chosen ("ask the administrator") | ☐ |
-| S-05 | **Part A**: khana malkiyat, khana kasht (pick, or "Other" to type as written) and names; **Part B**: in possession of, names, nature at site (tick several) | Both parts are required; names already entered in the mouza are suggested | ☐ |
-| S-05a | Part B "Unauthorised person"; in the killa table set one killa to "Vacant" and "Tibba" | Encroached-area column per killa; that killa is saved vacant / tibba, the others encroached ("differs from record") | ☐ |
-| S-05b | Quick fill buttons; then "Same as last entry" after saving once | The common cases fill in one click; the previous entry's details come back | ☐ |
+| S-01 | As `patwari1.hasilpur` › State Land › Enter State Land: choose the mouza (tehsil shows) | Opens the entry table, one row per khasra | ☐ |
+| S-02 | Murabba 45, Killas `1-25` (or `1-5, 8`), Khewat, Khatauni › Add Rows | One row per killa, khasra column 45/1 … 45/25; khewat / khatauni filled | ☐ |
+| S-03 | Fill type of land, ownership, cultivation, physical position in row 1 › ⇣ on each column header; tick some rows first and ⇣ again | The column is copied to all rows, or only to the ticked rows | ☐ |
+| S-04 | "+ Sub" on a killa (switch the style to الف، ب، ج too); edit a sub-killa name | Killa splits into 45/3/1, 45/3/2 (or الف، ب); names editable | ☐ |
+| S-05 | Copy a block of rows from an Excel register and paste into the Khewat cell of a row | The rows fill across the columns in table order | ☐ |
+| S-05a | Set "Litigation / Encroachment" to Encroachment on one row, add a note and an encumbrance; Save | Saved; that khasra shows as encroached (differs from record) | ☐ |
+| S-05b | Repeat a killa and leave ownership blank on another row; Save | Good rows save; the two rows stay red with the reason | ☐ |
 | S-06 | Save; enter the same murabba again | Saved killas are greyed out; re-entering one is refused | ☐ |
 | S-07 | As the Girdawar tick several khasras in the directory › Verify; as the Tehsildar › Approve | Verified, then approved, in bulk; approving before verification is refused | ☐ |
 | S-08 | The Patwari edits an approved khasra; the Girdawar returns one with remarks | Edit sends it back for verification; returned shows the remarks | ☐ |

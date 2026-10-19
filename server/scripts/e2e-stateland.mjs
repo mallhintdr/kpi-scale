@@ -82,7 +82,7 @@ check(mixed.s === 201, 'one entry: killa 1 vacant tibba (as below), killa 2 encr
 made.push(...mixed.b.ids);
 const mx = (await call(adm, 'GET', `/state-land?unitId=${mouza}&search=992`)).b.items;
 check(mx.find((r) => r.khasraNo === '992/1').possession === 'vacant' && mx.find((r) => r.khasraNo === '992/2').possession === 'encroached' && mx.find((r) => r.khasraNo === '992/2').site.nature[0].startsWith('Structure'), 'per-killa possession and nature are kept');
-check((await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '991', killas: [{ killa: 1, area: { kanal: 8 } }] }], details: { ...details, site: { possessedBy: 'vacant', nature: [] } } })).s === 400, 'both parts are required (nature at site missing → refused)');
+check((await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '991', killas: [{ killa: 1, area: { kanal: 8 } }] }], details: { ...details, ownerRecord: '' } })).s === 400, 'ownership as per record is required');
 const lam = await call(p1, 'POST', '/state-land/batch', { unitId: mouza, murabbas: [{ murabba: '994', killas: [{ killa: 1, area: { kanal: 8 } }] }], details: { ...details, category: 'scheme', subType: 'Lamberdari scheme', kasht: { type: 'Allottee', names: ['Test Lamberdar'] }, site: { possessedBy: 'recorded', nature: ['Cultivated (crop)'] }, allotment: { scheme: 'Lamberdari scheme', allottee: 'Test Lamberdar', leaseTo: '2024-06-30' }, underLitigation: true } });
 check(lam.s === 201, 'land under the Lamberdari scheme');
 made.push(...lam.b.ids);
@@ -107,6 +107,23 @@ const x = await call(tsd, 'GET', '/state-land/export/xlsx');
 const wb = new ExcelJS.Workbook(); await wb.xlsx.load(x.b);
 const head = wb.worksheets[0].getRow(1).values;
 check(head.includes('Murabba / Mustateel') && head.includes('Killa') && head.includes('Sub-killa') && wb.worksheets[0].getCell(1, 1).fill?.fgColor?.argb === 'FF187A43', 'khasra-wise Excel with green headers');
+
+console.log('Entry table');
+const base = { khewat: '201', khatauni: '305', murabba: '990', area: { kanal: 8 }, landType: 'Tibba', ownerRecord: 'Sarkar Daulatmadar', cultivation: 'Banjar (no cultivator)', possessedBy: 'vacant' };
+const tbl = await call(p1, 'POST', '/state-land/rows', { unitId: mouza, rows: [
+  { ...base, killa: 1 }, { ...base, killa: 2, scheme: 'Lamberdari scheme', cultivation: 'Allottee', possessedBy: 'allottee' },
+  { ...base, killa: 3, subKilla: '1', area: { kanal: 4 }, issue: 'encroachment', possessor: 'Squatter Y', issueNote: 'Notice issued' },
+  { ...base, killa: 3, subKilla: '2', area: { kanal: 4 }, issue: 'litigation', issueNote: 'Civil suit pending', encumbrance: 'Stay order' },
+  { ...base, killa: 1 }, { ...base, killa: 4, ownerRecord: '' },
+] });
+check(tbl.s === 201 && tbl.b.created === 4 && tbl.b.errors.length === 2, 'entry table: 4 rows saved, 2 rows returned with their problems');
+check(tbl.b.errors.some((e) => e.row === 4 && /repeats/.test(e.message)) && tbl.b.errors.some((e) => e.row === 5 && /Ownership/.test(e.message)), 'a repeated killa and a missing ownership are reported per row');
+const t = (await call(adm, 'GET', `/state-land?unitId=${mouza}&search=990`)).b.items;
+made.push(...t.map((x) => x._id));
+check(t.find((x) => x.khasraNo === '990/3/1').possession === 'encroached' && t.find((x) => x.khasraNo === '990/2').category === 'scheme', 'encroachment and scheme columns are understood');
+const lt = (await call(adm, 'GET', `/state-land/${t.find((x) => x.khasraNo === '990/3/2')._id}`)).b.khasra;
+check(lt.underLitigation && lt.encumbrance === 'Stay order' && lt.issueNote === 'Civil suit pending', 'litigation note and encumbrance are kept');
+check((await call(p1, 'POST', '/state-land/rows', { unitId: mouza, rows: [{ ...base, killa: 2 }] })).b.errors[0]?.message.startsWith('Already in the directory'), 'a khasra already saved is refused');
 
 // Clean up
 await call(p1, 'POST', `/state-land/mouza/${mouza}`, { action: 'reopen' });

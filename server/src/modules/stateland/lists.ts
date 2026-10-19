@@ -75,3 +75,8 @@ export const NATURE = ['Tibba (sand dune)', 'Cultivated (crop)', 'Banjar / barre
 export const possessionFrom = (by?: string | null) =>
   ({ department: 'department', recorded: 'allottee', allottee: 'allottee', unauthorised: 'encroached', vacant: 'vacant' } as Record<string, string>)[by ?? ''] ?? 'mixed';
 export const POSSESSED_LABEL = new Map(POSSESSED_BY);
+
+/** Type of land as entered in the record / found on the ground (list, plus anything typed). */
+export const LAND_TYPES = ['Abad (cultivated)', 'Chahi', 'Nehri', 'Barani', 'Banjar qadeem', 'Banjar jadeed', 'Ghair mumkin', 'Ghair mumkin rasta', 'Ghair mumkin nehar / khal', 'Ghair mumkin qabristan', 'Tibba', 'Abadi deh'];
+/** Litigation / encroachment flag of a row in the entry table. */
+export const ISSUES: [string, string][] = [['none', 'None'], ['litigation', 'Litigation'], ['encroachment', 'Encroachment'], ['both', 'Litigation + encroachment']];

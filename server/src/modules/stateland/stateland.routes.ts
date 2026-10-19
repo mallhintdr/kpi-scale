@@ -27,7 +27,7 @@ import { ancestorAt, hasCap, scopeRoots } from '../revenue/access.js';
 import { codeOf, courtName } from '../litigation/litigation.routes.js';
 import { imagesToPdf, pdfPages } from '../litigation/pdf.js';
 import {
-  DOC_CATEGORIES, ENCROACHMENT_ACTION, ENCROACHMENT_NATURE, KASHT_TYPES, LAND_CLASS, NATURE, OWNERS, POSSESSED_BY, POSSESSED_LABEL, POSSESSION, POSSESSION_LABEL,
+  DOC_CATEGORIES, ENCROACHMENT_ACTION, ISSUES, LAND_TYPES, ENCROACHMENT_NATURE, KASHT_TYPES, LAND_CLASS, NATURE, OWNERS, POSSESSED_BY, POSSESSED_LABEL, POSSESSION, POSSESSION_LABEL,
   RECORD_LABEL, RECORD_STATUS, USES, labelIn, possessionFrom, slSettings, toAcres, type Category,
 } from './lists.js';
 
@@ -67,7 +67,8 @@ router.get('/meta', async (req, res) => {
   const bp = bpOf(req);
   const s = await slSettings(me.tenantId);
   res.json({
-    categories: s.categories, departments: s.departments, possession: POSSESSION, owners: OWNERS, kashtTypes: KASHT_TYPES, possessedBy: POSSESSED_BY, nature: NATURE, recordStatus: RECORD_STATUS, landClass: LAND_CLASS, uses: USES,
+    categories: s.categories, departments: s.departments, possession: POSSESSION, owners: OWNERS, kashtTypes: KASHT_TYPES, possessedBy: POSSESSED_BY, nature: NATURE, landTypes: LAND_TYPES, issues: ISSUES,
+    schemes: s.categories.find((c) => c.key === 'scheme')?.subTypes ?? [], recordStatus: RECORD_STATUS, landClass: LAND_CLASS, uses: USES,
     encroachmentNature: ENCROACHMENT_NATURE, encroachmentAction: ENCROACHMENT_ACTION, docCategories: DOC_CATEGORIES.map(([key, label]) => ({ key, label })),
     canEnter: await can(me, bp, 'state_land'), canVerify: await can(me, bp, 'state_land_verify'), canApprove: await can(me, bp, 'state_land_approve'), isAdmin: isAdmin(me),
   });
@@ -240,7 +241,7 @@ const details = z.object({
   ownerShare: str(40),
   kasht: z.object({ type: z.string().trim().min(1, 'Enter khana kasht').max(80), names: z.array(z.string().trim().min(1).max(200)).max(100).default([]) }),
   // Physical possession at site and the nature of the land
-  site: z.object({ possessedBy: z.string().trim().min(1, 'Enter who is in possession at site').max(80), names: z.array(z.string().trim().min(1).max(200)).max(100).default([]), nature: z.array(z.string().trim().min(1).max(80)).min(1, 'Enter the nature of the land at site').max(12) }),
+  site: z.object({ possessedBy: z.string().trim().min(1, 'Enter who is in possession at site').max(80), names: z.array(z.string().trim().min(1).max(200)).max(100).default([]), nature: z.array(z.string().trim().min(1).max(80)).max(12).default([]) }),
   acquisition: z.object({ department: str(), purpose: str(), awardNo: str(80), awardDate: date, compensation: z.enum(['yes', 'no', 'partly']).nullish(), compensationAmount: z.number().min(0).max(1e13).nullish(), mutationNo: str(80), mutationDate: date }).optional(),
   allotment: z.object({ scheme: str(120), allottee: str(), parentage: str(), orderNo: str(80), orderDate: date, authority: str(), leaseFrom: date, leaseTo: date, conditionsMet: z.enum(['yes', 'no', 'review']).nullish(), proprietary: z.enum(['granted', 'pending', 'na']).nullish(), mutationNo: str(80) }).optional(),
   encroachment: z.object({ encroachers: z.array(z.string().trim().min(1).max(200)).max(100).default([]), nature: str(80), since: z.number().int().min(1900).max(2100).nullish(), action: str(80), retrievedOn: date, retrievedArea: area.optional() }).optional(),
@@ -345,6 +346,90 @@ router.post('/batch', validate({ body: batchBody }), async (req, res) => {
   res.status(201).json({ created: created.length, ids: created.map((c) => c._id), acres: Math.round(docs.reduce((a, d) => a + d.acres, 0) * 10_000) / 10_000 });
 });
 
+/* ================================================================== *
+ *  Entry table: one row per khasra (as in the register), saved together
+ * ================================================================== */
+const tableRow = z.object({
+  khewat: str(60), khatauni: str(60),
+  murabba: z.string().trim().min(1, 'Murabba no. missing').max(40),
+  killa: killaNo,
+  subKilla: subNo,
+  area,
+  landType: z.string().trim().min(1, 'Type of land missing').max(80),
+  ownerRecord: z.string().trim().min(1, 'Ownership missing').max(200),
+  scheme: str(120),
+  cultivation: z.string().trim().min(1, 'Cultivation (khana kasht) missing').max(200),
+  possessedBy: z.string().trim().min(1, 'Physical position missing').max(80),
+  possessor: str(200),
+  issue: z.enum(['none', 'litigation', 'encroachment', 'both']).default('none'),
+  issueNote: str(1000), encumbrance: str(500), note: str(2000),
+});
+type TableRow = z.infer<typeof tableRow>;
+
+router.post('/rows', validate({ body: z.object({ unitId: objectId, rows: z.array(z.unknown()).min(1).max(1000) }) }), async (req, res) => {
+  const me = req.user!;
+  const bp = bpOf(req);
+  const { unitId, rows } = req.body as { unitId: string; rows: unknown[] };
+  const mouza = await Unit.findById(unitId).select('name type anc code').lean();
+  if (!mouza || mouza.type !== 'mouza') throw badRequest('Choose a mouza');
+  if (!(await can(me, bp, 'state_land', mouza as any))) throw forbidden('You cannot enter state land for this mouza');
+  const tehsilId = ancestorAt(bp, mouza as any, 'tehsil');
+  const tehsil = tehsilId ? await Unit.findById(tehsilId).select('name type code').lean() : null;
+  const prefix = `${tehsil ? await codeOf(tehsil as any, 'tehsil') : 'X'}-${await codeOf(mouza as any, 'mouza')}`;
+  const s = await slSettings(me.tenantId);
+  const schemeCat = s.categories.find((c) => c.key === 'scheme');
+
+  const errors: { row: number; message: string }[] = [];
+  const good: { i: number; r: TableRow }[] = [];
+  rows.forEach((raw, i) => {
+    const p = tableRow.safeParse(raw);
+    if (!p.success) return errors.push({ row: i, message: p.error.issues[0]?.message ?? 'Invalid row' });
+    if (!toAcres(p.data.area)) return errors.push({ row: i, message: 'Area missing' });
+    good.push({ i, r: p.data });
+  });
+  // Repeats within the table, and khasras already in the directory (a whole killa clashes with its sub-killas)
+  const key = (r: TableRow) => khasraLabel(r.murabba, r.killa, r.subKilla);
+  const seen = new Map<string, number>();
+  for (const g of [...good]) {
+    const k = key(g.r);
+    const whole = khasraLabel(g.r.murabba, g.r.killa);
+    const clash = [...seen.keys()].find((x) => x === k || (!g.r.subKilla && x.startsWith(`${whole}/`)) || (g.r.subKilla && x === whole));
+    if (clash) { errors.push({ row: g.i, message: `${k} repeats row ${(seen.get(clash) ?? 0) + 1}` }); good.splice(good.indexOf(g), 1); continue; }
+    seen.set(k, g.i);
+  }
+  const existing = await StateLand.find({ deleted: { $ne: true }, unitId: mouza._id, murabba: { $in: [...new Set(good.map((g) => g.r.murabba))] } }).select('murabba killa subKilla khasraNo').lean();
+  for (const g of [...good]) {
+    const e = existing.find((x) => x.murabba === g.r.murabba && x.killa === g.r.killa && (x.subKilla === g.r.subKilla || !x.subKilla || !g.r.subKilla));
+    if (e) { errors.push({ row: g.i, message: `Already in the directory as ${e.khasraNo}` }); good.splice(good.indexOf(g), 1); }
+  }
+
+  const now = new Date();
+  const docs = good.map(({ r }) => {
+    const encroached = r.issue === 'encroachment' || r.issue === 'both';
+    const by = encroached ? 'unauthorised' : r.possessedBy;
+    const scheme = r.scheme || undefined;
+    const d: any = {
+      unitId: mouza._id, anc: mouza.anc, tehsilId, murabba: r.murabba, killa: r.killa, subKilla: r.subKilla, khasraNo: key(r), holdingId: `${prefix}-${key(r)}`,
+      khewat: r.khewat, khatauni: r.khatauni, area: r.area,
+      category: scheme ? 'scheme' : 'provincial', subType: scheme && schemeCat?.subTypes.includes(scheme) ? scheme : undefined,
+      ...(scheme ? { allotment: { scheme } } : {}),
+      landClass: r.landType, ownerRecord: r.ownerRecord, kasht: { type: r.cultivation, names: [] },
+      site: { possessedBy: by, names: r.possessor ? [r.possessor] : [], nature: [r.landType] },
+      underLitigation: r.issue === 'litigation' || r.issue === 'both', issueNote: r.issueNote, encumbrance: r.encumbrance, note: r.note,
+      record: { status: 'mutated' },
+      status: 'entered', createdBy: me.id, updatedBy: me.id, history: [{ at: now, by: me.id, action: 'entered' }],
+    };
+    derive(d);
+    return d;
+  });
+  const created = docs.length ? await StateLand.insertMany(docs) : [];
+  if (created.length) await audit('stateland.create', 'Unit', mouza._id, { khasras: created.length });
+  res.status(created.length ? 201 : 400).json({
+    created: created.length, acres: Math.round(docs.reduce((a, d) => a + d.acres, 0) * 10_000) / 10_000,
+    savedRows: good.map((g) => g.i), errors: errors.sort((a, b) => a.row - b.row),
+  });
+});
+
 /* ---------- one khasra ---------- */
 router.get('/:id', validate({ params: z.object({ id: objectId }) }), async (req, res) => {
   const me = req.user!;
@@ -361,7 +446,7 @@ router.get('/:id', validate({ params: z.object({ id: objectId }) }), async (req,
   res.json({ khasra: h, cases, tehsil: tehsil?.name, docs, categoryLabel: labelIn(s.categories, h.category), siblings, ...(await rights(me, bp, h)) });
 });
 
-const patchBody = details.partial().extend({ khewat: str(60), khatauni: str(60), area: area.optional(), encroachedArea: area.optional() });
+const patchBody = details.partial().extend({ khewat: str(60), khatauni: str(60), area: area.optional(), encroachedArea: area.optional(), issueNote: str(1000), encumbrance: str(500) });
 router.patch('/:id', validate({ params: z.object({ id: objectId }), body: patchBody }), async (req, res) => {
   const me = req.user!;
   const bp = bpOf(req);
@@ -552,11 +637,11 @@ router.get('/export/xlsx', validate({ query: listQuery }), async (req, res) => {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('State Land');
   const d = (x?: Date | null) => (x ? new Date(x) : '');
-  ws.addRow(['S.No', 'Tehsil', 'Mouza', 'Murabba / Mustateel', 'Killa', 'Sub-killa', 'Khasra No.', 'Khewat', 'Khatauni', 'Kanal', 'Marla', 'Feet', 'Acres', 'Category', 'Sub-type', 'Khana Malkiyat (Ownership)', 'Share', 'Khana Kasht', 'Recorded Cultivator / Possessor', 'Physical Possession', 'Possessor at Site', 'Nature of Land at Site', 'Custodian Department', 'Land Class', 'Present Use', 'Possession Status', 'Encroached Acres', 'Encroachers', 'Action on Encroachment', 'Record Status', 'Mutation Nos.', 'Demarcation', 'Under Litigation', 'Litigation Cases', 'Allottee / Lessee', 'Scheme', 'Lease To', 'Award No.', 'Status', 'Last Site Visit']);
+  ws.addRow(['S.No', 'Tehsil', 'Mouza', 'Murabba / Mustateel', 'Killa', 'Sub-killa', 'Khasra No.', 'Khewat', 'Khatauni', 'Kanal', 'Marla', 'Feet', 'Acres', 'Category', 'Sub-type', 'Khana Malkiyat (Ownership)', 'Share', 'Khana Kasht', 'Recorded Cultivator / Possessor', 'Physical Possession', 'Possessor at Site', 'Nature of Land at Site', 'Custodian Department', 'Land Class', 'Present Use', 'Possession Status', 'Encroached Acres', 'Encroachers', 'Action on Encroachment', 'Litigation / Encroachment Note', 'Encumbrance', 'Record Status', 'Mutation Nos.', 'Demarcation', 'Under Litigation', 'Litigation Cases', 'Allottee / Lessee', 'Scheme', 'Lease To', 'Award No.', 'Status', 'Last Site Visit']);
   rows.forEach((h: any, i) => ws.addRow([
     i + 1, h.tehsilId?.name, h.unitId?.name, h.murabba, h.killa, h.subKilla || '', h.khasraNo, h.khewat, h.khatauni, h.area?.kanal, h.area?.marla, h.area?.feet, h.acres,
     labelIn(s.categories, h.category), h.subType, h.ownerRecord, h.ownerShare, h.kasht?.type, (h.kasht?.names ?? []).join('; '), POSSESSED_LABEL.get(h.site?.possessedBy) ?? h.site?.possessedBy, (h.site?.names ?? []).join('; '), (h.site?.nature ?? []).join(', '),
-    h.custodian, h.landClass, h.use, POSSESSION_LABEL.get(h.possession) ?? h.possession, h.encroachment?.acres ?? '', (h.encroachment?.encroachers ?? []).join('; '), h.encroachment?.action,
+    h.custodian, h.landClass, h.use, POSSESSION_LABEL.get(h.possession) ?? h.possession, h.encroachment?.acres ?? '', (h.encroachment?.encroachers ?? []).join('; '), h.encroachment?.action, h.issueNote, h.encumbrance,
     RECORD_LABEL.get(h.record?.status) ?? '', h.record?.mutationNos, h.record?.demarcation === 'yes' ? 'Done' : h.record?.demarcation === 'no' ? 'Not done' : '', h.underLitigation ? 'Yes' : 'No', (h.litigationIds ?? []).map((c: any) => c.caseId).join(', '),
     h.allotment?.allottee, h.allotment?.scheme, d(h.allotment?.leaseTo), h.acquisition?.awardNo, STATUS_LABEL[h.status as string], d(h.lastVisit),
   ]));

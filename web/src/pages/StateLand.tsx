@@ -6,7 +6,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { CheckCircle2, Download, FileText, MapPin, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
-import { useDeferredValue, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useDeferredValue, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PageHeader } from '../components/AppShell';
 import { UnitField } from '../components/rev';
@@ -42,10 +42,6 @@ interface Doc { _id: string; category: string; title?: string; docDate?: string;
 
 const useMeta = () => useQuery({ queryKey: ['sl', 'meta'], queryFn: () => get<Meta>('/state-land/meta'), staleTime: 300_000 });
 const acres = (n?: number) => (n == null ? '—' : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-/** Area arithmetic in square feet: 1 marla = 272.25 sq ft, 1 kanal = 20 marla, 1 acre = 8 kanal. */
-const MARLA = 272.25;
-const sqft = (a?: Area) => ((a?.kanal ?? 0) * 20 + (a?.marla ?? 0)) * MARLA + (a?.feet ?? 0);
-const fromSqft = (s: number): Area => { const marlas = Math.floor(s / MARLA + 1e-9); return { kanal: Math.floor(marlas / 20), marla: marlas % 20, feet: Math.round((s - marlas * MARLA) * 100) / 100 }; };
 const kmf = (a?: Area) => [a?.kanal ? `${a.kanal} K` : '', a?.marla ? `${a.marla} M` : '', a?.feet ? `${a.feet} Ft` : ''].filter(Boolean).join(' – ') || '—';
 const STATUS: Record<Status, [string, string]> = {
   entered: ['Awaiting verification', 'bg-amber-100 text-amber-800'],
@@ -76,7 +72,6 @@ export function StateLandList() {
   const [status, setStatus] = useState('');
   const [extra, setExtra] = useState<{ litigation?: 'yes'; leases?: 'expired' | 'expiring' }>({});
   const [page, setPage] = useState(1);
-  const [creating, setCreating] = useState(false);
   const [marking, setMarking] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -108,7 +103,7 @@ export function StateLandList() {
           <Button size="sm" variant="secondary" onClick={() => download(`/state-land/export/xlsx?${params}`, 'state-land-directory.xlsx')}><Download className="size-4" />Excel</Button>
           {meta.data?.isAdmin && <Button size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}><Settings2 className="size-4" />Settings</Button>}
           {meta.data?.canEnter && <Button size="sm" variant="secondary" onClick={() => setMarking(true)}><CheckCircle2 className="size-4" />Mouza Listing</Button>}
-          {meta.data?.canEnter && <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />Enter State Land</Button>}
+          {meta.data?.canEnter && <Link to="/state-land/entry"><Button size="sm"><Plus className="size-4" />Enter State Land</Button></Link>}
         </div>
       } />
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -193,7 +188,6 @@ export function StateLandList() {
           </>
         )}
       </>}
-      {creating && <EntryForm onClose={() => setCreating(false)} />}
       {marking && <MouzaListingSheet onClose={() => setMarking(false)} />}
       {settingsOpen && meta.data && <SettingsSheet meta={meta.data} onClose={() => setSettingsOpen(false)} />}
       {returning && <ReturnSheet title={`Return ${picked.size} Khasra(s) for Correction`} onClose={() => setReturning(false)} onReturn={(r) => bulk('return', r)} />}
@@ -377,7 +371,6 @@ const n = (s: string) => (s.trim() ? Number(s) : undefined);
 const s0 = (v?: number | null) => (v == null ? '' : String(v));
 const areaIn = (a?: Area): AreaS => ({ kanal: s0(a?.kanal), marla: s0(a?.marla), feet: s0(a?.feet) });
 const areaOut = (a: AreaS): Area => ({ kanal: n(a.kanal), marla: n(a.marla), feet: n(a.feet) });
-const EMPTY: AreaS = { kanal: '', marla: '', feet: '' };
 
 function Section({ title, children, note }: { title: string; children: ReactNode; note?: string }) {
   return (
@@ -612,238 +605,6 @@ function DetailsFields({ f, setF, m, unitId, partNote }: { f: DetailsS; setF: (f
       </Section>
       <Field label="Note">{(id) => <Textarea id={id} rows={1} dir="auto" value={f.note} onChange={(e) => set('note', e.target.value)} />}</Field>
     </>
-  );
-}
-
-/* ================================================================== *
- *  Entry: murabbas → 25 killas → sub-killas, each with its own area
- * ================================================================== */
-/** by / nature: '' = as given for the whole entry (Part B). */
-interface Row { killa: number; sub: string; area: AreaS; enc: AreaS; by: string; nature: string }
-type SubStyle = 'num' | 'urdu';
-interface MurabbaBlock { murabba: string; own: boolean; khewat: string; khatauni: string; subStyle: SubStyle; rows: Row[] }
-/** Sub-killa names in order: 1, 2, 3 … or الف، ب، ج، د، ہ … (any name can still be typed). */
-const URDU_SUBS = ['الف', 'ب', 'ج', 'د', 'ہ', 'و', 'ز', 'ح', 'ط', 'ی', 'ک', 'ل', 'م', 'ن', 'س', 'ع', 'ف', 'ص', 'ق', 'ر'];
-const subName = (style: SubStyle, i: number) => (style === 'urdu' ? URDU_SUBS[i] ?? String(i + 1) : String(i + 1));
-const cleanSub = (v: string) => v.replace(/[^\p{L}\p{N}\p{M}-]/gu, '').slice(0, 12);
-const WHOLE_KILLA: AreaS = { kanal: '8', marla: '', feet: '' }; // a standard killa: 1 acre
-const blank = (subStyle: SubStyle = 'num'): MurabbaBlock => ({ murabba: '', own: false, khewat: '', khatauni: '', subStyle, rows: [] });
-
-function KillaPicker({ unitId, block, onChange, defBy, meta, onRemove }: { unitId: string; block: MurabbaBlock; onChange: (b: MurabbaBlock) => void; defBy: string; meta?: Meta; onRemove?: () => void }) {
-  const effBy = (r: Row) => r.by || defBy;
-  const anyEnc = block.rows.some((r) => effBy(r) === 'unauthorised');
-  const mur = useDeferredValue(block.murabba.trim());
-  const taken = useQuery({ queryKey: ['sl', 'taken', unitId, mur], queryFn: () => get<{ killa: number; subKilla: string; khasraNo: string }[]>(`/state-land/taken?unitId=${unitId}&murabba=${encodeURIComponent(mur)}`), enabled: !!unitId && !!mur });
-  const takenWhole = new Set((taken.data ?? []).filter((t) => !t.subKilla).map((t) => t.killa));
-  const takenSubs = new Map<number, string[]>();
-  for (const t of taken.data ?? []) if (t.subKilla) takenSubs.set(t.killa, [...(takenSubs.get(t.killa) ?? []), t.subKilla]);
-  const chosen = new Set(block.rows.map((r) => r.killa));
-  const setRows = (rows: Row[]) => onChange({ ...block, rows: [...rows].sort((a, b) => a.killa - b.killa || a.sub.localeCompare(b.sub, undefined, { numeric: true })) });
-  const toggle = (k: number) => setRows(chosen.has(k) ? block.rows.filter((r) => r.killa !== k) : [...block.rows, { killa: k, sub: '', area: { ...WHOLE_KILLA }, enc: { ...EMPTY }, by: '', nature: '' }]);
-  const free = Array.from({ length: 25 }, (_, i) => i + 1).filter((k) => !takenWhole.has(k));
-  const all = () => setRows([...block.rows, ...free.filter((k) => !chosen.has(k)).map((k) => ({ killa: k, sub: '', area: { ...WHOLE_KILLA }, enc: { ...EMPTY }, by: '', nature: '' }))]);
-  const split = (k: number) => {
-    const subs = block.rows.filter((r) => r.killa === k);
-    const used = new Set([...subs.map((r) => r.sub), ...(takenSubs.get(k) ?? [])]);
-    const free = () => { let i = 0; while (used.has(subName(block.subStyle, i))) i++; const name = subName(block.subStyle, i); used.add(name); return name; };
-    if (subs.length === 1 && !subs[0].sub) {
-      // A whole killa becomes its first two sub-killas (1, 2 or الف، ب)
-      return setRows([...block.rows.filter((r) => r.killa !== k), { killa: k, sub: free(), area: { ...EMPTY }, enc: { ...EMPTY }, by: '', nature: '' }, { killa: k, sub: free(), area: { ...EMPTY }, enc: { ...EMPTY }, by: '', nature: '' }]);
-    }
-    setRows([...block.rows, { killa: k, sub: free(), area: { ...EMPTY }, enc: { ...EMPTY }, by: '', nature: '' }]);
-  };
-  // Switching the style renames the sub-killas not yet saved, in their order
-  const restyle = (style: SubStyle) => {
-    const seen = new Map<number, number>();
-    onChange({ ...block, subStyle: style, rows: block.rows.map((r) => { if (!r.sub) return r; const i = seen.get(r.killa) ?? 0; seen.set(r.killa, i + 1); return { ...r, sub: subName(style, i) }; }) });
-  };
-  const update = (i: number, r: Row) => onChange({ ...block, rows: block.rows.map((x, j) => (j === i ? r : x)) });
-  const remove = (i: number) => onChange({ ...block, rows: block.rows.filter((_, j) => j !== i) });
-  const total = block.rows.reduce((s, r) => s + sqft(areaOut(r.area)), 0);
-
-  return (
-    <div className="rounded-lg border border-slate-300 p-2.5 dark:border-slate-600">
-      <div className="mb-2 grid items-end gap-2 sm:grid-cols-[10rem_1fr_auto]">
-        <Field label="Murabba / Mustateel No.">{(id) => <Input id={id} value={block.murabba} onChange={(e) => onChange({ ...block, murabba: e.target.value.trim() })} placeholder="e.g. 45" />}</Field>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pb-2 text-xs">
-          <label className="flex items-center gap-2"><input type="checkbox" className="size-4 accent-brand-600" checked={block.own} onChange={(e) => onChange({ ...block, own: e.target.checked })} />Different khewat / khatauni for this murabba</label>
-          <span className="flex items-center gap-1.5">Sub-killa names:
-            <Segmented value={block.subStyle} onChange={restyle} options={[{ value: 'num', label: '1, 2, 3' }, { value: 'urdu', label: <span className="whitespace-nowrap" dir="rtl">الف، ب، ج</span> }]} />
-          </span>
-        </div>
-        {onRemove && <Button type="button" size="sm" variant="ghost" onClick={onRemove}><X className="size-4" />Remove murabba</Button>}
-      </div>
-      {block.own && (
-        <div className="mb-2 grid grid-cols-2 gap-2">
-          <Field label="Khewat No(s).">{(id) => <Input id={id} value={block.khewat} onChange={(e) => onChange({ ...block, khewat: e.target.value })} />}</Field>
-          <Field label="Khatauni No(s).">{(id) => <Input id={id} value={block.khatauni} onChange={(e) => onChange({ ...block, khatauni: e.target.value })} />}</Field>
-        </div>
-      )}
-      {!block.murabba ? <p className="text-xs text-slate-500">Enter the murabba no. to show its 25 killas.</p> : (
-        <>
-          <div className="mb-1 flex items-center justify-between text-xs">
-            <span className="text-slate-500">Tick the killas that are state land{takenWhole.size || takenSubs.size ? ' · grey = already entered' : ''}</span>
-            <span className="flex gap-3">
-              <button type="button" className="font-semibold text-brand-700 hover:underline" onClick={all}>Select all</button>
-              {block.rows.length > 0 && <button type="button" className="text-slate-500 hover:underline" onClick={() => setRows([])}>Clear</button>}
-            </span>
-          </div>
-          <div className="mb-2 grid grid-cols-5 gap-1 sm:max-w-sm">
-            {Array.from({ length: 25 }, (_, i) => i + 1).map((k) => {
-              const done = takenWhole.has(k);
-              return (
-                <button key={k} type="button" disabled={done} onClick={() => toggle(k)} title={done ? 'Already entered' : takenSubs.has(k) ? `Sub-killas entered: ${takenSubs.get(k)!.join(', ')}` : undefined}
-                  className={clsx('h-9 rounded-md text-sm font-semibold ring-1 transition', done ? 'cursor-not-allowed bg-slate-100 text-slate-400 ring-slate-200 line-through dark:bg-slate-800' : chosen.has(k) ? 'bg-brand-700 text-white ring-brand-700' : 'bg-white ring-slate-400 hover:bg-brand-50 dark:bg-slate-900', takenSubs.has(k) && !chosen.has(k) && 'ring-amber-400')}>
-                  {k}
-                </button>
-              );
-            })}
-          </div>
-          {block.rows.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full border-separate border-spacing-0 text-[13px]">
-                <thead className="bg-brand-700 text-center text-[12px] text-white">
-                  <tr>
-                    <th className={th}>Khasra</th><th className={th}>Sub-killa</th><th className={th}>Area (K · M · Ft)</th>
-                    <th className={th} title="Physical possession at site, if different for this killa">At Site</th><th className={th} title="Nature of land at site, if different for this killa">Nature</th>
-                    {anyEnc && <th className={th}>Encroached (K · M · Ft)</th>}
-                    <th className={clsx(th, 'border-r-0')} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {block.rows.map((r, i) => {
-                    const first = i === 0 || block.rows[i - 1].killa !== r.killa;
-                    return (
-                      <tr key={`${r.killa}-${i}`} className={clsx(!first && 'bg-slate-50 dark:bg-slate-800/40')}>
-                        <td className={clsx(td, 'whitespace-nowrap font-mono text-xs font-semibold')} dir="ltr">{block.murabba}/{r.killa}{r.sub && <>/<span dir="auto">{r.sub}</span></>}</td>
-                        <td className={clsx(td, 'w-20')}>{r.sub ? <input value={r.sub} dir="auto" onChange={(e) => update(i, { ...r, sub: cleanSub(e.target.value) })} title="Edit the sub-killa name if it is written differently" className="h-8 w-16 rounded-md bg-white px-1 text-center text-sm ring-1 ring-slate-400 outline-none focus:ring-2 focus:ring-brand-500 dark:bg-slate-900 dark:ring-slate-500" aria-label="Sub-killa name" /> : <span className="text-xs text-slate-400">whole</span>}</td>
-                        <td className={td}><AreaBoxes value={r.area} onChange={(a) => update(i, { ...r, area: a })} /></td>
-                        <td className={td}>
-                          <select value={r.by} onChange={(e) => update(i, { ...r, by: e.target.value })} className={clsx('h-8 w-24 rounded-md bg-white px-0.5 text-[11px] ring-1 outline-none focus:ring-2 focus:ring-brand-500 dark:bg-slate-900', r.by ? 'font-semibold ring-brand-600' : 'text-slate-500 ring-slate-300')}>
-                            <option value="">Same</option>{meta?.possessedBy.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                          </select>
-                        </td>
-                        <td className={td}>
-                          <select value={r.nature} onChange={(e) => update(i, { ...r, nature: e.target.value })} className={clsx('h-8 w-24 rounded-md bg-white px-0.5 text-[11px] ring-1 outline-none focus:ring-2 focus:ring-brand-500 dark:bg-slate-900', r.nature ? 'font-semibold ring-brand-600' : 'text-slate-500 ring-slate-300')}>
-                            <option value="">Same</option>{meta?.nature.map((x) => <option key={x}>{x}</option>)}
-                          </select>
-                        </td>
-                        {anyEnc && <td className={td}>{effBy(r) === 'unauthorised' ? <AreaBoxes value={r.enc} onChange={(a) => update(i, { ...r, enc: a })} /> : <span className="text-xs text-slate-300">—</span>}</td>}
-                        <td className={clsx(td, 'whitespace-nowrap border-r-0 text-xs')}>
-                          {first && <button type="button" className="mr-2 font-semibold text-brand-700 hover:underline" onClick={() => split(r.killa)}>+ Sub-killa</button>}
-                          <button type="button" className="text-slate-400 hover:text-rose-600" aria-label="Remove" onClick={() => remove(i)}><X className="inline size-4" /></button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <div className="mt-1 text-right text-xs text-slate-600 dark:text-slate-300">Murabba {block.murabba}: <b>{block.rows.length}</b> khasra(s) · <b>{kmf(fromSqft(total))}</b> = <b>{acres(total / 43_560)}</b> acres</div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-const LAST_KEY = 'sl-last-entry';
-/** One-click fills for the common cases (only the fields they name are changed). */
-type Preset = { label: string; set: { category?: string; subType?: string; ownerRecord?: string; kashtType?: string; by?: string; nature?: string[]; record?: string } };
-const PRESETS: Preset[] = [
-  { label: 'Sarkar · Banjar · vacant tibba', set: { category: 'provincial', subType: 'Banjar qadeem', ownerRecord: 'Sarkar Daulatmadar', kashtType: 'Banjar (no cultivator)', by: 'vacant', nature: ['Tibba (sand dune)'], record: 'mutated' } },
-  { label: 'Department in own use', set: { ownerRecord: 'Provincial Government', kashtType: 'Department (in its own use)', by: 'department', nature: ['Structure (house / shop / wall)'], record: 'mutated' } },
-  { label: 'Leased · cultivated by lessee', set: { ownerRecord: 'Sarkar Daulatmadar', kashtType: 'Mustajir (lessee)', by: 'recorded', nature: ['Cultivated (crop)'], record: 'mutated' } },
-  { label: 'Encroached · cultivated', set: { ownerRecord: 'Sarkar Daulatmadar', kashtType: 'Banjar (no cultivator)', by: 'unauthorised', nature: ['Cultivated (crop)'] } },
-];
-const applyPreset = (d: DetailsS, x: Preset['set']): DetailsS => ({
-  ...d,
-  ...(x.category ? { category: x.category, subType: x.subType ?? '' } : {}),
-  ...(x.ownerRecord ? { ownerRecord: x.ownerRecord } : {}),
-  kasht: x.kashtType ? { ...d.kasht, type: x.kashtType } : d.kasht,
-  site: { ...d.site, ...(x.by ? { possessedBy: x.by } : {}), ...(x.nature ? { nature: x.nature } : {}) },
-  record: x.record ? { ...d.record, status: x.record } : d.record,
-});
-
-function EntryForm({ onClose }: { onClose: () => void }) {
-  const meta = useMeta();
-  const qc = useQueryClient();
-  const toast = useToast();
-  const m = meta.data;
-  const [mq, setMq] = useState('');
-  const mterm = useDeferredValue(mq);
-  const mouzas = useQuery({ queryKey: ['sl', 'mouzas', mterm], queryFn: () => get<{ _id: string; name: string; tehsil?: string }[]>(`/state-land/mouzas?search=${encodeURIComponent(mterm)}`) });
-  const [unitId, setUnitId] = useState('');
-  const [mouzaName, setMouzaName] = useState('');
-  const [khewat, setKhewat] = useState('');
-  const [khatauni, setKhatauni] = useState('');
-  const [blocks, setBlocks] = useState<MurabbaBlock[]>([blank()]);
-  const [d, setD] = useState(() => detailsInit());
-  const [last] = useState<DetailsS | null>(() => { try { return JSON.parse(localStorage.getItem(LAST_KEY) ?? 'null'); } catch { return null; } });
-  const [error, setError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
-  const count = blocks.reduce((s, b) => s + b.rows.length, 0);
-  const total = useMemo(() => blocks.reduce((s, b) => s + b.rows.reduce((t, r) => t + sqft(areaOut(r.area)), 0), 0), [blocks]);
-
-  const save = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (!unitId) return setError(new Error('Choose the mouza from the list'));
-    const used = blocks.filter((b) => b.murabba && b.rows.length);
-    if (!used.length) return setError(new Error('Enter a murabba no. and tick its killas'));
-    if (new Set(used.map((b) => b.murabba)).size !== used.length) return setError(new Error('The same murabba is entered twice — add its killas in one block'));
-    const msg = checkDetails(d);
-    if (msg) return setError(new Error(msg));
-    setBusy(true);
-    try {
-      const r = await post<{ created: number; acres: number }>('/state-land/batch', {
-        unitId, khewat: khewat || undefined, khatauni: khatauni || undefined,
-        murabbas: used.map((b) => ({ murabba: b.murabba, ...(b.own ? { khewat: b.khewat || undefined, khatauni: b.khatauni || undefined } : {}), killas: b.rows.map((x) => ({
-          killa: x.killa, subKilla: x.sub, area: areaOut(x.area), ...(x.by ? { possessedBy: x.by } : {}), ...(x.nature ? { nature: [x.nature] } : {}),
-          ...((x.by || d.site.possessedBy) === 'unauthorised' ? { encroachedArea: areaOut(x.enc) } : {}),
-        })) })),
-        details: detailsOut(d, m?.categories.find((c) => c.key === d.category)),
-      });
-      try { localStorage.setItem(LAST_KEY, JSON.stringify(d)); } catch { /* storage unavailable */ }
-      qc.invalidateQueries({ queryKey: ['sl'] });
-      toast(`${r.created} khasra(s) entered · ${acres(r.acres)} acres — sent for verification`);
-      onClose();
-    } catch (err) { setError(err); } finally { setBusy(false); }
-  };
-
-  return (
-    <LSheet open wide onClose={onClose} title="Enter State Land" footer={<Button form="sl-entry" type="submit" block loading={busy} disabled={!count}>{count ? `Save ${count} ${count === 1 ? 'Khasra' : 'Khasras'} · ${acres(total / 43_560)} acres` : 'Save'}</Button>}>
-      <form id="sl-entry" onSubmit={save} className="space-y-3">
-        <Section title="Mouza and record">
-          <div className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr]">
-            <Field label="Mouza">
-              {(id) => <AutoInput id={id} strict required placeholder="Type mouza name…" onQuery={setMq} value={unitId}
-                options={[...(unitId ? [{ value: unitId, label: mouzaName }] : []), ...(mouzas.data ?? []).filter((x) => x._id !== unitId).map((x) => ({ value: x._id, label: x.name, hint: x.tehsil }))]}
-                onChange={(v) => { setUnitId(v); setMouzaName(mouzas.data?.find((y) => y._id === v)?.name ?? mouzaName); }} />}
-            </Field>
-            <Field label="Khewat No(s).">{(id) => <Input id={id} value={khewat} onChange={(e) => setKhewat(e.target.value)} placeholder="for all killas below" />}</Field>
-            <Field label="Khatauni No(s).">{(id) => <Input id={id} value={khatauni} onChange={(e) => setKhatauni(e.target.value)} placeholder="for all killas below" />}</Field>
-          </div>
-        </Section>
-        <Section title="Murabba → Killa → Sub-killa" note="Area of each khasra in Kanal · Marla · Feet (a whole killa starts at 8 kanal)">
-          {!unitId ? <p className="text-xs text-slate-500">Choose the mouza first.</p> : (
-            <>
-              {blocks.map((b, i) => <KillaPicker key={i} unitId={unitId} block={b} defBy={d.site.possessedBy} meta={m} onChange={(nb) => setBlocks(blocks.map((x, j) => (j === i ? nb : x)))} onRemove={blocks.length > 1 ? () => setBlocks(blocks.filter((_, j) => j !== i)) : undefined} />)}
-              <button type="button" className="text-xs font-semibold text-brand-700 hover:underline" onClick={() => setBlocks([...blocks, blank(blocks[blocks.length - 1]?.subStyle)])}>+ Add another murabba (same khewat / khatauni)</button>
-              {count > 0 && <div className="rounded-md bg-brand-50 px-3 py-1.5 text-sm dark:bg-brand-900/30">Total: <b>{count}</b> khasra(s) · <b>{kmf(fromSqft(total))}</b> = <b>{acres(total / 43_560)}</b> acres</div>}
-            </>
-          )}
-        </Section>
-        <Card className="flex flex-wrap items-center gap-2 p-2.5 text-xs">
-          <b className="text-slate-600 dark:text-slate-300">Quick fill:</b>
-          {PRESETS.map((x) => <Button key={x.label} type="button" size="sm" variant="secondary" onClick={() => setD((cur) => applyPreset(cur, x.set))}>{x.label}</Button>)}
-          {last && <Button type="button" size="sm" variant="ghost" onClick={() => setD({ ...detailsInit(), ...last })}><RotateCcw className="size-4" />Same as last entry</Button>}
-        </Card>
-        <p className="text-xs text-slate-500">The details below apply to every khasra ticked above. Where possession or nature differs for a killa, choose it in the killa table. A single khasra can also be changed later from its own page.</p>
-        <DetailsFields f={d} setF={setD} m={m} unitId={unitId} partNote={d.site.possessedBy === 'unauthorised' ? 'encroached area per killa in the table above (blank = whole killa)' : 'applies to all killas unless set per killa above'} />
-        <FormError error={error} />
-      </form>
-    </LSheet>
   );
 }
 
