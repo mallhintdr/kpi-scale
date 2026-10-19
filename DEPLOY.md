@@ -310,3 +310,17 @@ mongosh -u <admin-user> -p --authenticationDatabase admin --eval '
 Then make these changes:
 - in `.env`, use `MONGO_URI=mongodb://kpi:<strong password>@127.0.0.1:27017/kpi_dashboard?authSource=kpi_dashboard`;
 - add `-u <admin-user> -p --authenticationDatabase admin` to the `mongorestore` and `mongodump` commands above.
+
+---
+
+## Quick update script
+
+After the first setup, every update is one command. **On the VPS**:
+```bash
+bash /kpi-bwp/update.sh
+```
+Or **from your PC**:
+```powershell
+ssh root@<VPS-IP> "bash /kpi-bwp/update.sh"
+```
+It pulls the code, builds the backend, updates the database (`migrate.js`), builds the frontend, restarts `kpi-api` and `kpi-worker`, and checks the API answers. It stops at the first error, so a failed build never restarts the app with broken code. If there is nothing new on GitHub it stops straight away; `bash /kpi-bwp/update.sh --force` rebuilds anyway.
