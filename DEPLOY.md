@@ -5,11 +5,14 @@ This guide puts the KPI Dashboard on your VPS the same way your other apps run: 
 You end up with:
 - the **current database** (all units, officers, figures, Tameel and litigation records), as its own database `kpi_dashboard`;
 - **your admin account** (`admin@bwp.test`) for demos;
-- a **guest link**, `https://<domain>/guest`, that opens the dashboard read-only without a password.
+- a **guest link**, `https://kpi-bwp.naqsha-zameen.pk/guest`, that opens the dashboard read-only without a password.
+
+The dashboard will be at **https://kpi-bwp.naqsha-zameen.pk**.
 
 **Your other apps are not touched.**
 - The dashboard lives in `/opt/kpi`.
 - It uses its own database name, its own Redis database number and its own PM2 processes (`kpi-api`, `kpi-worker`).
+- It runs on the Node already installed (v20.18), so nothing changes for your other apps.
 - Its API listens on a free port (4100), on `127.0.0.1` only.
 - It adds one new nginx site file for its own domain.
 
@@ -21,9 +24,9 @@ Each command block says where to run it: **on your PC** (Windows PowerShell) or 
 
 | Item | Notes |
 |---|---|
-| Domain | Its own domain or subdomain, e.g. `kpi.example.com`, with an **A record** pointing to the VPS IP. If you have no domain, use `kpi.<VPS-IP>.sslip.io` (e.g. `kpi.203.0.113.10.sslip.io`). It needs no setup. |
+| Domain | **`kpi-bwp.naqsha-zameen.pk`**. In the DNS of `naqsha-zameen.pk`, add an **A record**: name `kpi-bwp`, value = the VPS IP. Check from your PC with `nslookup kpi-bwp.naqsha-zameen.pk`; it must show the VPS IP before step 6. |
 | GitHub access | The code is at `github.com/mallhintdr/kpi-scale`. If the repository is private, create a **Personal Access Token** (GitHub › Settings › Developer settings › Tokens, scope *repo*). Use it as the password when cloning. |
-| Database copy | `D:\KPI Dashboard\deploy-backup\kpi.gz` on your PC (step 5). |
+| Database copy | `D:\KPI Dashboard\deploy-backup\kpi.gz` on your PC (step 4). |
 
 > **HTTPS is required.** Sign-in keeps a secure cookie that browsers only send over HTTPS. Over plain `http://`, users are signed out on every page reload.
 
@@ -39,7 +42,7 @@ ssh root@<VPS-IP>
 ```bash
 node -v
 pm2 -v
-mongod --version | head -1
+mongod --version | head -1                   
 mongorestore --version | head -1
 redis-cli config get maxmemory-policy
 free -h && df -h /
@@ -47,8 +50,8 @@ free -h && df -h /
 
 | Result | What to do |
 |---|---|
-| `node -v` is **v22 or higher** | Nothing. Skip step 2. |
-| `node -v` is lower than v22 | Step 2 installs Node 22 for the dashboard only. Your other apps keep their Node version. |
+| `node -v` is **v20.18 or higher** | Nothing. The dashboard runs on the server's own Node; nothing is installed or changed for your other apps. (Tested on v20.18.1: the full automated test suite and both builds.) |
+| `node -v` is lower than v20.18 | Tell me before going on. |
 | `mongorestore: command not found` | `apt -y install mongodb-database-tools`. If that package isn't found, install the "MongoDB Database Tools" `.deb` for Ubuntu from mongodb.com/try/download/database-tools, then `apt -y install ./mongodb-database-tools-*.deb`. |
 | `maxmemory-policy` is `noeviction` | Good. That's the Redis default. |
 | `maxmemory-policy` is anything else | Tell me. The dashboard's job queue needs `noeviction`, and changing it affects your other apps, so we'd decide together. Usually the dashboard is then given its own small Redis. |
@@ -56,25 +59,7 @@ free -h && df -h /
 
 ---
 
-## 2. Node 22 for the dashboard (only if `node -v` was lower than v22)
-
-This installs Node 22 alongside your current Node. Your other apps and the `node` command they use stay as they are.
-
-**On the VPS**:
-```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-source ~/.nvm/nvm.sh
-nvm install 22
-nvm alias default system 2>/dev/null || true   # keep your current node as the default
-```
-Each time you build the dashboard (steps 4 and 10), first run this line in that SSH session:
-```bash
-export PATH="$(dirname $(source ~/.nvm/nvm.sh && nvm which 22)):$PATH"; node -v   # must show v22
-```
-
----
-
-## 3. Get the code
+## 2. Get the code
 
 **On the VPS**:
 ```bash
@@ -86,9 +71,9 @@ If asked, enter your GitHub username, then the access token as the password.
 
 ---
 
-## 4. Settings and build
+## 3. Settings and build
 
-### 4.1 Choose free slots
+### 3.1 Choose free slots
 ```bash
 ss -ltn | grep ':4100 '                                          # no output = port 4100 is free
 mongosh --quiet --eval 'db.getMongo().getDBNames()'              # "kpi_dashboard" must NOT be in the list
@@ -100,7 +85,7 @@ for n in 1 2 3 4 5; do echo "redis db $n: $(redis-cli -n $n dbsize)"; done   # p
 
 If `mongosh` asks for a password, your MongoDB has authentication on. See *MongoDB with a password* at the end of this guide.
 
-### 4.2 App settings
+### 3.2 App settings
 ```bash
 cd /opt/kpi/server
 cp .env.example .env
@@ -118,7 +103,7 @@ REDIS_URL=redis://127.0.0.1:6379/1
 RUN_WORKER=false
 JWT_ACCESS_SECRET=<first secret>
 JWT_REFRESH_SECRET=<second secret>
-CORS_ORIGINS=https://kpi.example.com
+CORS_ORIGINS=https://kpi-bwp.naqsha-zameen.pk
 SINGLE_TENANT=true
 DEFAULT_TENANT=bor-bahawalpur
 WHATSAPP_MODE=mock
@@ -133,8 +118,7 @@ What some of these settings do:
 - `RUN_WORKER=false` is set because background jobs run in their own PM2 process (`kpi-worker`).
 - `GUEST_EMAIL`: `commissioner@bwp.test` shows the whole division. Use e.g. `dc.bahawalpur@bwp.test` to show one district. Don't use an admin account.
 
-### 4.3 Build
-(If you did step 2, run its `export PATH=…` line first.)
+### 3.3 Build
 ```bash
 cd /opt/kpi/server && npm ci && npm run build
 cd /opt/kpi/web && npm ci && npm run build
@@ -143,7 +127,7 @@ The server build creates `/opt/kpi/server/dist`, and the website build creates `
 
 ---
 
-## 5. Load the database
+## 4. Load the database
 
 **On your PC.** Make a fresh copy, so it includes your latest changes, then upload it:
 ```powershell
@@ -168,15 +152,12 @@ cd /opt/kpi/server && node dist/migrate.js
 
 ---
 
-## 6. Start with PM2
+## 5. Start with PM2
 
 **On the VPS**:
 ```bash
 cd /opt/kpi
-# Only if you did step 2 (Node 22 alongside your current Node):
-export NODE_BIN="$(source ~/.nvm/nvm.sh && nvm which 22)"
-
-pm2 start ecosystem.config.cjs
+pm2 start ecosystem.config.cjs           # runs with the server's own node
 pm2 save
 pm2 ls                                   # kpi-api and kpi-worker: "online"
 curl -s localhost:4100/api/config        # {"singleTenant":true,...,"guest":true}
@@ -185,16 +166,16 @@ curl -s localhost:4100/api/config        # {"singleTenant":true,...,"guest":true
 
 ---
 
-## 7. Nginx site and HTTPS
+## 6. Nginx site and HTTPS
 
 Your nginx keeps serving your other apps. Here you **add** one new site file. Don't edit or delete the existing ones.
 
-**On the VPS**, create the site file. Replace `kpi.example.com` with your domain, and `4100` if you chose another port:
+**On the VPS**, create the site file. Change `4100` only if you chose another port in step 3.1:
 ```bash
 cat > /etc/nginx/sites-available/kpi <<'EOF'
 server {
     listen 80;
-    server_name kpi.example.com;
+    server_name kpi-bwp.naqsha-zameen.pk;
 
     root /opt/kpi/web/dist;
     client_max_body_size 20m;              # litigation documents and Excel imports
@@ -225,19 +206,19 @@ nginx -t && systemctl reload nginx
 Add HTTPS. Certbot changes only this domain's file:
 ```bash
 certbot --version || apt -y install certbot python3-certbot-nginx
-certbot --nginx -d kpi.example.com --redirect -m you@example.com --agree-tos -n
+certbot --nginx -d kpi-bwp.naqsha-zameen.pk --redirect -m <your-email> --agree-tos -n
 certbot renew --dry-run
 ```
-Then open `https://kpi.example.com`.
+Then open `https://kpi-bwp.naqsha-zameen.pk`.
 
 ---
 
-## 8. Accounts: admin, guest link, test passwords
+## 7. Accounts: admin, guest link, test passwords
 
 | Purpose | How |
 |---|---|
-| **Your admin / demo account** | `https://kpi.example.com/login` with `admin@bwp.test`. |
-| **Guest link** (share this) | `https://kpi.example.com/guest`: opens the dashboard straight away, no password. |
+| **Your admin / demo account** | `https://kpi-bwp.naqsha-zameen.pk/login` with `admin@bwp.test`. |
+| **Guest link** (share this) | `https://kpi-bwp.naqsha-zameen.pk/guest`: opens the dashboard straight away, no password. |
 | Guest button | The sign-in page also shows **View Demo as Guest**. |
 
 **What a guest can and can't do.**
@@ -253,7 +234,7 @@ Then open `https://kpi.example.com`.
 
 ---
 
-## 9. Daily backups
+## 8. Daily backups
 
 **On the VPS**:
 ```bash
@@ -278,9 +259,9 @@ pm2 restart kpi-api kpi-worker
 
 ---
 
-## 10. Updating to a new version
+## 9. Updating to a new version
 
-**On the VPS**. If you did step 2, run its `export PATH=…` line first.
+**On the VPS**:
 ```bash
 cd /opt/kpi && git pull
 cd server && npm ci && npm run build && node dist/migrate.js
@@ -291,7 +272,7 @@ The data is kept. `migrate.js` only updates indexes.
 
 ---
 
-## 11. Everyday commands (on the VPS)
+## 10. Everyday commands (on the VPS)
 
 | Task | Command |
 |---|---|
@@ -309,14 +290,14 @@ The data is kept. `migrate.js` only updates indexes.
 
 | Symptom | Fix |
 |---|---|
-| Signed out on every reload | The site is opened over `http://`. Use `https://` (step 7). |
-| "Invalid email or password" for every account | The database wasn't restored into `kpi_dashboard`. Repeat step 5, then `pm2 restart kpi-api`. |
+| Signed out on every reload | The site is opened over `http://`. Use `https://` (step 6). |
+| "Invalid email or password" for every account | The database wasn't restored into `kpi_dashboard`. Repeat step 4, then `pm2 restart kpi-api`. |
 | Guest link says "Guest account not found" | `GUEST_EMAIL` doesn't match an active account. Fix `/opt/kpi/server/.env`, then `pm2 restart kpi-api`. |
 | `502 Bad Gateway` | The API isn't running, or nginx points to the wrong port. Check `pm2 logs kpi-api` and that `PORT` in `.env` matches `proxy_pass`. |
 | `500` or a blank page, with nginx error "Permission denied" | Run `chmod o+x /opt /opt/kpi /opt/kpi/web`, then `chmod -R o+r /opt/kpi/web/dist`. |
 | `413 Request Entity Too Large` on upload | `client_max_body_size 20m;` is missing from `/etc/nginx/sites-available/kpi`. |
 | The domain opens one of your other apps | `server_name` doesn't exactly match the domain, or the `sites-enabled/kpi` link is missing. Fix it, then `nginx -t && systemctl reload nginx`. |
-| `kpi-api` keeps restarting with `SyntaxError` / "Unexpected token" | PM2 is using an old Node. Redo step 6 with `NODE_BIN` set, after `pm2 delete kpi-api kpi-worker`. |
+| `kpi-api` keeps restarting with `SyntaxError` / "Unexpected token" | The Node in use is older than v20.18 (`node -v`). Send me the output of `pm2 logs kpi-api --lines 30`. |
 | Build stops with "Killed" | Out of memory. Add swap: `fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab`, then build again. |
 
 ### MongoDB with a password
