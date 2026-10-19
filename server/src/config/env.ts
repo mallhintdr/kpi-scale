@@ -36,8 +36,9 @@ const schema = z.object({
   /** Demo: /guest signs visitors in as this account, read-only. Empty = no guest access. */
   GUEST_EMAIL: z.string().trim().toLowerCase().default(''),
   /** Platform super-admin seeded on first start (only if no super-admin exists). */
-  SUPERADMIN_EMAIL: z.string().email().optional(),
-  SUPERADMIN_PASSWORD: z.string().min(10).optional(),
+  // Empty in .env means "not set" (the example file lists them blank)
+  SUPERADMIN_EMAIL: z.preprocess((v) => (v === '' ? undefined : v), z.string().email().optional()),
+  SUPERADMIN_PASSWORD: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(10).optional()),
 });
 
 const parsed = schema.safeParse(process.env);
