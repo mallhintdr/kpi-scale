@@ -188,7 +188,7 @@ export function AppShell() {
           )}
         </main>
         <footer className="mx-auto hidden w-full max-w-[1600px] print:!hidden border-t border-slate-200 px-4 py-2.5 text-[11px] text-slate-500 lg:block dark:border-slate-800">
-          © {new Date().getFullYear()} {orgLine} · Employee Performance Dashboard
+          © {new Date().getFullYear()} {orgLine} · Employee Performance Dashboard · <span title="App version">v{__APP_VERSION__}</span>
         </footer>
       </div>
 

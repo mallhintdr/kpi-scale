@@ -154,3 +154,10 @@ Scale with `docker compose up -d --scale api=4 --scale worker=2`.
 
 ## Single-organisation mode (current)
 The app currently runs as a **Board of Revenue only** solution. `SINGLE_TENANT=true` (server `.env`, the default) and the web build default switch off the platform console, super-admin, organisation templates and organisation switching on the sign-in page. Only `DEFAULT_TENANT` (`bor-bahawalpur`) can sign in. All multi-organisation code stays in place. To turn it back on, set `SINGLE_TENANT=false` on the server and `VITE_SINGLE_TENANT=false` for the web build.
+
+### Version
+The app version is in `VERSION` (also `server/package.json` and `web/package.json`) and is shown in the footer, on the sign-in page and in `/health` and `/api/config`. Every update gets the next number:
+```bash
+node scripts/bump-version.mjs     # 2.1.8 → 2.1.9 → 2.2.0 … 2.9.9 → 3.0.0
+```
+`update.sh` prints the version it deployed.

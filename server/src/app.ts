@@ -2,6 +2,7 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import express, { Router, type Request } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
@@ -36,6 +37,9 @@ import waAdminRoutes from './modules/whatsapp/admin.routes.js';
 import './modules/whatsapp/engine.js';
 import waWebhookRoutes from './modules/whatsapp/webhook.routes.js';
 
+/** App version (bumped on every update): server/package.json, next to dist/ and src/. */
+export const APP_VERSION: string = (() => { try { return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return 'dev'; } })();
+
 /** Shared limiter store across API instances when Redis is available. */
 const store = (prefix: string) => {
   const r = redis();
@@ -68,12 +72,12 @@ export function createApp() {
     let cache: boolean | null = null;
     const r = redis();
     if (r) cache = await r.ping().then(() => true).catch(() => false);
-    res.status(db ? 200 : 503).json({ status: db ? 'ok' : 'degraded', db, redis: cache });
+    res.status(db ? 200 : 503).json({ status: db ? 'ok' : 'degraded', version: APP_VERSION, db, redis: cache });
   });
 
   const api = Router();
   api.use(rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: 'draft-8', legacyHeaders: false, keyGenerator: clientKey, store: store('rl:api:') }));
-  api.get('/config', (_req, res) => res.json({ singleTenant: env.SINGLE_TENANT, defaultTenant: env.SINGLE_TENANT ? env.DEFAULT_TENANT : null, guest: !!env.GUEST_EMAIL }));
+  api.get('/config', (_req, res) => res.json({ version: APP_VERSION, singleTenant: env.SINGLE_TENANT, defaultTenant: env.SINGLE_TENANT ? env.DEFAULT_TENANT : null, guest: !!env.GUEST_EMAIL }));
   api.use('/auth', authRoutes);
   api.use('/whatsapp', waWebhookRoutes); // public: provider webhooks
 

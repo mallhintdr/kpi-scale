@@ -63,7 +63,7 @@ main() {
   fi
   pm2 ls
 
-  step "Done: $before → $after in $((SECONDS - started))s"
+  step "Done: version $(cat "$dir/VERSION" 2>/dev/null || echo '?') ($before → $after) in $((SECONDS - started))s"
 }
 
 main "$@"

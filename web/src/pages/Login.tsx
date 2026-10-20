@@ -139,7 +139,7 @@ export default function Login() {
             </form>
           )}
         </div>
-        <p className="mt-3 text-center text-[11px] text-brand-100">© {new Date().getFullYear()} {brand?.branding.tagline ?? brand?.name ?? 'KPI Dashboard'}</p>
+        <p className="mt-3 text-center text-[11px] text-brand-100">© {new Date().getFullYear()} {brand?.branding.tagline ?? brand?.name ?? 'KPI Dashboard'} · v{__APP_VERSION__}</p>
       </div>
     </div>
   );
