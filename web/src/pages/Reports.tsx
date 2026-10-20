@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { FileSpreadsheet, Maximize2, Minimize2, Printer, Sheet as SheetIcon } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileSpreadsheet, LayoutList, Maximize2, Minimize2, Printer, Sheet as SheetIcon, Table2 } from 'lucide-react';
 import { exportTableXlsx } from '../lib/xlsx';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
@@ -144,6 +144,12 @@ export default function Reports() {
   const anyMoney = chosenHeads.some((h) => h.money);
 
   const tableRef = useRef<HTMLTableElement>(null);
+  // Layout: officer-wise (one block per officer, a row per KPI — width stays the same however many KPIs)
+  // or table (KPIs across, for comparing officers side by side). Officer-wise by default above 3 KPIs.
+  const [layout, setLayout] = useState<'officer' | 'table' | null>(null);
+  const view = layout ?? (chosenHeads.length > 3 ? 'officer' : 'table');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleOfficer = (k: string) => setCollapsed((c) => { const n = new Set(c); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   // Full screen: the report fills the window; Esc or "Exit Full Screen" returns to the normal view
   const [full, setFull] = useState(false);
   useEffect(() => {
@@ -155,9 +161,9 @@ export default function Reports() {
     return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
   }, [full]);
   const exportXlsx = () => exportTableXlsx(tableRef.current, {
-    filename: `report-${data?.postLabel ?? post}-${unit?.name}-${fy}`, sheet: data?.postLabel ?? 'Report', freezeCols: 2 + groupCols.length,
+    filename: `report-${data?.postLabel ?? post}-${unit?.name}-${fy}`, sheet: data?.postLabel ?? 'Report', freezeCols: view === 'officer' ? 1 : 2 + groupCols.length,
     title: `${data?.postLabel} report · ${unit?.name} · FY ${generated?.fy ?? fy}`,
-    subtitle: `Generated ${new Date().toLocaleString()} · ${generated?.mode === 'aggregate' ? 'Aggregated per officer' : 'Unit-wise'} · ${perf ? 'Performance mode' : 'KPI evaluation mode'}${anyMoney ? ` · amounts ${MILLIONS}` : ''}`,
+    subtitle: `Generated ${new Date().toLocaleString()} · ${generated?.mode === 'aggregate' ? 'Aggregated per officer' : 'Unit-wise'} · ${view === 'officer' ? 'Officer-wise layout' : 'Table layout'} · ${perf ? 'Performance mode' : 'KPI evaluation mode'}${anyMoney ? ` · amounts ${MILLIONS}` : ''}`,
   });
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -226,7 +232,17 @@ export default function Reports() {
               <b>{rows.length}</b> {data?.postLabel} · {unit?.name} · FY {generated.fy}
               {anyMoney && <span className="ml-1 text-xs text-slate-400">· amounts {MILLIONS}</span>}
             </span>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented value={view} onChange={(v) => setLayout(v)} options={[
+                { value: 'officer', label: <span className="flex items-center gap-1 whitespace-nowrap" title="One block per officer, a row per KPI"><LayoutList className="size-4" />Officer-wise</span> },
+                { value: 'table', label: <span className="flex items-center gap-1" title="KPIs across, officers down"><Table2 className="size-4" />Table</span> },
+              ]} />
+              {view === 'officer' && (
+                <>
+                  <Button variant="ghost" size="sm" onClick={() => setCollapsed(new Set())}>Expand All</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setCollapsed(new Set(rows.map((x) => `${x.user._id}-${x.unitId}`)))}>Collapse All</Button>
+                </>
+              )}
               {full
                 ? <Button size="sm" onClick={() => setFull(false)} title="Back to the normal view (Esc)"><Minimize2 className="size-4" />Exit Full Screen</Button>
                 : <Button variant="secondary" size="sm" onClick={() => setFull(true)}><Maximize2 className="size-4" />Full Screen</Button>}
@@ -245,6 +261,10 @@ export default function Reports() {
 
           <Card className={clsx('overflow-hidden print:rounded-none print:shadow-none print:ring-0', full && 'flex min-h-0 flex-1 flex-col')}>
             <div className={clsx('overflow-auto print:max-h-none print:overflow-visible', full ? 'min-h-0 flex-1' : 'max-h-[70vh]')}>
+              {view === 'officer' ? (
+                <OfficerWise rows={rows} heads={chosenHeads} measures={chosenMeasures} details={chosenDetails} perf={perf} areaOf={areaOf} detailValue={detailValue} value={value}
+                  groupCols={groupCols} collapsed={collapsed} toggle={toggleOfficer} tableRef={tableRef} />
+              ) : (
               <table ref={tableRef} className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
                 <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white print:static">
                   <tr>
@@ -326,11 +346,94 @@ export default function Reports() {
                   </tr>
                 </tfoot>
               </table>
+              )}
             </div>
           </Card>
           <p className="mt-1.5 text-[11px] text-slate-400 print:hidden">Registers: figures are items settled / total; % is the amount recovered. Money amounts are {MILLIONS}.</p>
         </div>
       )}
     </>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ *  Officer-wise layout: one block per officer — the officer's row, then a row per KPI with
+ *  Target / Achieved / Balance / % and a bar. The width stays the same however many KPIs are chosen.
+ * ------------------------------------------------------------------ */
+export type HeadItem = { code: string; name: string; group: string; money: boolean };
+type RowX = Pick<Row, 'user' | 'unitId' | 'areas' | 'charges' | 'heads'> & { overall: number | null; rank: number | null; chargeType?: string };
+export type OfficerMeasure = Measure;
+export type OfficerDetail = Detail;
+export function OfficerWise<R extends RowX>({ rows, heads, measures, details, perf, areaOf, detailValue, value, groupCols, collapsed, toggle, tableRef }: {
+  rows: R[]; heads: HeadItem[]; measures: { key: Measure; label: string }[]; details: { key: Detail; label: string }[]; perf: boolean;
+  areaOf: (r: R) => string; detailValue: (r: R, d: Detail) => string | number; value: (c: Cell | undefined, m: Measure, money: boolean) => string;
+  groupCols: string[]; collapsed: Set<string>; toggle: (k: string) => void; tableRef: React.RefObject<HTMLTableElement | null>;
+}) {
+  const cols = 1 + measures.length + 1; // KPI, measures, progress bar
+  const bar = (pct: number | null | undefined) => {
+    if (pct == null) return <span className="text-slate-300">—</span>;
+    const w = Math.max(2, Math.min(100, pct));
+    const tone = pct >= 100 ? 'bg-emerald-600' : pct >= 60 ? 'bg-brand-600' : pct >= 30 ? 'bg-amber-500' : 'bg-rose-500';
+    return <div className="h-2.5 w-32 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div className={clsx('h-full rounded-full', tone)} style={{ width: `${w}%` }} /></div>;
+  };
+  const totals = heads.map((h) => {
+    const of = rows.reduce((a, r) => a + (r.heads[h.code]?.of ?? 0), 0);
+    const done = rows.reduce((a, r) => a + (r.heads[h.code]?.done ?? 0), 0);
+    return { h, c: { of, done, pct: achievement(done, of) } as Cell };
+  });
+  const kpiRows = (cells: { h: HeadItem; c?: Cell }[]) => cells.map(({ h, c }) => (
+    <tr key={h.code}>
+      <td className="border-b border-r border-slate-200 py-1.5 pl-2 pr-1.5 leading-tight sm:whitespace-nowrap sm:pl-8 sm:pr-3 dark:border-slate-700">{h.name}{h.money && <span className="ml-1 hidden text-[10.5px] text-slate-400 sm:inline">{MILLIONS}</span>}</td>
+      {measures.map((m) => (
+        <td key={m.key} className={clsx('whitespace-nowrap border-b border-r border-slate-200 px-1 py-1.5 text-center tabular-nums sm:px-3 dark:border-slate-700', m.key === 'pct' ? 'font-bold text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300')}>
+          {m.key === 'pct' ? (c?.pct != null ? `${Math.round(c.pct)}%` : <span className="text-slate-300">—</span>) : (value(c, m.key, h.money) || <span className="text-slate-300">—</span>)}
+        </td>
+      ))}
+      <td className="hidden border-b border-slate-200 px-3 py-1.5 sm:table-cell dark:border-slate-700 print:hidden">{bar(c?.pct)}</td>
+    </tr>
+  ));
+  return (
+    <table ref={tableRef} className="w-full border-separate border-spacing-0 text-[12px] sm:min-w-[640px] sm:text-[13px]">
+      <thead className="sticky top-0 z-30 bg-brand-700 text-center text-[12.5px] text-white print:static">
+        <tr>
+          <th className="border-b border-r border-white/50 px-2 py-2 text-left sm:px-3">KPI</th>
+          {measures.map((m) => <th key={m.key} className="border-b border-r border-white/50 px-1 py-2 leading-tight sm:px-3">{m.key === 'achieved' ? <><span className="sm:hidden">Done</span><span className="hidden sm:inline">{`${T.achieved} / ${T.disposed}`}</span></> : m.key === 'pct' ? '%' : m.key === 'balance' ? <><span className="sm:hidden">Bal.</span><span className="hidden sm:inline">Balance</span></> : m.label}</th>)}
+          <th className="hidden border-b border-white/50 px-3 py-2 sm:table-cell print:hidden">Progress</th>
+        </tr>
+      </thead>
+      {rows.map((r, idx) => {
+        const key = `${r.user._id}-${r.unitId}`;
+        const open = !collapsed.has(key);
+        const facts = [
+          ...groupCols.map((l) => r.areas?.[l]).filter(Boolean),
+          areaOf(r),
+          ...details.filter((d) => d.key !== 'rank' && d.key !== 'overall').map((d) => detailValue(r, d.key)).filter(Boolean),
+        ];
+        return (
+          <tbody key={key} className="break-inside-avoid">
+            <tr className="cursor-pointer !bg-brand-50 hover:!bg-brand-100 dark:!bg-brand-900/40" onClick={() => toggle(key)}>
+              <td colSpan={cols} className="sticky top-[37px] z-20 border-b border-t-2 border-b-brand-200 border-t-brand-600 bg-inherit px-3 py-2 print:static">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                  <span className="print:hidden">{open ? <ChevronDown className="size-4 text-brand-700" /> : <ChevronRight className="size-4 text-brand-700" />}</span>
+                  <span className="w-8 text-xs font-bold text-slate-500 tabular-nums">{details.some((d) => d.key === 'rank') && r.rank != null ? `#${r.rank}` : idx + 1}</span>
+                  <Link to={`/officers/${r.user._id}`} onClick={(e) => e.stopPropagation()} className="font-bold text-slate-900 hover:text-brand-700 hover:underline dark:text-white">{r.user.name}</Link>
+                  <span className="text-xs text-slate-600 dark:text-slate-300">{facts.join(' · ')}</span>
+                  {details.some((d) => d.key === 'overall') && r.overall != null && (
+                    <span className="ml-auto text-sm">{perf ? 'Achieved' : 'KPI score'} <b className="text-slate-900 dark:text-white">{perf ? `${Math.round(r.overall)}%` : Math.round(r.overall)}</b></span>
+                  )}
+                </div>
+              </td>
+            </tr>
+            {open && kpiRows(heads.map((h) => ({ h, c: r.heads[h.code] })))}
+          </tbody>
+        );
+      })}
+      <tbody className="break-inside-avoid">
+        <tr className="!bg-slate-100 dark:!bg-slate-800">
+          <td colSpan={cols} className="border-b border-t-2 border-b-slate-300 border-t-slate-500 px-3 py-2 font-bold">Total · {rows.length} officer(s)</td>
+        </tr>
+        {kpiRows(totals)}
+      </tbody>
+    </table>
   );
 }

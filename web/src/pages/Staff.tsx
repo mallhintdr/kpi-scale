@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Download, Search, Printer } from 'lucide-react';
+import { Download, Search, Printer, LayoutList, Table2 } from 'lucide-react';
 import { exportTableXlsx } from '../lib/xlsx';
 import { useDeferredValue, useEffect, useMemo, useState, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -8,10 +8,11 @@ import { useTargetSummary } from '../components/targets';
 import { PageHeader } from '../components/AppShell';
 import { BandChip } from '../components/charts';
 import { FyPicker, UnitField } from '../components/rev';
-import { Card, Empty, ErrorState, Field, Input, Loading, Select } from '../components/ui';
+import { Card, Empty, ErrorState, Field, Input, Loading, Select, Segmented } from '../components/ui';
 import { get } from '../lib/api';
 import { fmtPKR, getOrg, groupLevels, MILLIONS, parentLevels, T, UNIT_LABEL, useCaps, useFy, useMeta, type Block, type Post, type RevBand, type UnitRef } from '../lib/rev';
 import { POSTS_BY_UNIT } from './League';
+import { OfficerWise } from './Reports';
 
 interface Cell { pct: number | null; done: number; of: number }
 interface StaffRow {
@@ -82,8 +83,18 @@ export default function Staff() {
   const [selected, setSelected] = useState<string | null>(null);
 
   const tableRef = useRef<HTMLTableElement>(null);
+  // Layout: officer-wise (a block per officer, a row per KPI) or the wide table; officer-wise above 3 KPIs
+  const [layout, setLayout] = useState<'officer' | 'table' | null>(null);
+  const view = layout ?? (columns.length > 3 ? 'officer' : 'table');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleOfficer = (k: string) => setCollapsed((c) => { const n = new Set(c); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const cellValue = (c: Cell | undefined, m: 'target' | 'achieved' | 'balance' | 'pct', money: boolean) => {
+    if (!c) return '';
+    const f = (v: number) => (money ? fmtPKR(v) : v.toLocaleString());
+    return m === 'target' ? f(c.of) : m === 'achieved' ? f(c.done) : m === 'balance' ? f(Math.max(0, c.of - c.done)) : c.pct == null ? '' : `${Math.round(c.pct)}%`;
+  };
   const exportXlsx = () => exportTableXlsx(tableRef.current, {
-    filename: `staff-${post}-${unit?.name}-${fy}`, sheet: 'Staff performance', freezeCols: 3 + groupCols.length,
+    filename: `staff-${post}-${unit?.name}-${fy}`, sheet: 'Staff performance', freezeCols: view === 'officer' ? 1 : 3 + groupCols.length,
     title: `Staff performance · ${unit?.name ?? ''} · FY ${fy}`, subtitle: `Generated ${new Date().toLocaleString()}`,
   });
   const exportCsv = () => {
@@ -129,6 +140,16 @@ export default function Staff() {
             <div className="text-xs">{rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS} · generated <span className="font-semibold">{new Date().toLocaleString()}</span></div>
           </div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500 print:hidden">
+            <span className="flex flex-wrap items-center gap-2">
+              <Segmented value={view} onChange={(v) => setLayout(v)} options={[
+                { value: 'officer', label: <span className="flex items-center gap-1 whitespace-nowrap" title="One block per officer, a row per KPI"><LayoutList className="size-4" />Officer-wise</span> },
+                { value: 'table', label: <span className="flex items-center gap-1 whitespace-nowrap" title="KPIs across, officers down"><Table2 className="size-4" />Table</span> },
+              ]} />
+              {view === 'officer' && <>
+                <button className="font-medium text-brand-700 hover:underline" onClick={() => setCollapsed(new Set())}>Expand all</button>
+                <button className="font-medium text-brand-700 hover:underline" onClick={() => setCollapsed(new Set(rows.map((x) => `${x.user._id}-${x.unitId}`)))}>Collapse all</button>
+              </>}
+            </span>
             <span>
               {rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS} · tap a row to highlight it · tap a name for the profile
               {focusName && (
@@ -138,6 +159,17 @@ export default function Staff() {
               )}
             </span>
           </div>
+          {view === 'officer' ? (
+            <Card className="overflow-hidden">
+              <div className="max-h-[70vh] overflow-auto print:max-h-none print:overflow-visible">
+                <OfficerWise rows={rows} heads={columns} measures={[{ key: 'target', label: 'Target' }, { key: 'achieved', label: 'Achieved' }, { key: 'balance', label: 'Balance' }, { key: 'pct', label: '%' }]}
+                  details={[{ key: 'rank', label: 'Rank' }, { key: 'overall', label: 'Overall' }, { key: 'bps', label: 'BPS' }]} perf={perf}
+                  areaOf={(r) => r.charges.join(', ').replace(/ \(test\)/g, '') + (r.chargeType && r.chargeType !== 'regular' ? (r.chargeType === 'additional' ? ' (Addl. charge)' : ' (Look after)') : '')}
+                  detailValue={(r, d) => (d === 'bps' ? (r.user.bps ? `BPS-${r.user.bps}` : '') : '')} value={cellValue}
+                  groupCols={groupCols} collapsed={collapsed} toggle={toggleOfficer} tableRef={tableRef} />
+              </div>
+            </Card>
+          ) : (
           <Card className="overflow-hidden">
             <div className="max-h-[70vh] overflow-auto">
               <table ref={tableRef} className="w-max min-w-full border-separate border-spacing-0 text-sm">
@@ -218,6 +250,7 @@ export default function Staff() {
               </table>
             </div>
           </Card>
+          )}
         </>
       )}
     </>
