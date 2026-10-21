@@ -59,8 +59,12 @@ export const Card = ({ className, children, onClick }: { className?: string; chi
 );
 
 export const SectionTitle = ({ children, action }: { children: ReactNode; action?: ReactNode }) => (
-  <div className="mb-1.5 mt-4 flex items-center justify-between px-0.5 first:mt-0">
-    <h2 className="text-[13px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{titleNode(children)}</h2>
+  // Section header: gold accent bar, bold green caps, light green rule underneath
+  <div className="mb-2 mt-5 flex items-center justify-between gap-2 border-b-2 border-brand-100 pb-1.5 first:mt-0 dark:border-brand-900">
+    <h2 className="flex items-center gap-2 text-[14.5px] font-bold uppercase tracking-wide text-brand-800 dark:text-brand-200">
+      <span aria-hidden className="h-5 w-1.5 shrink-0 rounded-full bg-gold-500" />
+      {titleNode(children)}
+    </h2>
     {action}
   </div>
 );
