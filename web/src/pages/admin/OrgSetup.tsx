@@ -60,6 +60,16 @@ const KIND_LABEL: Record<BlockD['kind'], string> = {
   register: 'Register (items & amounts)',
   tasks: 'Tasks on time',
 };
+/* Client-only stable ids for editable list items (React keys survive reorder/removal); stripped before save. */
+let cidSeq = 0;
+const LISTS = ['levels', 'posts', 'blocks', 'metrics', 'registers', 'profiles', 'tags', 'bands'] as const;
+const withIds = (d: Draft): Draft => {
+  for (const k of LISTS) for (const it of (d[k] ?? []) as { _cid?: number }[]) it._cid ??= ++cidSeq;
+  return d;
+};
+const stripIds = (d: Draft): Draft => JSON.parse(JSON.stringify(d, (k, v) => (k === '_cid' ? undefined : v)));
+const kid = (o: object) => (o as { _cid?: number })._cid!;
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const toKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/^(\d)/, 'x$1').slice(0, 40) || 'item';
 const toCode = (s: string) => toKey(s).toUpperCase();
@@ -75,22 +85,23 @@ export default function OrgSetup() {
   const [history, setHistory] = useState(false);
   const [templates, setTemplates] = useState(false);
   useEffect(() => {
-    if (bp.data?.doc && !draft) setDraft(structuredClone(bp.data.doc));
+    if (bp.data?.doc && !draft) setDraft(withIds(structuredClone(bp.data.doc)));
+    // Intentional: only seed the draft when the blueprint (re)loads; edits must not be overwritten.
   }, [bp.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dirty = useMemo(() => !!draft && !!bp.data?.doc && JSON.stringify(draft) !== JSON.stringify(bp.data.doc), [draft, bp.data]);
+  const dirty = useMemo(() => !!draft && !!bp.data?.doc && JSON.stringify(stripIds(draft)) !== JSON.stringify(bp.data.doc), [draft, bp.data]);
 
   // Live validation (debounced)
   useEffect(() => {
     if (!draft) return;
     const h = setTimeout(() => {
-      post<{ ok: boolean; issues: Issue[] }>('/org/blueprint/validate', { doc: draft }).then((r) => setIssues(r.issues)).catch(() => undefined);
+      post<{ ok: boolean; issues: Issue[] }>('/org/blueprint/validate', { doc: stripIds(draft) }).then((r) => setIssues(r.issues)).catch(() => undefined);
     }, 400);
     return () => clearTimeout(h);
   }, [draft]);
 
   const save = useMutation({
-    mutationFn: () => put<{ version: number; warnings: string[] }>('/org/blueprint', { doc: draft, note: note || undefined }),
+    mutationFn: () => put<{ version: number; warnings: string[] }>('/org/blueprint', { doc: draft && stripIds(draft), note: note || undefined }),
     onSuccess: (r) => {
       toast(`Saved as version ${r.version}${r.warnings.length ? ` — ${r.warnings[0]}` : ''}`);
       setNote('');
@@ -109,7 +120,7 @@ export default function OrgSetup() {
   const update = (fn: (d: Draft) => void) => setDraft((d) => {
     const n = structuredClone(d!);
     fn(n);
-    return n;
+    return withIds(n);
   });
   const tabIssues = (t: Tab) => issues.filter((i) => ({ general: /^(name|calendar|money|terms|bands|tags)/, levels: /^levels/, posts: /^posts/, kpis: /^metrics/, scoring: /^(blocks|profiles)/, registers: /^registers/ })[t].test(i.path)).length;
 
@@ -132,7 +143,7 @@ export default function OrgSetup() {
             <button key={t.value} onClick={() => setTab(t.value)}
               className={clsx('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium', tab === t.value ? 'bg-white text-brand-800 shadow-sm dark:bg-slate-900 dark:text-white' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300')}>
               {t.label}
-              {tabIssues(t.value) > 0 && <span className="rounded-full bg-rose-500 px-1.5 text-[10px] font-bold text-white">{tabIssues(t.value)}</span>}
+              {tabIssues(t.value) > 0 && <span className="rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{tabIssues(t.value)}</span>}
             </button>
           ))}
         </div>
@@ -146,7 +157,7 @@ export default function OrgSetup() {
       {tab === 'registers' && <Registers d={draft} update={update} />}
 
       {/* Save bar */}
-      <div className="sticky bottom-20 z-20 mt-4 lg:bottom-3">
+      <div className="sticky bottom-20 z-20 mt-3 lg:bottom-3">
         <Card className="space-y-2 p-3 shadow-lg ring-2 ring-brand-100 dark:ring-brand-900">
           {issues.length > 0 ? (
             <div className="flex items-start gap-2 text-sm text-rose-700 dark:text-rose-300">
@@ -167,14 +178,14 @@ export default function OrgSetup() {
           )}
           <div className="flex flex-wrap gap-2">
             <Input className="min-w-0 basis-full sm:basis-0 sm:flex-1" placeholder="What changed? (optional note for the history)" value={note} onChange={(e) => setNote(e.target.value)} />
-            {dirty && <Button variant="ghost" onClick={() => { setDraft(structuredClone(bp.data!.doc!)); save.reset(); }}><RotateCcw className="size-4" />Discard</Button>}
+            {dirty && <Button variant="ghost" onClick={() => { setDraft(withIds(structuredClone(bp.data!.doc!))); save.reset(); }}><RotateCcw className="size-4" />Discard</Button>}
             <Button disabled={!dirty || issues.length > 0} loading={save.isPending} onClick={() => save.mutate()}><Save className="size-4" />Save &amp; apply</Button>
           </div>
         </Card>
       </div>
 
       {history && <HistorySheet onClose={() => setHistory(false)} onRestored={() => { setDraft(null); setHistory(false); }} />}
-      {templates && <TemplateSheet onClose={() => setTemplates(false)} onPick={(doc) => { setDraft({ ...doc, name: draft.name }); setTemplates(false); toast('Template loaded — review it, then save'); }} />}
+      {templates && <TemplateSheet onClose={() => setTemplates(false)} onPick={(doc) => { setDraft(withIds(structuredClone({ ...doc, name: draft.name }))); setTemplates(false); toast('Template loaded — review it, then save'); }} />}
     </>
   );
 }
@@ -186,7 +197,7 @@ function Item({ title, sub, badges, children, onUp, onDown, onRemove, open: open
   const [open, setOpen] = useState(openInit);
   return (
     <Card className="overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2.5">
+      <div className="flex items-center gap-2 px-3 py-2">
         <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
           <ChevronDown className={clsx('size-4 shrink-0 text-slate-400 transition', !open && '-rotate-90')} />
           <div className="min-w-0">
@@ -241,7 +252,7 @@ function General({ d, update }: Ed) {
     <Field label={label} hint={hint}>{(id) => <Input id={id} value={t[k] ?? ''} onChange={(e) => update((x) => { x.terms = { ...(x.terms ?? {}), [k]: e.target.value }; })} />}</Field>
   );
   return (
-    <div className="space-y-4">
+    <div className="space-y-2.5">
       <Card className="grid gap-3 p-4 sm:grid-cols-2">
         <Field label="Framework name">{(id) => <Input id={id} value={d.name} onChange={(e) => update((x) => { x.name = e.target.value; })} />}</Field>
         <Field label="Industry">{(id) => <Input id={id} value={d.industry ?? ''} placeholder="e.g. Marketing, HR, Public sector" onChange={(e) => update((x) => { x.industry = e.target.value; })} />}</Field>
@@ -287,7 +298,7 @@ function General({ d, update }: Ed) {
       <Card className="space-y-2 p-4">
         {!d.tags.length && <div className="text-sm text-slate-500">No tags. Tags group KPIs for reporting, e.g. Rabi / Kharif crops or quarters.</div>}
         {d.tags.map((t2, i) => (
-          <div key={i} className="flex gap-2">
+          <div key={kid(t2)} className="flex gap-2">
             <Input value={t2.label} onChange={(e) => update((x) => { x.tags[i].label = e.target.value; })} />
             <Input className="w-40 font-mono text-xs" value={t2.key} onChange={(e) => update((x) => { x.tags[i].key = toKey(e.target.value); })} />
             <Button variant="ghost" onClick={() => update((x) => { x.tags.splice(i, 1); })}><Trash2 className="size-4" /></Button>
@@ -298,7 +309,7 @@ function General({ d, update }: Ed) {
       <SectionTitle>Grade bands (score from … upwards)</SectionTitle>
       <Card className="space-y-2 p-4">
         {d.bands.map((b, i) => (
-          <div key={i} className="flex items-center gap-2">
+          <div key={kid(b)} className="flex items-center gap-2">
             <Input value={b.label} onChange={(e) => update((x) => { x.bands[i].label = e.target.value; })} />
             <Input className="w-24 text-right" type="number" min={0} max={100} value={b.min} onChange={(e) => update((x) => { x.bands[i].min = Number(e.target.value); })} />
             <span className="text-sm text-slate-500">%+</span>
@@ -317,7 +328,7 @@ function Levels({ d, update }: Ed) {
     <div className="space-y-2">
       <p className="text-sm text-slate-500">From the top of your organisation down. Every unit sits one level below its parent (e.g. Region › Branch › Team). Levels already used by units cannot be removed.</p>
       {d.levels.map((l, i) => (
-        <Item key={i} title={<><span className="mr-2 text-xs font-bold text-slate-400">{i + 1}</span>{l.label}</>} sub={`${l.plural ?? `${l.label}s`} · key ${l.key}`}
+        <Item key={kid(l)} title={<><span className="mr-2 text-xs font-bold text-slate-400">{i + 1}</span>{l.label}</>} sub={`${l.plural ?? `${l.label}s`} · key ${l.key}`}
           onUp={i ? () => update((x) => move(x.levels, i, -1)) : undefined} onDown={i < d.levels.length - 1 ? () => update((x) => move(x.levels, i, 1)) : undefined}
           onRemove={d.levels.length > 1 ? () => update((x) => { x.levels.splice(i, 1); }) : undefined}>
           <Field label="Name (singular)">{(id) => <Input id={id} value={l.label} onChange={(e) => update((x) => { x.levels[i].label = e.target.value; })} />}</Field>
@@ -341,7 +352,7 @@ function Posts({ d, update }: Ed) {
     <div className="space-y-2">
       <p className="text-sm text-slate-500">Posts are the roles people hold through postings. What a post may enter and verify is set on each KPI.</p>
       {d.posts.map((p, i) => (
-        <Item key={i} title={p.label} sub={`${p.levels.map((l) => d.levels.find((x) => x.key === l)?.label ?? l).join(', ')} · key ${p.key}`}
+        <Item key={kid(p)} title={p.label} sub={`${p.levels.map((l) => d.levels.find((x) => x.key === l)?.label ?? l).join(', ')} · key ${p.key}`}
           badges={<>{p.scored === false ? <Badge>Data post</Badge> : <Badge tone="bg-brand-50 text-brand-700">Scored</Badge>}{p.single && <Badge>One per unit</Badge>}</>}
           onUp={i ? () => update((x) => move(x.posts, i, -1)) : undefined} onDown={i < d.posts.length - 1 ? () => update((x) => move(x.posts, i, 1)) : undefined}
           onRemove={() => update((x) => { x.posts.splice(i, 1); })}>
@@ -378,7 +389,7 @@ function Kpis({ d, update }: Ed) {
           <div key={g} className="space-y-2">
             <SectionTitle>{blk?.label ?? g} <span className="text-xs font-normal normal-case text-slate-400">· {blk ? KIND_LABEL[blk.kind] : 'unknown block'}</span></SectionTitle>
             {list.map(({ m, i }) => (
-              <Item key={i} title={<span className={clsx(m.active === false && 'text-slate-400 line-through')}>{m.name}</span>}
+              <Item key={kid(m)} title={<span className={clsx(m.active === false && 'text-slate-400 line-through')}>{m.name}</span>}
                 sub={`${m.code} · ${d.levels.find((l) => l.key === m.level)?.label ?? m.level}${m.perHolder ? ' · per person' : ''} · weight ${m.weight ?? 1}`}
                 badges={<>{m.unit === 'money' ? <Badge>Money</Badge> : <Badge>{m.unit ?? 'money'}</Badge>}{m.arrears && <Badge>Arrears</Badge>}{m.active === false && <Badge tone="bg-slate-200 text-slate-600">Retired</Badge>}</>}
                 onRemove={() => update((x) => { x.metrics.splice(i, 1); })}>
@@ -414,11 +425,11 @@ function Kpis({ d, update }: Ed) {
 /* ---------- Scoring: blocks and profiles ---------- */
 function Scoring({ d, update }: Ed) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-2.5">
       <SectionTitle action={<Button size="sm" variant="ghost" onClick={() => update((x) => { const n = x.blocks.length + 1; x.blocks.push({ key: `block_${n}`, label: `New block ${n}`, kind: 'target' }); })}><Plus className="size-4" />Block</Button>}>Scoring blocks</SectionTitle>
       <div className="space-y-2">
         {d.blocks.map((b, i) => (
-          <Card key={i} className="grid gap-2 p-3 sm:grid-cols-[1fr_12rem_10rem_auto] sm:items-end">
+          <Card key={kid(b)} className="grid gap-2 p-3 sm:grid-cols-[1fr_12rem_10rem_auto] sm:items-end">
             <Field label="Block name">{(id) => <Input id={id} value={b.label} onChange={(e) => update((x) => { x.blocks[i].label = e.target.value; })} />}</Field>
             <Field label="Type">{(id) => <Select id={id} value={b.kind} onChange={(e) => update((x) => { x.blocks[i].kind = e.target.value as BlockD['kind']; })}>{Object.entries(KIND_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select>}</Field>
             <Field label="Key">{(id) => <Input id={id} className="font-mono text-xs" value={b.key} onChange={(e) => update((x) => { const old = x.blocks[i].key; const k = toKey(e.target.value); x.blocks[i].key = k; x.metrics.forEach((m) => { if (m.block === old) m.block = k; }); x.profiles.forEach((p) => { if (old in p.weights) { p.weights[k] = p.weights[old]; delete p.weights[old]; } }); })} />}</Field>
@@ -432,7 +443,7 @@ function Scoring({ d, update }: Ed) {
       </SectionTitle>
       <Card className="overflow-x-auto">
         <table className="w-full min-w-[560px] text-sm">
-          <thead className="bg-brand-700 text-center text-[12.5px] text-white">
+          <thead className="bg-brand-700 text-center text-[13.5px] text-white">
             <tr>
               <th className="px-3 py-2">Profile</th>
               {d.blocks.map((b) => <th key={b.key} className="px-2 py-2">{b.label}</th>)}
@@ -443,7 +454,7 @@ function Scoring({ d, update }: Ed) {
             {d.profiles.map((p, i) => {
               const total = d.blocks.reduce((s, b) => s + (p.weights[b.key] ?? 0), 0);
               return (
-                <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
+                <tr key={kid(p)} className="border-b border-slate-100 dark:border-slate-800">
                   <td className="px-2 py-1.5"><Input value={p.label} onChange={(e) => update((x) => { x.profiles[i].label = e.target.value; })} /></td>
                   {d.blocks.map((b) => (
                     <td key={b.key} className="px-1 py-1.5"><Input className="w-16 text-center" type="number" min={0} max={100} value={p.weights[b.key] ?? 0} onChange={(e) => update((x) => { x.profiles[i].weights[b.key] = Number(e.target.value); })} /></td>
@@ -471,7 +482,7 @@ function Registers({ d, update }: Ed) {
       <p className="text-sm text-slate-500">Registers hold individual items with an amount and a status — e.g. audit paras, customer complaints, grievances. They are scored in a "Register" block.</p>
       {!regBlocks.length && <Card className="p-4 text-sm text-amber-700">Add a block of type "Register" on the Scoring tab to score registers.</Card>}
       {d.registers.map((r, i) => (
-        <Item key={i} title={r.label} sub={`${r.categories.length} categories · ${r.levels.map((l) => d.levels.find((x) => x.key === l)?.label ?? l).join(', ')}`} onRemove={() => update((x) => { x.registers.splice(i, 1); })}>
+        <Item key={kid(r)} title={r.label} sub={`${r.categories.length} categories · ${r.levels.map((l) => d.levels.find((x) => x.key === l)?.label ?? l).join(', ')}`} onRemove={() => update((x) => { x.registers.splice(i, 1); })}>
           <Field label="Name">{(id) => <Input id={id} value={r.label} onChange={(e) => update((x) => { x.registers[i].label = e.target.value; })} />}</Field>
           <Field label="Amount column">{(id) => <Input id={id} value={r.amountLabel ?? ''} placeholder="Amount" onChange={(e) => update((x) => { x.registers[i].amountLabel = e.target.value; })} />}</Field>
           <Field label="Scored in">{(id) => <Select id={id} value={r.block} onChange={(e) => update((x) => { x.registers[i].block = e.target.value; })}>{regBlocks.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}</Select>}</Field>
@@ -524,12 +535,12 @@ function TemplateSheet({ onClose, onPick }: { onClose: () => void; onPick: (doc:
       <p className="mb-3 text-sm text-slate-500">Loads the template into the editor. Nothing changes until you save, and items your data still uses cannot be removed.</p>
       {t.isLoading ? <Loading /> : (
         <div className="space-y-2">
-          {[...new Set(t.data?.map((x) => x.category))].map((cat) => <div key={cat} className="space-y-2"><div className="pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{cat}</div>
+          {[...new Set(t.data?.map((x) => x.category))].map((cat) => <div key={cat} className="space-y-2"><div className="pt-2 text-[12px] font-semibold uppercase tracking-wide text-slate-500">{cat}</div>
           {t.data?.filter((x) => x.category === cat).map((x) => (
             <Card key={x.key} className="p-3" onClick={() => confirm(`Replace the editor contents with "${x.label}"?`) && onPick(structuredClone(x.blueprint))}>
               <div className="font-medium">{x.label}</div>
               <div className="text-xs text-slate-500">{x.description}</div>
-              <div className="mt-1 text-[11px] text-slate-400">{x.blueprint.levels.map((l) => l.label).join(' › ')} · {x.blueprint.metrics.length} KPIs</div>
+              <div className="mt-1 text-[12px] text-slate-400">{x.blueprint.levels.map((l) => l.label).join(' › ')} · {x.blueprint.metrics.length} KPIs</div>
             </Card>
           ))}</div>)}
         </div>

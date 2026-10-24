@@ -7,6 +7,8 @@ export interface AccessPayload {
   tid: string;
   role: string;
   tv: number;
+  /** Read-only guest (demo) session. */
+  ro?: boolean;
 }
 
 export const signAccessToken = (p: AccessPayload) =>

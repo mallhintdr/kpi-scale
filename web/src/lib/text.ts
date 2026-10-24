@@ -4,7 +4,7 @@
  * containing capitals or digits are left alone (KPI, FY, Rs, AIT, 236-C, iPhone); names are untouched
  * because they are already capitalised. Sentences (help text, messages) should not be passed here.
  */
-import { Children, isValidElement, type ReactNode } from 'react';
+import { Children, cloneElement, Fragment, isValidElement, type ReactElement, type ReactNode } from 'react';
 
 const MINOR = new Set(['a', 'an', 'the', 'and', 'or', 'nor', 'but', 'of', 'in', 'on', 'at', 'to', 'for', 'by', 'vs', 'per', 'with', 'from', 'as', 'via', 'into']);
 
@@ -26,7 +26,13 @@ export function titleCase(s: string): string {
 /** Title-case plain strings inside a ReactNode, leaving elements (icons, links, numbers) as they are. */
 export function titleNode(node: ReactNode): ReactNode {
   if (typeof node === 'string') return titleCase(node);
-  if (Array.isArray(node)) return Children.map(node, (c) => (typeof c === 'string' ? titleCase(c) : c));
-  if (isValidElement(node)) return node;
+  if (Array.isArray(node)) return Children.map(node, (c) => titleNode(c));
+  // Look inside fragments and plain HTML wrappers (<span>, <b>) — e.g. an icon plus a label — but not
+  // inside components such as links, whose text is usually a name or data.
+  if (isValidElement(node) && (node.type === Fragment || typeof node.type === 'string')) {
+    const el = node as ReactElement<{ children?: ReactNode }>;
+    if (el.props.children == null) return node;
+    return cloneElement(el, undefined, titleNode(el.props.children));
+  }
   return node;
 }

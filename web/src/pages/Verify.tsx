@@ -91,7 +91,7 @@ function EntryQueue() {
               </div>
             );
           })}
-          <div className="pb-safe fixed inset-x-0 bottom-16 z-30 grid grid-cols-2 gap-2 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:static lg:mt-4 lg:border-0 lg:bg-transparent lg:p-0 dark:border-slate-800 dark:bg-slate-900/95">
+          <div className="pb-safe fixed inset-x-0 bottom-16 z-30 grid grid-cols-2 gap-2 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:static lg:mt-3 lg:border-0 lg:bg-transparent lg:p-0 dark:border-slate-800 dark:bg-slate-900/95">
             <Button variant="secondary" disabled={!selected.size} loading={act.isPending && act.variables?.action === 'reject'} onClick={() => {
               const reason = prompt('Reason for returning these entries?');
               if (reason !== null) act.mutate({ action: 'reject', reason });
@@ -146,12 +146,12 @@ function TargetQueue() {
             </div>
             <div className="text-right text-sm tabular-nums">
               <b>{p.money ? fmtFull(p.value) : p.value}</b>
-              <div className="text-[11px] text-slate-500">of {p.money ? fmtFull(p.targetValue) : p.targetValue}</div>
+              <div className="text-[12px] text-slate-500">of {p.money ? fmtFull(p.targetValue) : p.targetValue}</div>
             </div>
           </label>
         ))}
       </Card>
-      <div className="pb-safe fixed inset-x-0 bottom-16 z-30 grid grid-cols-2 gap-2 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:static lg:mt-4 lg:border-0 lg:bg-transparent lg:p-0 dark:border-slate-800 dark:bg-slate-900/95">
+      <div className="pb-safe fixed inset-x-0 bottom-16 z-30 grid grid-cols-2 gap-2 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:static lg:mt-3 lg:border-0 lg:bg-transparent lg:p-0 dark:border-slate-800 dark:bg-slate-900/95">
         <Button variant="secondary" disabled={!selected.size} loading={act.isPending && act.variables === 'reject'} onClick={() => act.mutate('reject')}><X className="size-4" />Reject</Button>
         <Button disabled={!selected.size} loading={act.isPending && act.variables === 'verify'} onClick={() => act.mutate('verify')}><Check className="size-4" />Verify {selected.size || ''}</Button>
       </div>

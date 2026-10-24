@@ -8,8 +8,8 @@ import { objectId, q, validate } from '../../middleware/validate.js';
 import { Charge, RevEntry, RevTarget, Unit, User } from '../../models/index.js';
 import { publicBlueprint, type BP } from '../org/blueprint.js';
 import { bpOf } from '../org/service.js';
-import { activeFilter, assertCanRead, browseRootsFor, grantsOf, hasCap, myCharges, scopeRoots } from './access.js';
-import { breakdown, configResolver, headCells, inUnit, loadFacts, rollup, scoreFacts, type FactSet } from './scoring.js';
+import { activeFilter, assertCanRead, assertCanReadFull, browseRootsFor, canSeeFull, grantsOf, hasCap, myCharges, scopeRoots } from './access.js';
+import { breakdown, configResolver, headCells, loadFacts, rollupUnit, rollupWithin, scoreFacts, type FactSet } from './scoring.js';
 
 const router = Router();
 const fyQuery = z.object({ fy: z.string().optional() });
@@ -44,7 +44,7 @@ router.get('/meta', (req, res) => {
     })),
     auditCategories: bp.registers[0]?.categories ?? [],
     currentFy: bp.fy.of(new Date()),
-    fys: bp.fy.list(3),
+    fys: bp.fy.list(5),
   });
 });
 
@@ -96,7 +96,7 @@ router.get('/me', async (req, res) => {
 
 /* Child units for pickers */
 router.get('/units/:id/children', validate({ params: z.object({ id: objectId }) }), async (req, res) => {
-  await assertCanRead(req.user!, req.params.id as string);
+  await assertCanReadFull(req.user!, req.params.id as string);
   res.json(await Unit.find({ parentId: req.params.id }).select('type name code').sort({ name: 1 }).lean());
 });
 
@@ -105,13 +105,13 @@ router.get('/units/:id/descendants', validate({ params: z.object({ id: objectId 
   const bp = bpOf(req);
   const type = q<{ type: string }>(req).type;
   if (!bp.level.has(type)) throw badRequest('Unknown level');
-  await assertCanRead(req.user!, req.params.id as string);
+  await assertCanReadFull(req.user!, req.params.id as string);
   const items = await Unit.find({ anc: new Types.ObjectId(req.params.id as string), type }).select('type name code parentId').sort({ name: 1 }).lean();
   res.json(items);
 });
 
 async function holdersOf(bp: BP, unitIds: Types.ObjectId[]) {
-  const rows = await Charge.find({ unitId: { $in: unitIds }, ...activeFilter() }).populate('userId', 'name designation bps phone').lean();
+  const rows = await Charge.find({ unitId: { $in: unitIds }, ...activeFilter() }).populate('userId', 'name designation bps').lean();
   return rows
     .filter((r) => r.userId)
     .map((r) => ({ unitId: String(r.unitId), post: r.post, postLabel: bp.postLabel(r.post), chargeType: r.chargeType, user: r.userId }));
@@ -136,8 +136,15 @@ async function trendFor(bp: BP, fy: string, match: Record<string, unknown>) {
 router.get('/units/:id', validate({ params: z.object({ id: objectId }), query: fyQuery }), async (req, res) => {
   const bp = bpOf(req);
   const fy = resolveFy(bp, q<any>(req).fy);
-  const unit = await assertCanRead(req.user!, req.params.id as string);
-  res.json(await view(req, bp, `unit:${unit._id}:${fy}`, () => unitView(bp, unit, fy)));
+  const unit = await assertCanReadFull(req.user!, req.params.id as string);
+  const v = await view(req, bp, `unit:${unit._id}:${fy}`, () => unitView(bp, unit, fy));
+  // Contact numbers are personal data: never cached, added only for viewers with full access to this unit
+  if (await canSeeFull(req.user!, String(unit._id))) {
+    const ids = [...v.holders, ...v.childHolders].map((h: any) => h.user?._id).filter(Boolean);
+    const phones = new Map((await User.find({ _id: { $in: ids } }).select('phone').lean()).map((u) => [String(u._id), u.phone]));
+    const add = (h: any) => ({ ...h, user: h.user ? { ...h.user, phone: phones.get(String(h.user._id)) } : h.user });
+    res.json({ ...v, holders: v.holders.map(add), childHolders: v.childHolders.map(add) });
+  } else res.json(v);
 });
 
 async function unitView(bp: BP, unit: any, fy: string) {
@@ -149,12 +156,12 @@ async function unitView(bp: BP, unit: any, fy: string) {
   ]);
   const level = bp.profileForLevel(unit.type);
   const anc: string[] = unit.anc.map(String);
-  const f = rollup(facts.rows, inUnit(String(unit._id)));
+  const f = rollupUnit(facts.rows, String(unit._id));
   const own = scoreFacts(f, level, resolve(anc), bp);
 
   const scoredChildren = children
     .map((c) => {
-      const cf = rollup(facts.rows, inUnit(String(c._id)));
+      const cf = rollupUnit(facts.rows, String(c._id));
       const s = scoreFacts(cf, bp.profileForLevel(c.type), resolve([...anc, String(c._id)]), bp);
       const b = breakdown(cf, bp);
       return { ...c, score: s.score, band: bp.band(s.score), blocks: s.blocks, target: b.totals.target, collected: b.totals.collected };
@@ -204,7 +211,7 @@ function officerFacts(bp: BP, facts: FactSet, charges: OfficerCharge[], post: st
   const isHolder = bp.holderPosts.has(post) && includeHolder;
   const oversight = bp.post.get(post)?.oversightAt ?? [];
   const unitIds = charges.filter((c) => !(isHolder && oversight.includes(facts.units.get(c.unitId)?.type ?? ''))).map((c) => c.unitId);
-  const f = rollup(facts.rows, (r) => (r.roUserId ? isHolder && r.roUserId === userId : unitIds.some((u) => r.anc.includes(u))));
+  const f = rollupWithin(facts.rows, unitIds, isHolder ? userId : null, (r) => (r.roUserId ? isHolder && r.roUserId === userId : unitIds.some((u) => r.anc.includes(u))));
   return { f, unitIds };
 }
 
@@ -217,13 +224,28 @@ function officerScore(bp: BP, facts: FactSet, resolve: Awaited<ReturnType<typeof
   return { score: s.score, band: bp.band(s.score), blocks: s.blocks, weights: s.weights, target: b.totals.target, collected: b.totals.collected, units: unitIds.length, heads: headCells(b, bp) };
 }
 
-/** Facts root for an officer: their shallowest unit, raised to the shallowest per-holder KPI level so their own rows are covered. */
-function factsRootFor(bp: BP, units: { anc: Types.ObjectId[] | string[]; _id: Types.ObjectId | string }[]) {
-  const top = units.reduce((a, b) => (a.anc.length <= b.anc.length ? a : b));
+/** Facts roots for an officer: each unit raised to the shallowest per-holder KPI level so their own rows are covered; roots inside another root are dropped. */
+function factsRootsFor(bp: BP, units: { anc: Types.ObjectId[] | string[]; _id: Types.ObjectId | string }[]) {
   const holderDepths = bp.metrics.filter((m) => m.perHolder).map((m) => bp.levelIndex.get(m.level) ?? 0);
-  if (!holderDepths.length) return top._id;
-  const depth = Math.min(top.anc.length - 1, Math.min(...holderDepths));
-  return top.anc[depth] ?? top._id;
+  const rootOf = (u: (typeof units)[number]) => {
+    if (!holderDepths.length) return { id: String(u._id), anc: u.anc.map(String) };
+    const depth = Math.min(u.anc.length - 1, Math.min(...holderDepths));
+    return depth >= 0 && u.anc[depth] ? { id: String(u.anc[depth]), anc: u.anc.slice(0, depth + 1).map(String) } : { id: String(u._id), anc: u.anc.map(String) };
+  };
+  // Shallowest first, so the old single-root behaviour is unchanged when all charges share a subtree
+  const roots = [...units].sort((a, b) => a.anc.length - b.anc.length).map(rootOf);
+  const out: typeof roots = [];
+  for (const r of roots) if (!out.some((o) => r.anc.includes(o.id))) out.push(r);
+  return out.map((r) => r.id);
+}
+
+/** Facts for several disjoint roots, merged into one set. */
+async function loadFactsMulti(roots: string[], fy: string, bp: BP): Promise<FactSet> {
+  const sets = await Promise.all(roots.map((r) => loadFacts(r, fy, bp)));
+  if (sets.length === 1) return sets[0];
+  const units = new Map(sets[0].units);
+  for (const s of sets.slice(1)) for (const [k, u] of s.units) units.set(k, u);
+  return { ...sets[0], rows: sets.flatMap((s) => s.rows), units };
 }
 
 /** Name of each ancestor by level key, for list columns. */
@@ -243,9 +265,14 @@ router.get('/league', validate({ query: fyQuery.extend({ unitId: objectId, post:
   const { unitId, post, mode } = q<{ unitId: string; post: string; mode: 'unit' | 'aggregate' }>(req);
   if (!bp.post.has(post)) throw badRequest('Unknown post');
   const fy = resolveFy(bp, q<any>(req).fy);
-  const unit = await assertCanRead(req.user!, unitId);
+  const unit = await assertCanReadFull(req.user!, unitId);
   if (bp.dataPosts.has(post)) throw badRequest(`${bp.postLabel(post)} is not scored`);
-  res.json(await view(req, bp, `league:${unit._id}:${post}:${fy}:${mode}`, () => leagueView(bp, unit, post, fy, mode)));
+  const v = await view(req, bp, `league:${unit._id}:${post}:${fy}:${mode}`, () => leagueView(bp, unit, post, fy, mode));
+  // Phones are not cached; added per request for viewers with full access to this unit
+  if (await canSeeFull(req.user!, String(unit._id))) {
+    const phones = new Map((await User.find({ _id: { $in: v.items.map((x: any) => x.user?._id).filter(Boolean) } }).select('phone').lean()).map((u) => [String(u._id), u.phone]));
+    res.json({ ...v, items: v.items.map((x: any) => ({ ...x, user: x.user ? { ...x.user, phone: phones.get(String(x.user._id)) } : x.user })) });
+  } else res.json(v);
 });
 
 /**
@@ -269,9 +296,11 @@ export async function leagueView(bp: BP, unit: any, post: string, fy: string, mo
     list.push({ userId: String(r.userId), post: r.post, unitId: String(r.unitId), anc });
     byUser.set(k, list);
   }
-  const users = new Map((await User.find({ _id: { $in: [...new Set(rows.map((r) => String(r.userId)))] } }).select('name designation bps phone').lean()).map((u) => [String(u._id), u]));
+  const users = new Map((await User.find({ _id: { $in: [...new Set(rows.map((r) => String(r.userId)))] } }).select('name designation').lean()).map((u) => [String(u._id), u]));
   const unitName = (id: string) => facts.units.get(id)?.name;
   const typeOf = (id: string) => facts.units.get(id)?.type ?? '';
+  // Levels above the viewed area (e.g. the District when viewing a Tehsil) are not in its facts; add them
+  const above = Object.fromEntries((await Unit.find({ _id: { $in: (unit.anc ?? []).filter((a: any) => String(a) !== String(unit._id)) } }).select('type name').lean()).map((u) => [u.type, u.name]));
   const chargeType = new Map(rows.map((r) => [`${r.userId}|${r.unitId}`, r.chargeType]));
 
   // One row per charge: an officer with an additional charge is listed (and scored) once per unit held.
@@ -301,7 +330,7 @@ export async function leagueView(bp: BP, unit: any, post: string, fy: string, mo
       return own.map((c, i) => {
         const u = facts.units.get(c.unitId);
         const context = u?.anc.slice(1, -1).map((a) => unitName(String(a))).filter(Boolean).slice(-2).join(' › ');
-        const areas = areasOf(facts, c.unitId);
+        const areas = { ...above, ...areasOf(facts, c.unitId) };
         return {
           user: users.get(uid),
           unitId: c.unitId,
@@ -330,7 +359,7 @@ export async function scoresForUser(bp: BP, userId: string, fy: string) {
   const scored = charges.filter((c) => !bp.dataPosts.has(c.post));
   if (!scored.length) return [];
   const resolve = await configResolver(bp);
-  const facts = await loadFacts(factsRootFor(bp, scored.map((c) => c.unit)), fy, bp);
+  const facts = await loadFactsMulti(factsRootsFor(bp, scored.map((c) => c.unit)), fy, bp);
   const byPost = new Map<string, OfficerCharge[]>();
   for (const c of scored) {
     const list = byPost.get(c.post) ?? [];
@@ -356,7 +385,7 @@ router.get('/compare', validate({ query: fyQuery.extend({ unitId: objectId, type
   const { unitId, type } = q<{ unitId: string; type: string }>(req);
   levelKey(bp).parse(type);
   const fy = resolveFy(bp, q<any>(req).fy);
-  const root = await assertCanRead(me, unitId);
+  const root = await assertCanReadFull(me, unitId);
   res.json(await view(req, bp, `compare:${root._id}:${type}:${fy}`, () => compareView(bp, root, type, fy)));
 });
 
@@ -367,7 +396,7 @@ async function compareView(bp: BP, root: any, type: string, fy: string) {
   const pct = (d: number, o: number) => (o > 0 ? Math.round(Math.min(100, (d / o) * 100) * 10) / 10 : null);
 
   const items = units.map((u) => {
-    const f = rollup(facts.rows, inUnit(String(u._id)));
+    const f = rollupUnit(facts.rows, String(u._id));
     const b = breakdown(f, bp);
     const s = scoreFacts(f, bp.profileForLevel(type), resolve(u.anc.map(String)), bp);
     const heads = headCells(b, bp);
@@ -404,6 +433,10 @@ router.get('/officers/:userId', validate({ params: z.object({ userId: objectId }
     }
     if (!ok) throw forbidden('This officer is outside what you are allowed to view');
   }
+  // Contact details only for admins, the officer themself, or those with full access over one of their units
+  let contact = atLeast(req.user!.role, 'admin') || req.user!.id === userId;
+  for (const c of all) if (!contact && (await canSeeFull(req.user!, String(c.unit._id)))) contact = true;
+  if (!contact) { delete (user as any).phone; delete (user as any).email; delete (user as any).employeeCode; }
 
   const byPost = new Map<string, typeof charges>();
   for (const c of charges) byPost.set(c.post, [...(byPost.get(c.post) ?? []), c]);
@@ -414,7 +447,7 @@ router.get('/officers/:userId', validate({ params: z.object({ userId: objectId }
   const oc: OfficerCharge[] = list.map((c) => ({ userId, post: c.post, unitId: String(c.unit._id), anc: c.unit.anc.map(String) }));
 
   const top = list.reduce((a, b) => (a.unit.anc.length <= b.unit.anc.length ? a : b)).unit;
-  const [facts, resolve] = await Promise.all([loadFacts(factsRootFor(bp, list.map((c) => c.unit)), fy, bp), configResolver(bp)]);
+  const [facts, resolve] = await Promise.all([loadFactsMulti(factsRootsFor(bp, list.map((c) => c.unit)), fy, bp), configResolver(bp)]);
   const { f, unitIds } = officerFacts(bp, facts, oc, post);
   const profile = bp.profileForPost(post, list[0].unit.type);
   const s = scoreFacts(f, profile, resolve(oc[0].anc), bp);

@@ -27,7 +27,7 @@ export default function Tasks() {
     <>
       <PageHeader title="Tasks" actions={canAssign && <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />Assign</Button>} />
       {canAssign && (
-        <div className="mb-4"><Segmented value={box} onChange={(b) => setParams({ box: b }, { replace: true })} options={[{ value: 'mine', label: 'Assigned to me' }, { value: 'assigned', label: 'Assigned by Me' }]} /></div>
+        <div className="mb-3"><Segmented value={box} onChange={(b) => setParams({ box: b }, { replace: true })} options={[{ value: 'mine', label: 'Assigned to me' }, { value: 'assigned', label: 'Assigned by Me' }]} /></div>
       )}
       {isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !data?.length ? (
         <Card><Empty icon={CheckCircle2} title="No tasks" /></Card>
@@ -88,7 +88,7 @@ function NewTask({ onClose }: { onClose: () => void }) {
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(undefined); };
   return (
     <Sheet open onClose={onClose} title="Assign a task" footer={<Button form="task-form" type="submit" block disabled={!who} loading={save.isPending}>Assign</Button>}>
-      <form id="task-form" onSubmit={submit} className="space-y-4">
+      <form id="task-form" onSubmit={submit} className="space-y-2.5">
         {who ? (
           <Card className="flex items-center gap-3 p-3">
             <div className="min-w-0 flex-1"><div className="font-bold">{who.name}</div><div className="text-xs text-slate-500">{who.postLabel} · {who.unitName}</div></div>

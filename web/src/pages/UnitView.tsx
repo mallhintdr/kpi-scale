@@ -12,6 +12,7 @@ import { TargetSummary } from './Assigned';
 import { useMe } from '../lib/auth';
 import { Badge, Card, Empty, ErrorState, Loading, Segmented, UnitCaption } from '../components/ui';
 import { get } from '../lib/api';
+import { UnitYears, YearsPicker } from '../components/yearCompare';
 import { fmtPct, fmtPKR, fmtValue, getOrg, MILLIONS, staffedLevel, T, tagLabel, UNIT_LABEL, useFy, type Block, type RevBand, type UnitRef } from '../lib/rev';
 
 export interface UnitData {
@@ -37,7 +38,7 @@ export interface UnitData {
   childHolders: Holder[];
   trend: TrendData;
 }
-interface Holder { unitId: string; post: string; postLabel: string; chargeType: string; user: { _id: string; name: string; designation?: string; bps?: number; phone?: string } }
+interface Holder { unitId: string; post: string; postLabel: string; chargeType: string; user: { _id: string; name: string; designation?: string; phone?: string } }
 
 export const useUnit = (id: string | undefined, fy: string) =>
   useQuery({ queryKey: ['rev', 'unit', id, fy], queryFn: () => get<UnitData>(`/rev/units/${id}?fy=${fy}`), enabled: !!id && !!fy });
@@ -50,7 +51,7 @@ export default function UnitView() {
   return (
     <>
       <PageHeader title={data?.unit.name ?? 'Performance'} subtitle={data && <Breadcrumb path={data.path} />} actions={<FyPicker />} />
-      {isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : data && <UnitBody data={data} />}
+      {isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : data && <UnitBody data={data} urlFor={(f) => `/rev/units/${id}?fy=${f}`} />}
     </>
   );
 }
@@ -73,8 +74,9 @@ const pct = (a: number, b: number) => (b > 0 ? Math.min(100, (a / b) * 100) : nu
 
 /* ================================================================== */
 
-export function UnitBody({ data }: { data: UnitData }) {
-  const [tab, setTab] = useState<'heads' | 'ranking' | 'arrears' | 'officers'>('heads');
+export function UnitBody({ data, urlFor }: { data: UnitData; urlFor?: (fy: string) => string }) {
+  const [tab, setTab] = useState<'heads' | 'ranking' | 'arrears' | 'officers' | 'years'>('heads');
+  const [years, setYears] = useState<string[]>(() => [String(Number(data.fy.slice(0, 4)) - 1) + '-' + data.fy.slice(2, 4), data.fy]);
   const childType = data.children[0]?.type;
   const collectedPct = pct(data.totals.collected, data.totals.target);
   const gap = collectedPct == null ? null : collectedPct - data.elapsed;
@@ -105,7 +107,7 @@ export function UnitBody({ data }: { data: UnitData }) {
   }));
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       {/* ---------- Hero ---------- */}
       <Card className="overflow-hidden">
         <div className="h-1.5 bg-gradient-to-r from-brand-700 via-brand-500 to-gold-400" />
@@ -120,7 +122,7 @@ export function UnitBody({ data }: { data: UnitData }) {
                   {Math.abs(Math.round(gap))} pts {gap >= 0 ? 'ahead of' : 'behind'} pace
                 </div>
               )}
-              <div className="flex items-center gap-1 text-[11px] text-slate-500 lg:justify-center"><Timer className="size-3" />{data.elapsed}% of FY {data.fy} elapsed</div>
+              <div className="flex items-center gap-1 text-[12px] text-slate-500 lg:justify-center"><Timer className="size-3" />{data.elapsed}% of FY {data.fy} elapsed</div>
             </div>
           </div>
           {perf ? <BlockBars blocks={achieved} note={false} /> : <BlockBars blocks={data.blocks} weights={data.weights} />}
@@ -132,7 +134,6 @@ export function UnitBody({ data }: { data: UnitData }) {
         <MetricCard
           title={`${T.money} — current year`} achieved={data.totals.collected} total={data.totals.target} fmt={fmtPKR} pace={data.elapsed}
           extras={[
-            ...(data.totals.pending > 0 ? [{ label: 'Unverified', value: fmtPKR(data.totals.pending), tone: 'warn' as const }] : []),
             ...(data.totals.untargeted > 0 ? [{ label: `${T.achieved} without target (not counted)`, value: fmtPKR(data.totals.untargeted), tone: 'muted' as const }] : []),
           ]} unit={MILLIONS}
         />
@@ -140,7 +141,7 @@ export function UnitBody({ data }: { data: UnitData }) {
         <MetricCard title={T.flowGroup} achieved={cases.disp} total={cases.load} fmt={(v) => v.toLocaleString()} labels={{ total: 'Total', achieved: T.disposed, balance: T.pending }} unit={`(${T.items[0].toUpperCase()}${T.items.slice(1)})`} />
         <MetricCard
           title={getOrg()?.registers.map((x) => x.label).join(' / ') || 'Registers'} achieved={data.audit.rec} total={data.audit.amt} fmt={fmtPKR} labels={{ total: 'Amount' }}
-          action={<Link to="/audit-paras" className="text-[12px] font-medium text-brand-600 hover:underline">Details</Link>}
+          action={<Link to="/audit-paras" className="text-[13px] font-medium text-brand-600 hover:underline">Details</Link>}
           extras={data.audit.n ? [{ label: 'Items settled', value: `${data.audit.settled} / ${data.audit.n}` }] : []} unit={data.audit.n ? MILLIONS : '(None recorded)'}
         />
       </div>
@@ -160,12 +161,19 @@ export function UnitBody({ data }: { data: UnitData }) {
           ...(data.children.length ? [{ value: 'ranking' as const, label: childType ? `${UNIT_LABEL[childType]}s` : 'Units' }] : []),
           { value: 'arrears', label: 'Arrears' },
           ...(data.holders.length + data.childHolders.length ? [{ value: 'officers' as const, label: 'Officers' }] : []),
+          ...(urlFor ? [{ value: 'years' as const, label: 'Years' }] : []),
         ]}
       />
       {tab === 'heads' && <Heads data={data} />}
       {tab === 'ranking' && <Ranking data={data} />}
       {tab === 'arrears' && <Arrears data={data} />}
       {tab === 'officers' && <Officers data={data} />}
+      {tab === 'years' && urlFor && (
+        <div className="space-y-2">
+          <YearsPicker value={years} onChange={setYears} />
+          <UnitYears urlFor={urlFor} fys={years} />
+        </div>
+      )}
     </div>
   );
 }
@@ -197,11 +205,11 @@ function Heads({ data }: { data: UnitData }) {
         subtitle="Current-year demand · bar = collected, tick = where an even pace would be today"
       >
         {!rows.length ? <Empty title="No demand set for this year" /> : (
-          <div className="space-y-4">
+          <div className="space-y-2.5">
             {groups.map((g) => (
               <div key={g}>
-                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{g}</div>
-                <div className="space-y-3">
+                <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wider text-slate-400">{g}</div>
+                <div className="space-y-2.5">
                   {rows.filter((r) => r.group === g).map((r) => (
                     <div key={r.code}>
                       <div className="mb-1 flex items-baseline justify-between gap-2 text-sm">
@@ -217,7 +225,7 @@ function Heads({ data }: { data: UnitData }) {
                 </div>
               </div>
             ))}
-            <p className="text-[11px] text-slate-400">Crop heads (Rabi, Kharif) are seasonal, so they show no even-pace tick.</p>
+            <p className="text-[12px] text-slate-400">Crop heads (Rabi, Kharif) are seasonal, so they show no even-pace tick.</p>
             <UnitCaption>{MILLIONS}</UnitCaption>
           </div>
         )}
@@ -247,10 +255,10 @@ function Ranking({ data }: { data: UnitData }) {
         />
       </ChartCard>
       <Card className="divide-y divide-slate-200 self-start overflow-hidden dark:divide-slate-700">
-        <div className="flex bg-brand-700 text-[11px] font-semibold uppercase tracking-wide text-white">
-          <span className="w-10 shrink-0 border-r border-white/20 py-2.5 text-center">#</span>
-          <span className="flex-1 px-3 py-2.5">{data.children[0] ? UNIT_LABEL[data.children[0].type] : 'Unit'} · officers</span>
-          <span className="px-3 py-2.5">{perf ? 'Achieved' : 'Band'}</span>
+        <div className="flex bg-brand-700 text-[12px] font-semibold uppercase tracking-wide text-white">
+          <span className="w-10 shrink-0 border-r border-white/20 py-2 text-center">#</span>
+          <span className="flex-1 px-3 py-2">{data.children[0] ? UNIT_LABEL[data.children[0].type] : 'Unit'} · officers</span>
+          <span className="px-3 py-2">{perf ? 'Achieved' : 'Band'}</span>
         </div>
         {ordered.map((c, i) => {
           const h = holderOf(c._id);
@@ -258,10 +266,10 @@ function Ranking({ data }: { data: UnitData }) {
           return (
             <Link key={c._id} to={`/units/${c._id}`} className="flex items-stretch hover:bg-slate-50 dark:hover:bg-slate-800">
               <span className="flex w-10 shrink-0 items-center justify-center border-r border-slate-200 text-xs font-bold text-slate-500 tabular-nums dark:border-slate-700">{v == null ? '–' : i + 1}</span>
-              <div className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5">
+              <div className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{c.name}</div>
-                <div className="truncate text-[11px] text-slate-500">
+                <div className="truncate text-[12px] text-slate-500">
                   {h.length ? <b>{h.map((x) => x.user.name).join(', ')}</b> : staffedLevel(c.type) ? <span className="text-amber-600">Vacant</span> : '—'}
                 </div>
               </div>
@@ -286,7 +294,7 @@ function Arrears({ data }: { data: UnitData }) {
     { k: 'other' as const, label: 'Non-crop heads' },
   ];
   return (
-    <div className="space-y-4">
+    <div className="space-y-2.5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {tiles.map((t) => {
           const p = pct(a[t.k].collected, a[t.k].demand);
@@ -296,15 +304,15 @@ function Arrears({ data }: { data: UnitData }) {
               <div className="min-w-0">
                 <div className="text-xs font-medium text-slate-500">{t.label}</div>
                 <div className="text-base font-bold text-slate-900 tabular-nums dark:text-white">{fmtPKR(a[t.k].collected)}</div>
-                <div className="text-[11px] text-slate-400 tabular-nums">/ {fmtPKR(a[t.k].demand)}</div>
-                <div className="text-[10px] text-slate-400">{MILLIONS}</div>
+                <div className="text-[12px] text-slate-400 tabular-nums">/ {fmtPKR(a[t.k].demand)}</div>
+                <div className="text-[11px] text-slate-400">{MILLIONS}</div>
               </div>
             </Card>
           );
         })}
       </div>
       <ChartCard title="Arrears by KPI" subtitle="Uncollected demand from earlier years">
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {rows.map((r) => (
             <div key={r.code}>
               <div className="mb-1 flex items-baseline justify-between gap-2 text-sm">
@@ -325,22 +333,52 @@ function Arrears({ data }: { data: UnitData }) {
 }
 
 /* ---------- Officers ---------- */
+/** Officers posted here and in the units below, as a table: each area once, then its posts and holders. */
 function Officers({ data }: { data: UnitData }) {
+  const units = [data.unit, ...data.children];
+  const order = new Map((getOrg()?.posts ?? []).map((p, i) => [p.key, i]));
   const all = [...data.holders, ...data.childHolders];
-  const unitName = (id: string) => (id === data.unit._id ? data.unit.name : data.children.find((c) => c._id === id)?.name);
   if (!all.length) return <Card><Empty title="No officers posted" /></Card>;
+  const groups = units
+    .map((u) => ({ u, rows: all.filter((h) => h.unitId === u._id).sort((a, b) => (order.get(a.post) ?? 99) - (order.get(b.post) ?? 99) || a.user.name.localeCompare(b.user.name)) }))
+    .filter((g) => g.rows.length);
+  const levelLabels = [...new Set(groups.map((g) => UNIT_LABEL[g.u.type]).filter(Boolean))];
+  const th = 'border-b border-r border-white/40 px-3 py-2 text-left font-semibold';
+  const td = 'border-b border-r border-slate-200 px-3 py-1.5 align-top dark:border-slate-700';
   return (
-    <Card className="divide-y divide-slate-100 dark:divide-slate-800">
-      {all.map((h, i) => (
-        <div key={i} className="flex items-center gap-3 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <Link to={`/officers/${h.user._id}`} className="block truncate font-bold hover:text-brand-700 hover:underline">{h.user.name}{h.user.bps && <span className="ml-1.5 text-xs text-slate-400">BPS-{h.user.bps}</span>}</Link>
-            <div className="truncate text-xs text-slate-500">{h.postLabel} · {unitName(h.unitId)}</div>
-          </div>
-          {h.chargeType !== 'regular' && <Badge>{h.chargeType === 'additional' ? 'Addl. charge' : 'Look after'}</Badge>}
-          {h.user.phone && <a href={`tel:${h.user.phone}`} aria-label="Call" className="grid size-10 place-items-center rounded-lg text-brand-600 hover:bg-brand-50"><Phone className="size-4" /></a>}
-        </div>
-      ))}
+    <Card className="overflow-x-auto">
+      <table className="w-full border-separate border-spacing-0 text-sm">
+        <thead className="bg-brand-700 text-[14px] text-white">
+          <tr><th className={th}>{levelLabels.join(' / ') || 'Area'}</th><th className={`${th} hidden sm:table-cell`}>Post</th><th className={th}>Officer</th><th className="border-b border-white/40 px-2 py-2" aria-label="Call" /></tr>
+        </thead>
+        <tbody>
+          {groups.flatMap((g, gi) => {
+            // Post cells merge over consecutive holders of the same post
+            const postSpan = (i: number) => (i > 0 && g.rows[i - 1].post === g.rows[i].post ? 0 : g.rows.slice(i).findIndex((h) => h.post !== g.rows[i].post) === -1 ? g.rows.length - i : g.rows.slice(i).findIndex((h) => h.post !== g.rows[i].post));
+            return g.rows.map((h, i) => {
+              const span = postSpan(i);
+              return (
+                <tr key={`${g.u._id}-${h.user._id}-${h.post}`} className={gi % 2 ? 'bg-slate-50/60 dark:bg-slate-800/30' : ''}>
+                  {i === 0 && (
+                    <td rowSpan={g.rows.length} className={`${td} w-[38%] border-l-4 border-l-brand-600 sm:w-auto sm:whitespace-nowrap bg-brand-50 font-semibold text-slate-900 dark:bg-brand-900/40 dark:text-white`}>
+                      {g.u._id === data.unit._id ? g.u.name : <Link to={`/units/${g.u._id}`} className="hover:text-brand-700 hover:underline">{g.u.name}</Link>}
+                    </td>
+                  )}
+                  {span > 0 && <td rowSpan={span} className={`${td} hidden text-slate-700 sm:table-cell dark:text-slate-300`}>{h.postLabel}</td>}
+                  <td className={td}>
+                    <div className="text-xs text-slate-500 sm:hidden">{h.postLabel}</div>
+                    <Link to={`/officers/${h.user._id}`} className="font-medium text-slate-900 hover:text-brand-700 hover:underline dark:text-white">{h.user.name}</Link>
+                    {h.chargeType !== 'regular' && <Badge className="ml-1.5">{h.chargeType === 'additional' ? 'Addl. Charge' : 'Look After'}</Badge>}
+                  </td>
+                  <td className="w-12 border-b border-slate-200 px-1 py-0.5 text-center dark:border-slate-700">
+                    {h.user.phone && <a href={`tel:${h.user.phone}`} aria-label={`Call ${h.user.name}`} className="inline-grid size-9 place-items-center rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10"><Phone className="size-4" /></a>}
+                  </td>
+                </tr>
+              );
+            });
+          })}
+        </tbody>
+      </table>
     </Card>
   );
 }

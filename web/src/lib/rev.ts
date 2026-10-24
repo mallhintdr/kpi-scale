@@ -4,7 +4,7 @@
  * organisation's blueprint (/rev/meta). Nothing here is specific to one department.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { get } from './api';
 import { titleCase as toTitle } from './text';
 
@@ -91,6 +91,11 @@ export function setOrg(m: Meta) {
   MILLIONS = m.money.scale === 1 ? `(${m.money.symbol})` : `(${m.money.symbol} in ${m.money.scaleLabel})`;
 }
 export const getOrg = () => org;
+/** Forget the organisation (on logout / user change). */
+export function resetOrg() {
+  org = null;
+  MILLIONS = '(Rs in Millions)';
+}
 
 /** Levels from the top of the hierarchy down. */
 export const levels = () => org?.levels ?? [];
@@ -159,15 +164,23 @@ export const revColor = (v: number | null | undefined) => REV_BAND[bandOf(v)].co
  * Money in the organisation's display scale (e.g. millions) with no unit text; each card/chart carries
  * a single MILLIONS caption instead. Pass { exact: true } for full amounts (verification).
  */
+// Number formatters are costly to create; big reports format thousands of figures, so reuse them.
+const NF = new Map<string, Intl.NumberFormat>();
+const nf = (min: number, max: number) => {
+  const k = `${min}|${max}`;
+  let f = NF.get(k);
+  if (!f) NF.set(k, (f = new Intl.NumberFormat('en-PK', { minimumFractionDigits: min, maximumFractionDigits: max })));
+  return f;
+};
 export const fmtPKR = (v: number | null | undefined, opts: { exact?: boolean } = {}) => {
   if (v == null) return '—';
-  if (opts.exact) return v.toLocaleString('en-PK', { maximumFractionDigits: 0 });
+  if (opts.exact) return nf(0, 0).format(v);
   const m = org?.money ?? { scale: 1e6, decimals: 2 };
-  return (v / m.scale).toLocaleString('en-PK', { minimumFractionDigits: m.decimals, maximumFractionDigits: m.decimals });
+  return nf(m.decimals, m.decimals).format(v / m.scale);
 };
 export const fmtMoney = fmtPKR;
 /** A KPI value in its own unit (money scaled, counts as integers). */
-export const fmtValue = (v: number | null | undefined, unit: string | undefined) => (unit === 'money' ? fmtPKR(v) : v == null ? '—' : v.toLocaleString());
+export const fmtValue = (v: number | null | undefined, unit: string | undefined) => (unit === 'money' ? fmtPKR(v) : v == null ? '—' : nf(0, 3).format(v));
 
 export const fmtPct = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v * 10) / 10}%`);
 export const monthLabel = (m: string) => new Date(`${m}-15`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
@@ -218,16 +231,15 @@ export function useCaps() {
 /** Selected financial year, remembered per device. */
 export function useFy() {
   const { data: meta } = useMeta();
-  const [fy, setFyState] = useState<string | null>(() => {
+  const [stored, setFyState] = useState<string | null>(() => {
     try {
       return localStorage.getItem('fy');
     } catch {
       return null;
     }
   });
-  useEffect(() => {
-    if (meta && (!fy || !meta.fys.includes(fy))) setFyState(meta.currentFy);
-  }, [meta, fy]);
+  // Validate synchronously so screens never render (and fetch) with a stale/invalid year.
+  const fy = meta ? (stored && meta.fys.includes(stored) ? stored : meta.currentFy) : stored;
   const setFy = useCallback((v: string) => {
     setFyState(v);
     try {
@@ -240,8 +252,8 @@ export function useFy() {
 }
 
 /** Months of a financial year up to the current month, latest first. */
-export const fyMonthsUpToNow = (fy: string) => {
-  const sm = (org?.calendar.fyStartMonth ?? 7) - 1;
+export const fyMonthsUpToNow = (fy: string, meta: Pick<Meta, 'calendar'> | null | undefined = org) => {
+  const sm = (meta?.calendar.fyStartMonth ?? 7) - 1;
   const y = Number(fy.slice(0, 4));
   const now = new Date();
   const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -252,3 +264,9 @@ export const fyMonthsUpToNow = (fy: string) => {
     .filter((m) => m <= cur)
     .reverse();
 };
+
+/** Reactive version of fyMonthsUpToNow: re-renders once the organisation's calendar loads. */
+export function useFyMonths(fy: string) {
+  const { data: meta } = useMeta();
+  return fyMonthsUpToNow(fy, meta ?? org);
+}

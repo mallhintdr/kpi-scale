@@ -51,7 +51,7 @@ export default function People() {
             ))}
           </Card>
           {pages > 1 && (
-            <div className="mt-4 flex items-center justify-between">
+            <div className="mt-3 flex items-center justify-between">
               <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
               <span className="text-sm text-slate-500">Page {page} of {pages}</span>
               <Button variant="secondary" size="sm" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</Button>
@@ -94,7 +94,7 @@ function UserSheet({ user, onClose }: { user: UserRow | null; onClose: () => voi
 
   return (
     <Sheet open onClose={onClose} title={user ? 'Edit person' : 'Add person'} footer={<Button form="user-form" type="submit" block loading={save.isPending}>Save</Button>}>
-      <form id="user-form" onSubmit={submit} className="space-y-4">
+      <form id="user-form" onSubmit={submit} className="space-y-2.5">
         <Field label="Full name">{(id) => <Input id={id} required minLength={2} value={f.name} onChange={set('name')} />}</Field>
         <Field label="Email">{(id) => <Input id={id} type="email" required value={f.email} onChange={set('email')} />}</Field>
         <div className="grid grid-cols-2 gap-3">

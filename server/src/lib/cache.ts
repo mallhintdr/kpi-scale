@@ -37,6 +37,13 @@ class Lru<V> {
 
 const l1 = new Lru<unknown>(Number(process.env.CACHE_L1_MAX ?? 300));
 const inflight = new Map<string, Promise<unknown>>();
+/** Bumped by invalidate(): a computation that started before it must not repopulate L1. */
+const generations = new Map<string, number>();
+const genOf = (key: string) => {
+  let g = 0;
+  for (const [prefix, n] of generations) if (key.startsWith(prefix)) g += n;
+  return g;
+};
 const localVersions = new Map<string, number>(); // used only without Redis
 
 export interface Codec<T> {
@@ -51,6 +58,8 @@ export async function cached<T>(key: string, ttlSec: number, fn: () => Promise<T
   const running = inflight.get(key);
   if (running) return running as Promise<T>;
 
+  const gen = genOf(key);
+  const fresh = () => genOf(key) === gen;
   const p = (async () => {
     const r = redis();
     if (r) {
@@ -58,7 +67,7 @@ export async function cached<T>(key: string, ttlSec: number, fn: () => Promise<T
         const raw = await r.get(`c:${key}`);
         if (raw != null) {
           const v = codec ? codec.decode(JSON.parse(raw)) : (JSON.parse(raw) as T);
-          l1.set(key, v, ttlSec);
+          if (fresh()) l1.set(key, v, ttlSec);
           return v;
         }
       } catch (err) {
@@ -66,6 +75,7 @@ export async function cached<T>(key: string, ttlSec: number, fn: () => Promise<T
       }
     }
     const v = await fn();
+    if (!fresh()) return v; // invalidated while computing: serve it once, cache nothing
     l1.set(key, v, ttlSec);
     if (r) {
       r.set(`c:${key}`, JSON.stringify(codec ? codec.encode(v) : v), 'EX', ttlSec).catch((err) => logger.warn({ err }, 'cache write failed'));
@@ -76,7 +86,7 @@ export async function cached<T>(key: string, ttlSec: number, fn: () => Promise<T
   try {
     return await p;
   } finally {
-    inflight.delete(key);
+    if (inflight.get(key) === p) inflight.delete(key);
   }
 }
 
@@ -106,7 +116,13 @@ export function onInvalidate(fn: (msg: { kind: string; tenantId: string }) => vo
   listeners.push(fn);
 }
 
+const bumpGeneration = (prefix: string) => {
+  generations.set(prefix, (generations.get(prefix) ?? 0) + 1);
+  for (const k of inflight.keys()) if (k.startsWith(prefix)) inflight.delete(k); // later callers recompute
+};
+
 export async function invalidate(kind: string, tenantId: string) {
+  bumpGeneration(`${kind}:${tenantId}`);
   l1.deletePrefix(`${kind}:${tenantId}`);
   for (const fn of listeners) fn({ kind, tenantId });
   const r = redis();
@@ -119,6 +135,7 @@ export async function invalidate(kind: string, tenantId: string) {
 subscribe(CHANNEL, (raw) => {
   try {
     const msg = JSON.parse(raw);
+    bumpGeneration(`${msg.kind}:${msg.tenantId}`);
     l1.deletePrefix(`${msg.kind}:${msg.tenantId}`);
     for (const fn of listeners) fn(msg);
   } catch {

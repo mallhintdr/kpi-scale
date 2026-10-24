@@ -166,6 +166,35 @@ export function rollup(rows: FactRow[], pick: (r: FactRow) => boolean): Facts {
   return out;
 }
 
+/** Rows indexed once per fact set: by every ancestor unit, and per-holder rows by person (positions kept for stable sum order). */
+interface RowIndex { byUnit: Map<string, number[]>; byRo: Map<string, number[]> }
+const rowIndexes = new WeakMap<FactRow[], RowIndex>();
+function indexOf(rows: FactRow[]): RowIndex {
+  let ix = rowIndexes.get(rows);
+  if (!ix) {
+    ix = { byUnit: new Map(), byRo: new Map() };
+    rows.forEach((r, i) => {
+      for (const a of r.anc) { const l = ix!.byUnit.get(a); if (l) l.push(i); else ix!.byUnit.set(a, [i]); }
+      if (r.roUserId) { const l = ix!.byRo.get(r.roUserId); if (l) l.push(i); else ix!.byRo.set(r.roUserId, [i]); }
+    });
+    rowIndexes.set(rows, ix);
+  }
+  return ix;
+}
+/** Same as rollup(rows, inUnit(unitId)) using the index. */
+export function rollupUnit(rows: FactRow[], unitId: string): Facts {
+  const ids = indexOf(rows).byUnit.get(unitId) ?? [];
+  return rollup(ids.map((i) => rows[i]), () => true);
+}
+/** Same as rollup(rows, pick) where pick only accepts rows under `unitIds` or per-holder rows of `roUserId`; `pick` is still applied. */
+export function rollupWithin(rows: FactRow[], unitIds: string[], roUserId: string | null, pick: (r: FactRow) => boolean): Facts {
+  const ix = indexOf(rows);
+  const set = new Set<number>();
+  for (const u of unitIds) for (const i of ix.byUnit.get(u) ?? []) set.add(i);
+  if (roUserId) for (const i of ix.byRo.get(roUserId) ?? []) set.add(i);
+  return rollup([...set].sort((a, b) => a - b).map((i) => rows[i]), pick);
+}
+
 /** Rows inside a unit's subtree. Per-holder rows are included only where `includeRo` allows. */
 export const inUnit = (unitId: string, includeRo: (ro: string) => boolean = () => true) => (r: FactRow) =>
   r.anc.includes(unitId) && (!r.roUserId || includeRo(r.roUserId));
@@ -178,7 +207,9 @@ export interface EffectiveConfig { profiles: Record<string, Weights>; heads: Rec
 export interface ConfigResolver { (anc: string[]): EffectiveConfig }
 
 export async function configResolver(bp: BP): Promise<ConfigResolver> {
-  const all = await ScoreConfig.find().lean();
+  const tenantId = String(getContext()?.tenantId ?? '');
+  const dv = await dataVersion(tenantId);
+  const all: any[] = tenantId ? await cached(`scorecfg:${tenantId}:${dv}`, 900, () => ScoreConfig.find().lean() as Promise<any[]>) : await ScoreConfig.find().lean();
   const byScope = new Map(all.map((c) => [c.scopeUnitId ? String(c.scopeUnitId) : 'default', c]));
   const blockKeys = bp.blocks.map((b) => b.key);
   const merge = (base: EffectiveConfig, c: any, src: string | null): EffectiveConfig => {

@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { bumpData, cached, invalidate } from '../../lib/cache.js';
 import { AppError, badRequest } from '../../lib/errors.js';
 import { getContext } from '../../lib/tenantContext.js';
-import { AuditPara, Blueprint, BlueprintHistory, Charge, RevEntry, RevTarget, Unit } from '../../models/index.js';
+import { AssignedTarget, AuditPara, Blueprint, BlueprintHistory, Charge, RevEntry, RevTarget, TargetDrive, Unit } from '../../models/index.js';
 import { blueprintSchema, compile, type BP, type Blueprint as BlueprintDoc } from './blueprint.js';
 
 declare global {
@@ -43,14 +43,16 @@ export const bpOf = (req: Request) => req.bp!;
 
 /** Keys that existing data still refers to: they cannot be removed from the blueprint, only retired. */
 async function keysInUse() {
-  const [levels, posts, heads, entryHeads, registers] = await Promise.all([
+  const [levels, posts, heads, entryHeads, registers, assignedHeads, driveHeads] = await Promise.all([
     Unit.distinct('type'),
     Charge.distinct('post', { $or: [{ to: null }, { to: { $gt: new Date() } }] }),
     RevTarget.distinct('head'),
     RevEntry.distinct('head'),
     AuditPara.distinct('register'),
+    AssignedTarget.distinct('head'),
+    TargetDrive.distinct('head'),
   ]);
-  return { levels: levels as string[], posts: posts as string[], metrics: [...new Set([...heads, ...entryHeads] as string[])], registers: registers as string[] };
+  return { levels: levels as string[], posts: posts as string[], metrics: [...new Set([...heads, ...entryHeads, ...assignedHeads, ...driveHeads] as string[])], registers: registers as string[] };
 }
 
 export interface SaveResult {
@@ -68,8 +70,10 @@ export async function saveBlueprint(tenantId: string, input: unknown, opts: { us
   const doc: BlueprintDoc = parsed.data;
   const warnings: string[] = [];
 
+  const current = await Blueprint.findOne({ tenantId });
   if (!opts.skipUsageCheck) {
     const used = await keysInUse();
+    const old = current?.doc as BlueprintDoc | undefined;
     const missing = (list: string[], have: Set<string>, what: string) => list.filter((k) => !have.has(k)).map((k) => `${what} "${k}" is still in use and cannot be removed`);
     const problems = [
       ...missing(used.levels, new Set(doc.levels.map((l) => l.key)), 'Level'),
@@ -77,21 +81,43 @@ export async function saveBlueprint(tenantId: string, input: unknown, opts: { us
       ...missing(used.metrics, new Set(doc.metrics.map((m) => m.code)), 'KPI').map((s) => `${s} (mark it inactive instead)`),
       ...missing(used.registers, new Set(doc.registers.map((r) => r.key)), 'Register'),
     ];
+    if (old) {
+      // Units are typed by their position in the hierarchy, and figures were recorded at a KPI's level
+      // and scored by its block kind: these cannot change under existing data
+      const oldIdx = new Map(old.levels.map((l, i) => [l.key, i]));
+      const newIdx = new Map(doc.levels.map((l, i) => [l.key, i]));
+      for (const k of used.levels) if (oldIdx.has(k) && newIdx.has(k) && oldIdx.get(k) !== newIdx.get(k)) problems.push(`Level "${k}" is in use and cannot be moved to another position in the hierarchy`);
+      const kindOf = (d: BlueprintDoc, block: string) => d.blocks.find((b) => b.key === block)?.kind;
+      const oldMetric = new Map(old.metrics.map((m) => [m.code, m]));
+      for (const m of doc.metrics) {
+        const o = oldMetric.get(m.code);
+        if (!o || !used.metrics.includes(m.code)) continue;
+        if (o.level !== m.level) problems.push(`KPI "${m.code}" has recorded data at level "${o.level}"; its level cannot change (add a new KPI instead)`);
+        const ok = kindOf(old, o.block);
+        const nk = kindOf(doc, m.block);
+        if (ok && nk && ok !== nk) problems.push(`KPI "${m.code}" has recorded data scored as "${ok}"; it cannot move to a "${nk}" block (add a new KPI instead)`);
+      }
+    }
     if (problems.length) throw new AppError(409, 'Some items are still used by existing data', 'IN_USE', problems);
     const totals = doc.profiles.filter((p) => Object.values(p.weights).reduce((s, w) => s + w, 0) !== 100);
     for (const p of totals) warnings.push(`Weights of profile "${p.label}" add up to ${Object.values(p.weights).reduce((s, w) => s + w, 0)}, not 100 — they are applied proportionally`);
   }
 
-  const current = await Blueprint.findOne({ tenantId });
   const version = (current?.version ?? 0) + 1;
+  const conflict = () => new AppError(409, 'The configuration was changed by someone else meanwhile; reload it and try again', 'VERSION_CONFLICT');
   if (current) {
-    current.version = version;
-    current.doc = doc;
-    if (opts.userId) current.updatedBy = opts.userId as any;
-    current.markModified('doc');
-    await current.save();
+    // Conditional on the version read above, so two concurrent saves cannot both become version N
+    const set: Record<string, unknown> = { version, doc };
+    if (opts.userId) set.updatedBy = opts.userId;
+    const ok = await Blueprint.updateOne({ tenantId, version: current.version }, { $set: set });
+    if (!ok.modifiedCount) throw conflict();
   } else {
-    await Blueprint.create({ tenantId, version, doc, template: opts.template, updatedBy: opts.userId });
+    try {
+      await Blueprint.create({ tenantId, version, doc, template: opts.template, updatedBy: opts.userId });
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) throw conflict();
+      throw err;
+    }
   }
   await BlueprintHistory.create({ tenantId, version, doc, note: opts.note, updatedBy: opts.userId });
   await invalidate('bp', tenantId);

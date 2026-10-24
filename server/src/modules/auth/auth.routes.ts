@@ -1,4 +1,6 @@
 import { Router, type Request, type Response } from 'express';
+import { randomUUID } from 'node:crypto';
+import { logger } from '../../lib/logger.js';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -20,9 +22,10 @@ const limiterStore = (prefix: string) => {
   const r = redis();
   return r ? new RedisStore({ prefix, sendCommand: (...args: string[]) => r.call(args[0], ...args.slice(1)) as any }) : undefined;
 };
+const loginEmail = (req: Request) => String(req.body?.email ?? '').trim().toLowerCase();
 const perAccount = rateLimit({
   windowMs: 15 * 60_000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, store: limiterStore('rl:login:acct:'),
-  keyGenerator: (req) => `${String(req.body?.email ?? '').toLowerCase()}|${req.ip}`,
+  keyGenerator: (req) => `${loginEmail(req)}|${req.ip}`,
   skipSuccessfulRequests: true, // only failed attempts count
   message: { error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts for this account. Try again in 15 minutes.' } },
 });
@@ -30,7 +33,17 @@ const perIp = rateLimit({
   windowMs: 15 * 60_000, limit: 500, standardHeaders: 'draft-8', legacyHeaders: false, store: limiterStore('rl:login:ip:'),
   message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many sign-in attempts from this network. Try again shortly.' } },
 });
-const authLimiter = [perIp, perAccount];
+// Distributed guessing against one account from many IPs: cap failures per email regardless of IP.
+const perEmail = rateLimit({
+  windowMs: 15 * 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false, store: limiterStore('rl:login:email:'),
+  keyGenerator: (req) => loginEmail(req),
+  skipSuccessfulRequests: true,
+  message: { error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts for this account. Try again in 15 minutes.' } },
+});
+const authLimiter = [perIp, perAccount, perEmail];
+const DUMMY_HASH = bcrypt.hashSync('timing-equaliser-not-a-password', 12);
+/** Fixed number of bcrypt compares per login, so response time reveals neither existence nor account count. */
+const LOGIN_COMPARES = 3;
 
 export const password = z
   .string()
@@ -64,12 +77,13 @@ const publicUser = (u: any) => ({
 const publicTenant = (t: any) => ({ id: String(t._id), name: t.name, slug: t.slug, settings: t.settings, isPlatform: !!t.isPlatform, industry: t.industry, branding: t.branding ?? {} });
 
 const SHORT_SESSION_MS = 12 * 3_600_000;
+const REUSE_GRACE_MS = 30_000;
 
 /**
  * remember=true: persistent cookie, sliding REFRESH_TOKEN_DAYS expiry.
  * remember=false: browser-session cookie with a fixed 12h ceiling that refreshes never extend.
  */
-async function issueSession(req: Request, res: Response, user: any, tenant: any, opts: { remember?: boolean; expiresAt?: Date } = {}) {
+async function issueSession(req: Request, res: Response, user: any, tenant: any, opts: { remember?: boolean; expiresAt?: Date; familyId?: string; readOnly?: boolean } = {}) {
   const remember = opts.remember ?? true;
   const refresh = newRefreshToken();
   const expiresAt =
@@ -82,16 +96,18 @@ async function issueSession(req: Request, res: Response, user: any, tenant: any,
     ip: req.ip,
     remember,
     expiresAt,
+    familyId: opts.familyId ?? randomUUID(),
+    readOnly: !!opts.readOnly,
   });
   res.cookie(COOKIE, refresh, {
     httpOnly: true,
-    secure: env.isProd,
+    secure: env.cookieSecure,
     sameSite: 'strict',
     path: '/api/auth',
     ...(remember ? { maxAge: env.REFRESH_TOKEN_DAYS * 86_400_000 } : {}), // no maxAge = cleared when browser closes
   });
-  const accessToken = signAccessToken({ sub: String(user._id), tid: String(tenant._id), role: user.role, tv: user.tokenVersion ?? 0 });
-  return { accessToken, user: publicUser(user), tenant: publicTenant(tenant) };
+  const accessToken = signAccessToken({ sub: String(user._id), tid: String(tenant._id), role: user.role, tv: user.tokenVersion ?? 0, ...(opts.readOnly ? { ro: true } : {}) });
+  return { accessToken, user: { ...publicUser(user), readOnly: !!opts.readOnly }, tenant: publicTenant(tenant) };
 }
 
 // Organisations are created only by the platform super-admin (see modules/platform).
@@ -123,12 +139,15 @@ router.post(
       User.find({ email, status: 'active' }).select('+passwordHash').limit(20).populate('tenantId', 'name slug status settings isPlatform industry branding'),
     );
     let matches = [];
+    let compared = 0;
     for (const u of candidates) {
       const t = u.tenantId as any;
       if (t?.status !== 'active') continue;
       if (env.SINGLE_TENANT && t.slug !== env.DEFAULT_TENANT) continue; // only the one organisation
+      compared++;
       if (await bcrypt.compare(pw, u.passwordHash)) matches.push(u);
     }
+    for (; compared < LOGIN_COMPARES; compared++) await bcrypt.compare(pw, DUMMY_HASH); // timing equaliser
     // The organisation from the sign-in link is a preference, not a filter: a super-admin, or someone
     // whose browser remembers another organisation, can still sign in to the account the password matches.
     if (tenantSlug) {
@@ -136,7 +155,6 @@ router.post(
       if (preferred.length) matches = preferred;
     }
     if (!matches.length) {
-      if (!candidates.length) await bcrypt.compare(pw, '$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinva'); // timing equaliser
       throw invalid();
     }
     if (matches.length > 1) {
@@ -165,8 +183,20 @@ router.post('/guest', perIp, async (req, res) => {
 router.post('/refresh', async (req, res) => {
   const token = req.cookies?.[COOKIE];
   if (!token) throw unauthorized();
-  const session = await Session.findOneAndDelete({ tokenHash: hashToken(token) });
-  if (!session || session.expiresAt < new Date()) {
+  const tokenHash = hashToken(token);
+  // Claim the token atomically; the row is kept as a tombstone so a replayed token can be detected.
+  const session = await Session.findOneAndUpdate({ tokenHash, rotatedAt: null }, { $set: { rotatedAt: new Date() } });
+  if (!session) {
+    const used = await Session.findOne({ tokenHash }).select('familyId userId rotatedAt').lean();
+    // Reuse of an already-rotated token (outside a short grace for parallel tabs) means it was stolen: revoke the whole sign-in.
+    if (used?.rotatedAt && Date.now() - used.rotatedAt.getTime() > REUSE_GRACE_MS) {
+      await Session.deleteMany(used.familyId ? { familyId: used.familyId } : { userId: used.userId });
+      logger.warn({ userId: String(used.userId) }, 'refresh token reuse detected; sessions revoked');
+    }
+    res.clearCookie(COOKIE, { path: '/api/auth' });
+    throw unauthorized('Session expired');
+  }
+  if (session.expiresAt < new Date()) {
     res.clearCookie(COOKIE, { path: '/api/auth' });
     throw unauthorized('Session expired');
   }
@@ -176,19 +206,38 @@ router.post('/refresh', async (req, res) => {
   if (!user || user.status !== 'active' || !tenant || tenant.status !== 'active') throw unauthorized();
   const remember = session.remember !== false;
   // Short sessions keep their original ceiling; remembered sessions slide forward.
-  res.json(await issueSession(req, res, user, tenant, { remember, expiresAt: remember ? undefined : session.expiresAt }));
+  res.json(await issueSession(req, res, user, tenant, { remember, expiresAt: remember ? undefined : session.expiresAt, familyId: session.familyId ?? undefined, readOnly: !!session.readOnly }));
 });
 
 router.post('/logout', async (req, res) => {
   const token = req.cookies?.[COOKIE];
-  if (token) await Session.deleteOne({ tokenHash: hashToken(token) });
+  if (token) {
+    const s = await Session.findOneAndDelete({ tokenHash: hashToken(token) }).lean();
+    if (s?.familyId) await Session.deleteMany({ familyId: s.familyId });
+  }
   res.clearCookie(COOKIE, { path: '/api/auth' });
   res.status(204).end();
 });
 
 router.get('/me', authenticate, async (req, res) => {
   const [user, tenant] = await Promise.all([User.findById(req.user!.id).lean(), Tenant.findById(req.user!.tenantId).lean()]);
-  res.json({ user: publicUser(user), tenant: publicTenant(tenant) });
+  res.json({ user: { ...publicUser(user), readOnly: !!req.user!.readOnly }, tenant: publicTenant(tenant) });
+});
+
+/* Guest demo: is it available, and for which organisation? */
+router.get('/demo', async (_req, res) => {
+  if (!env.demoEnabled) return res.json({ enabled: false });
+  const t = await runUnscoped(() => Tenant.findOne({ slug: env.DEMO_TENANT_SLUG!.toLowerCase(), status: 'active', isPlatform: { $ne: true } }).select('name').lean());
+  res.json(t ? { enabled: true, organisation: t.name } : { enabled: false });
+});
+
+/* Guest demo: a short, read-only session on the configured demo account. No password involved. */
+router.post('/demo', perIp, async (req, res) => {
+  if (!env.demoEnabled) throw unauthorized('The demo is not available');
+  const tenant = await runUnscoped(() => Tenant.findOne({ slug: env.DEMO_TENANT_SLUG!.toLowerCase(), status: 'active', isPlatform: { $ne: true } }));
+  const user = tenant && (await runUnscoped(() => User.findOne({ tenantId: tenant._id, email: env.DEMO_LOGIN_EMAIL!.toLowerCase(), status: 'active' })));
+  if (!tenant || !user) throw unauthorized('The demo is not available');
+  res.json(await issueSession(req, res, user, tenant, { remember: false, readOnly: true, expiresAt: new Date(Date.now() + 2 * 3_600_000) }));
 });
 
 router.post(

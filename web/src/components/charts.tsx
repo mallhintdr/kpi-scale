@@ -22,7 +22,7 @@ const BAND_ICON: Record<RevBand, typeof Award> = {
 export function BandChip({ band, size = 'sm' }: { band: RevBand; size?: 'sm' | 'md' }) {
   const Icon = BAND_ICON[band];
   return (
-    <span className={clsx('inline-flex items-center gap-1 whitespace-nowrap rounded-full font-semibold ring-1 ring-inset', REV_BAND[band].tone, size === 'md' ? 'px-2.5 py-1 text-xs' : 'px-2 py-0.5 text-[11px]')}>
+    <span className={clsx('inline-flex items-center gap-1 whitespace-nowrap rounded-full font-semibold ring-1 ring-inset', REV_BAND[band].tone, size === 'md' ? 'px-2.5 py-1 text-xs' : 'px-2 py-0.5 text-[12px]')}>
       <Icon className={size === 'md' ? 'size-3.5' : 'size-3'} />
       {REV_BAND[band].label}
     </span>
@@ -78,7 +78,7 @@ export function ScoreGauge({ value, size = 168, label = 'Overall score' }: { val
         <div className="font-bold leading-none tracking-tight text-slate-900 dark:text-white" style={{ fontSize: size * 0.27 }}>
           {value == null ? '—' : Math.round(value)}
         </div>
-        <div className="mt-1 text-[11px] font-medium uppercase tracking-wider text-slate-500">{label}</div>
+        <div className="mt-1 text-[12px] font-medium uppercase tracking-wider text-slate-500">{label}</div>
       </div>
     </div>
   );
@@ -177,8 +177,8 @@ export function MetricCard({ title, eyebrow, achieved, total, fmt, labels = {}, 
     <div className={clsx('flex h-full flex-col rounded-xl bg-white ring-1 ring-slate-200/80 dark:bg-slate-900 dark:ring-slate-800', compact ? 'p-3' : 'p-3.5')}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          {eyebrow && <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{eyebrow}</div>}
-          <div className={clsx('truncate font-semibold text-slate-800 dark:text-slate-100', compact ? 'text-[13px]' : 'text-sm')} title={title}>{titleCase(title)}</div>
+          {eyebrow && <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{eyebrow}</div>}
+          <div className={clsx('truncate font-semibold text-slate-800 dark:text-slate-100', compact ? 'text-[14px]' : 'text-sm')} title={title}>{titleCase(title)}</div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <span className="rounded-lg px-2 py-0.5 text-lg font-bold leading-tight text-slate-900 tabular-nums dark:text-white" style={{ boxShadow: `inset 0 -3px 0 ${revColor(pct)}` }}>
@@ -195,7 +195,7 @@ export function MetricCard({ title, eyebrow, achieved, total, fmt, labels = {}, 
           { l: labels.balance ?? 'Balance', v: balance },
         ].map((c) => (
           <div key={c.l} className="min-w-0 px-1">
-            <div className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-500">{c.l}</div>
+            <div className="truncate text-[11px] font-medium uppercase tracking-wide text-slate-500">{c.l}</div>
             <div className={clsx('truncate font-bold text-slate-900 tabular-nums dark:text-white', fig)}>{fmt(c.v)}</div>
           </div>
         ))}
@@ -204,7 +204,7 @@ export function MetricCard({ title, eyebrow, achieved, total, fmt, labels = {}, 
       <div className="mt-2.5"><Bullet value={pct} pace={pace} height={8} /></div>
 
       {allExtras.length > 0 && (
-        <div className="mt-2 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-[11px]">
+        <div className="mt-2 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-[12px]">
           {allExtras.map((e) => (
             <span key={e.label} className="tabular-nums text-slate-500">
               {e.label}{' '}
@@ -213,7 +213,7 @@ export function MetricCard({ title, eyebrow, achieved, total, fmt, labels = {}, 
           ))}
         </div>
       )}
-      <div className="mt-auto pt-2 text-center text-[10px] font-medium tracking-wide text-slate-400">{unit}</div>
+      <div className="mt-auto pt-2 text-center text-[11px] font-medium tracking-wide text-slate-400">{unit}</div>
     </div>
   );
 }
@@ -244,9 +244,19 @@ const axisTick = { fontSize: 11, fill: 'var(--viz-axis)' };
 function useNarrow(bp = 640) {
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < bp);
   useEffect(() => {
-    const on = () => setNarrow(window.innerWidth < bp);
+    let raf = 0;
+    const on = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        setNarrow(window.innerWidth < bp);
+      });
+    };
     window.addEventListener('resize', on);
-    return () => window.removeEventListener('resize', on);
+    return () => {
+      window.removeEventListener('resize', on);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [bp]);
   return narrow;
 }
@@ -347,7 +357,7 @@ export function CollectionTrend({ trend, target }: { trend: TrendData; target: n
           </Area>
         </ComposedChart>
       </ResponsiveContainer>
-      <div className="text-center text-[10px] font-medium tracking-wide text-slate-400">{MILLIONS}</div>
+      <div className="text-center text-[11px] font-medium tracking-wide text-slate-400">{MILLIONS}</div>
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { forbidden, notFound } from '../../lib/errors.js';
 import { runAsTenant, runUnscoped } from '../../lib/tenantContext.js';
 import { idParam, validate } from '../../middleware/validate.js';
-import { Blueprint, Charge, RevEntry, Session, Tenant, Unit, User } from '../../models/index.js';
+import { Blueprint, BlueprintHistory, Charge, RevEntry, Session, Tenant, Unit, User } from '../../models/index.js';
 import { hashPassword, password, uniqueSlug } from '../auth/auth.routes.js';
 import { saveBlueprint } from '../org/service.js';
 import { TEMPLATES } from '../org/templates.js';
@@ -81,17 +81,27 @@ router.post(
     const tpl = TEMPLATES[b.template];
     if (!tpl) throw notFound('Template');
     const slug = b.slug ?? (await runUnscoped(() => uniqueSlug(b.name)));
+    // Everything that can fail without touching the database happens first
+    const passwordHash = await hashPassword(b.admin.password);
     const tenant = await runUnscoped(() =>
       Tenant.create({ name: b.name, slug, industry: b.industry ?? tpl.blueprint.industry, plan: b.plan, contact: b.contact, limits: b.maxUsers ? { maxUsers: b.maxUsers } : undefined }),
     );
     try {
       const admin = await runAsTenant(tenant._id, async () => {
         await saveBlueprint(String(tenant._id), { ...tpl.blueprint, name: b.name }, { userId: req.user!.id, template: b.template, note: `Created from template "${tpl.label}"`, skipUsageCheck: true });
-        return User.create({ name: b.admin.name, email: b.admin.email, designation: b.admin.designation ?? 'Administrator', passwordHash: await hashPassword(b.admin.password), role: 'owner' });
+        return User.create({ name: b.admin.name, email: b.admin.email, designation: b.admin.designation ?? 'Administrator', passwordHash, role: 'owner' });
       });
       res.status(201).json({ tenant, admin: { _id: admin._id, name: admin.name, email: admin.email, role: admin.role } });
     } catch (err) {
-      await runUnscoped(() => Tenant.deleteOne({ _id: tenant._id })); // nothing half-created
+      // nothing half-created: the blueprint, its history and any user go with the organisation
+      await runUnscoped(() =>
+        Promise.allSettled([
+          Blueprint.deleteMany({ tenantId: tenant._id }),
+          BlueprintHistory.deleteMany({ tenantId: tenant._id }),
+          User.deleteMany({ tenantId: tenant._id }),
+        ]),
+      );
+      await runUnscoped(() => Tenant.deleteOne({ _id: tenant._id }));
       throw err;
     }
   },

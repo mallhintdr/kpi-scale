@@ -45,7 +45,7 @@ export default function Units() {
         }
       />
 
-      <Card className="mb-3 space-y-3 p-3">
+      <Card className="mb-3 space-y-2.5 p-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
           <Input className="pl-9" placeholder="Search any unit by name…" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -63,17 +63,17 @@ export default function Units() {
         )}
       </Card>
 
-      <div className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{lists}</div>
+      <div className="mb-1.5 px-1 text-[12px] font-semibold uppercase tracking-wide text-slate-500">{lists}</div>
       {isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !data?.length ? (
         <Card><Empty icon={FolderTree} title={term ? 'No matching units' : `No ${childLevel ? UNIT_PLURAL[childLevel.key].toLowerCase() : 'units'} yet`} body={childLevel && !term ? 'Add them one by one, or import a CSV for the whole tree.' : undefined} /></Card>
       ) : (
         <Card className="divide-y divide-slate-100 dark:divide-slate-800">
           {data.map((u) => (
-            <div key={u._id} className="flex items-center gap-2 px-3 py-2.5">
+            <div key={u._id} className="flex items-center gap-2 px-3 py-2">
               <button className="min-w-0 flex-1 text-left" disabled={!u.children && levelIndex(u.type) >= levels().length - 1} onClick={() => { setSearch(''); setTrail(term ? [u] : [...trail, u]); }}>
                 <div className="flex items-center gap-2">
                   <span className="truncate font-medium">{u.name}</span>
-                  {u.code && <span className="font-mono text-[11px] text-slate-400">{u.code}</span>}
+                  {u.code && <span className="font-mono text-[12px] text-slate-400">{u.code}</span>}
                   {!u.active && <Badge tone="bg-slate-200 text-slate-600">Inactive</Badge>}
                 </div>
                 <div className="text-xs text-slate-500">{u.levelLabel} · {u.children} below · {u.postings} posting{u.postings === 1 ? '' : 's'}</div>
@@ -106,7 +106,7 @@ function UnitSheet({ unit, parent, level, onClose }: { unit: UnitRow | null; par
   return (
     <Sheet open onClose={onClose} title={unit ? `Edit ${unit.name}` : `New ${UNIT_LABEL[level ?? '']}${parent ? ` in ${parent.name}` : ''}`}
       footer={<Button form="unit-form" type="submit" block loading={save.isPending}>{unit ? 'Save' : 'Add'}</Button>}>
-      <form id="unit-form" onSubmit={submit} className="space-y-4">
+      <form id="unit-form" onSubmit={submit} className="space-y-2.5">
         <Field label="Name">{(id) => <Input id={id} required autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />}</Field>
         <Field label="Code" hint="Unique; used to match rows in CSV imports">{(id) => <Input id={id} className="font-mono" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} />}</Field>
         {unit && (

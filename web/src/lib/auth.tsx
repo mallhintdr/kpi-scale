@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { post, refreshSession, setAccessToken, setUnauthorizedHandler } from './api';
+import { resetOrg } from './rev';
 import type { Role, Tenant, User } from './types';
 
 interface Session {
@@ -15,6 +16,15 @@ interface AuthCtx {
   can: (min: Role) => boolean;
 }
 
+/** Drop the service worker's cached API responses so one user's data never shows for another. */
+const clearApiCache = () => {
+  try {
+    if (typeof caches !== 'undefined') void caches.delete('api').catch(() => {});
+  } catch {
+    /* Cache API unavailable */
+  }
+};
+
 const RANK: Record<Role, number> = { employee: 0, manager: 1, admin: 2, owner: 3, superadmin: 4 };
 const Ctx = createContext<AuthCtx | null>(null);
 
@@ -25,13 +35,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setSession = useCallback((d: { accessToken: string; user: User; tenant: Tenant }) => {
     setAccessToken(d.accessToken);
-    set({ user: d.user, tenant: d.tenant });
-  }, []);
+    set((prev) => {
+      if (prev?.user.id !== d.user.id) {
+        // New or different user: forget anything cached for the previous one.
+        clearApiCache();
+        resetOrg();
+        if (prev) qc.clear();
+      }
+      return { user: d.user, tenant: d.tenant };
+    });
+  }, [qc]);
 
   const clear = useCallback(() => {
     setAccessToken(null);
     set(null);
     qc.clear();
+    resetOrg();
+    clearApiCache();
   }, [qc]);
 
   const logout = useCallback(async () => {

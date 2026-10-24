@@ -13,14 +13,19 @@ import { AccessGrant, Charge, Unit, type GrantRight } from '../../models/index.j
 import type { BP, Cap } from '../org/blueprint.js';
 import { getBlueprint } from '../org/service.js';
 
-export interface Grant { _id: string; unitId: string; anc: string[]; rights: GrantRight[]; metrics: string[] }
+export interface Grant { _id: string; unitId: string; anc: string[]; rights: GrantRight[]; metrics: string[]; expiresAt?: string | null }
 
-/** A person's live grants (cached briefly; invalidated when an admin changes grants). */
+/**
+ * A person's live grants. The raw list is cached briefly (invalidated when an admin changes grants);
+ * expiry is checked on every read so an expired grant stops working at once, not when the cache lapses.
+ */
 export async function grantsOf(me: AuthUser): Promise<Grant[]> {
-  return cached(`grants:${me.tenantId}:${me.id}`, 120, async () => {
-    const rows = await AccessGrant.find({ userId: me.id, $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] }).select('unitId anc rights metrics').lean();
-    return rows.map((g) => ({ _id: String(g._id), unitId: String(g.unitId), anc: g.anc.map(String), rights: g.rights as GrantRight[], metrics: g.metrics ?? [] }));
+  const all = await cached(`grants:${me.tenantId}:${me.id}`, 120, async () => {
+    const rows = await AccessGrant.find({ userId: me.id, $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] }).select('unitId anc rights metrics expiresAt').lean();
+    return rows.map((g) => ({ _id: String(g._id), unitId: String(g.unitId), anc: g.anc.map(String), rights: g.rights as GrantRight[], metrics: g.metrics ?? [], expiresAt: g.expiresAt ? new Date(g.expiresAt).toISOString() : null }));
   });
+  const now = Date.now();
+  return all.filter((g) => !g.expiresAt || new Date(g.expiresAt).getTime() > now);
 }
 
 /** Does a grant give `right` on this unit (it, or an ancestor, is the granted unit) for this KPI? */
@@ -52,24 +57,44 @@ export async function myCharges(userId: string): Promise<MyCharge[]> {
 /** Top-level units of the organisation. */
 export const topUnits = (bp: BP) => Unit.find({ type: bp.topLevel }).select('type name').sort({ name: 1 }).lean();
 
-/** Units a user can see the whole subtree of (work jurisdiction). Admins see every top-level unit. */
-export async function scopeRoots(me: AuthUser, bp: BP): Promise<Types.ObjectId[]> {
+/** The area a charge covers: its unit, or — for a post with `widenTo` — its ancestor at that level. */
+function chargeRoot(bp: BP, c: MyCharge) {
+  const widen = bp.post.get(c.post)?.widenTo;
+  const wi = widen ? bp.levelIndex.get(widen) : undefined;
+  const ci = bp.levelIndex.get(c.unit.type);
+  if (wi != null && ci != null && wi < ci) {
+    // anc is root-first and includes self; anc[wi] is the ancestor at the widened level
+    const depth = c.unit.anc.length - 1 - (ci - wi);
+    if (depth >= 0) return { id: c.unit.anc[depth], anc: c.unit.anc.slice(0, depth + 1).map(String) };
+  }
+  return { id: c.unit._id, anc: c.unit.anc.map(String) };
+}
+
+/**
+ * Does the person hold `cap` OVER this unit: a grant with that right covering it, or a posting with the
+ * capability whose area (widened per `widenTo`) contains it. Admins always do.
+ */
+export async function capOver(me: AuthUser, bp: BP, cap: Cap, unit: { anc: Types.ObjectId[] | string[] }) {
+  if (isAdmin(me)) return true;
+  if (await hasGrant(me, cap, unit)) return true;
+  const posts = new Set(bp.postsWithCap(cap));
+  if (!posts.size) return false;
+  const anc = new Set(unit.anc.map(String));
+  return (await myCharges(me.id)).some((c) => posts.has(c.post) && anc.has(String(chargeRoot(bp, c).id)));
+}
+
+/**
+ * Units a user can see the whole subtree of (work jurisdiction). Admins see every top-level unit.
+ * By default every direct grant widens it (visibility). Pass `grantRight` for a write check: then only
+ * grants carrying that right count (null = postings only, no grants).
+ */
+export async function scopeRoots(me: AuthUser, bp: BP, grantRight?: GrantRight | null): Promise<Types.ObjectId[]> {
   if (isAdmin(me)) return (await topUnits(bp)).map((u) => u._id);
   const charges = await myCharges(me.id);
   // A post with `widenTo` sees its whole ancestor at that level (e.g. a Naib Tehsildar sees the tehsil).
-  const roots = charges.map((c) => {
-    const widen = bp.post.get(c.post)?.widenTo;
-    const wi = widen ? bp.levelIndex.get(widen) : undefined;
-    const ci = bp.levelIndex.get(c.unit.type);
-    if (wi != null && ci != null && wi < ci) {
-      // anc is root-first and includes self; anc[wi] is the ancestor at the widened level
-      const depth = c.unit.anc.length - 1 - (ci - wi);
-      if (depth >= 0) return { id: c.unit.anc[depth], anc: c.unit.anc.slice(0, depth + 1).map(String) };
-    }
-    return { id: c.unit._id, anc: c.unit.anc.map(String) };
-  });
+  const roots = charges.map((c) => chargeRoot(bp, c));
   // Units granted to the person directly are part of their jurisdiction too
-  for (const g of await grantsOf(me)) roots.push({ id: new Types.ObjectId(g.unitId), anc: g.anc });
+  if (grantRight !== null) for (const g of await grantsOf(me)) if (!grantRight || g.rights.includes(grantRight)) roots.push({ id: new Types.ObjectId(g.unitId), anc: g.anc });
   // Drop roots already covered by another root, and duplicates
   const set = new Set(roots.map((r) => String(r.id)));
   const out = new Map<string, Types.ObjectId>();
@@ -88,17 +113,35 @@ export async function loadUnit(unitId: string) {
  * still applies). When the organisation restricts viewing to jurisdiction, a person sees only their own
  * area, areas they were granted, and the path above them. Writes use assertCanSee / capability checks.
  */
+/** How much of a unit a person may read: 'full' (its figures and children), 'name' (an ancestor of their area: breadcrumb only) or 'none'. */
+export async function readLevel(me: AuthUser, unit: { _id: Types.ObjectId; anc: Types.ObjectId[] }): Promise<'full' | 'name' | 'none'> {
+  if (isAdmin(me)) return 'full';
+  const bp = await getBlueprint(me.tenantId);
+  if (!bp || bp.raw.access?.viewScope !== 'jurisdiction') return 'full';
+  const roots = (await scopeRoots(me, bp)).map(String);
+  if (unit.anc.some((a) => roots.includes(String(a)))) return 'full';
+  const mine = await Unit.find({ _id: { $in: roots } }).select('anc').lean();
+  if (mine.some((m) => m.anc.some((a) => String(a) === String(unit._id)))) return 'name';
+  return 'none';
+}
+
+/** Name-level read: inside my areas, or an ancestor of one (to see where I stand). Use for breadcrumbs. */
 export async function assertCanRead(me: AuthUser, unitId: string) {
   const unit = await loadUnit(unitId);
-  if (isAdmin(me)) return unit;
-  const bp = await getBlueprint(me.tenantId);
-  if (!bp || bp.raw.access?.viewScope !== 'jurisdiction') return unit;
-  const roots = (await scopeRoots(me, bp)).map(String);
-  // Inside one of my areas, or an ancestor of one of them (to see where I stand)
-  if (unit.anc.some((a) => roots.includes(String(a)))) return unit;
-  const mine = await Unit.find({ _id: { $in: roots } }).select('anc').lean();
-  if (mine.some((m) => m.anc.some((a) => String(a) === String(unit._id)))) return unit;
-  throw forbidden('This area is outside what you are allowed to view');
+  if ((await readLevel(me, unit)) === 'none') throw forbidden('This area is outside what you are allowed to view');
+  return unit;
+}
+export const assertCanSeeName = assertCanRead;
+
+/** Full read (figures, children, siblings): only inside my areas when viewing is restricted. */
+export async function assertCanReadFull(me: AuthUser, unitId: string) {
+  const unit = await loadUnit(unitId);
+  if ((await readLevel(me, unit)) !== 'full') throw forbidden('This area is outside what you are allowed to view');
+  return unit;
+}
+export async function canSeeFull(me: AuthUser, unitId: string) {
+  const unit = await Unit.findById(unitId).select('anc').lean();
+  return !!unit && (await readLevel(me, unit as any)) === 'full';
 }
 
 /** Units a person may browse from (whole organisation, or their own areas when viewing is restricted). */
@@ -107,16 +150,29 @@ export async function browseRootsFor(me: AuthUser, bp: BP) {
   return Unit.find({ _id: { $in: await scopeRoots(me, bp) } }).select('type name').sort({ name: 1 }).lean();
 }
 
-export async function canSeeUnit(me: AuthUser, unit: { anc: Types.ObjectId[] }, bp: BP) {
+/** Inside the person's jurisdiction. With `right`, direct grants count only if they carry that right (write checks). */
+export async function canSeeUnit(me: AuthUser, unit: { anc: Types.ObjectId[] }, bp: BP, right?: GrantRight) {
   if (isAdmin(me)) return true;
-  const roots = (await scopeRoots(me, bp)).map(String);
+  const roots = (await scopeRoots(me, bp, right)).map(String);
   return unit.anc.some((a) => roots.includes(String(a)));
 }
 
-export async function assertCanSee(me: AuthUser, unitId: string, bp: BP) {
+export async function assertCanSee(me: AuthUser, unitId: string, bp: BP, right?: GrantRight) {
   const unit = await loadUnit(unitId);
-  if (!(await canSeeUnit(me, unit, bp))) throw forbidden('This unit is outside your jurisdiction');
+  if (!(await canSeeUnit(me, unit, bp, right))) throw forbidden('This unit is outside your jurisdiction');
   return unit;
+}
+
+/** Does the person have `right` on this unit — from a posting (capability / KPI posts) or a grant carrying it? */
+export async function hasRightOn(me: AuthUser, bp: BP, unit: UnitLike, right: GrantRight, code?: string) {
+  if (isAdmin(me)) return true;
+  switch (right) {
+    case 'enter': return !!code && canEnter(me, bp, code, unit);
+    case 'verify': return !!code && canVerify(me, bp, code, unit);
+    case 'edit': return !!code && canEditVerified(me, bp, code, unit);
+    case 'view': return canSeeUnit(me, unit, bp);
+    default: return hasCap(me, bp, right as Cap, unit);
+  }
 }
 
 /** Does the user hold one of `posts` on this unit or any of its ancestors (admins always do)? */

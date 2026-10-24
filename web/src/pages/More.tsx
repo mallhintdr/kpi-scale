@@ -1,9 +1,10 @@
 import { ChevronRight, LogOut } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { PageHeader, useUnread, visibleNav } from '../components/AppShell';
+import { PageHeader, toneOf, useUnread, visibleNav } from '../components/AppShell';
 import { useCaps } from '../lib/rev';
 import { Avatar, Card, SectionTitle } from '../components/ui';
 import { useAuth } from '../lib/auth';
+import { titleCase } from '../lib/text';
 
 export default function More() {
   const { session, logout } = useAuth();
@@ -14,10 +15,10 @@ export default function More() {
   const main = items.filter((i) => i.group !== 'admin');
   const admin = items.filter((i) => i.group === 'admin');
 
-  const Row = ({ to, label, icon: Icon, badge }: { to: string; label: string; icon: typeof ChevronRight; badge?: number }) => (
-    <Link to={to} className="flex h-14 items-center gap-3 px-4 active:bg-slate-50 dark:active:bg-slate-800">
-      <span className="grid size-9 place-items-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/15"><Icon className="size-[18px]" /></span>
-      <span className="flex-1 font-medium">{label}</span>
+  const Row = ({ to, label, icon: Icon, badge, group }: { to: string; label: string; icon: typeof ChevronRight; badge?: number; group?: string }) => (
+    <Link to={to} className="flex h-12 items-center gap-3 px-4 active:bg-slate-50 dark:active:bg-slate-800">
+      <span className={`grid size-9 place-items-center rounded-xl ${toneOf({ to, group }).chip}`}><Icon className="size-[18px]" /></span>
+      <span className="flex-1 font-medium">{titleCase(label)}</span>
       {!!badge && <span className="rounded-full bg-rose-500 px-2 text-xs font-semibold text-white">{badge}</span>}
       <ChevronRight className="size-4 text-slate-300" />
     </Link>

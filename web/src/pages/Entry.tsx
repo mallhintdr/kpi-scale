@@ -6,7 +6,7 @@ import { PageHeader } from '../components/AppShell';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, useToast } from '../components/ui';
 import { get, put } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { MILLIONS, UNIT_LABEL, fmtValue, fyMonthsUpToNow, levelIndex, monthLabel, useCaps, useFy, useMeta, type HeadDef, type UnitRef } from '../lib/rev';
+import { MILLIONS, UNIT_LABEL, fmtValue, useFyMonths, levelIndex, monthLabel, useCaps, useFy, useMeta, type HeadDef, type UnitRef } from '../lib/rev';
 
 interface EntryRow {
   head: HeadDef;
@@ -28,7 +28,7 @@ export default function Entry() {
   const { user } = useMe();
   const caps = useCaps();
   const [fy] = useFy();
-  const months = fyMonthsUpToNow(fy);
+  const months = useFyMonths(fy);
   const { data: charges = [] } = useQuery({ queryKey: ['rev', 'my-charges'], queryFn: () => get<MyChargeFull[]>('/rev/my-charges') });
 
   const { data: meta } = useMeta();
@@ -83,7 +83,8 @@ export default function Entry() {
     if (!scopes.length && ownRegisters.length) setMode('self');
     if (!parentId && parents[0]) setParentId(parents[0].charge.unit._id);
     if (!unitId && direct[0]) setUnitId(direct[0]._id);
-  }, [charges, meta]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Re-run when admin grants load too (they add scopes); each default is only applied while still unset.
+  }, [charges, meta, caps.grants]); // eslint-disable-line react-hooks/exhaustive-deps -- scopes/parents/direct are derived from these
 
   const childUnits = useQuery({
     queryKey: ['rev', 'descendants', parentScope?.charge.unit._id, parentScope?.level],
@@ -99,7 +100,7 @@ export default function Entry() {
       <PageHeader title="Enter figures" subtitle={`FY ${fy}`} actions={canRecordRegister && <Link to="/audit-paras" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50"><ListChecks className="size-4" />{meta?.registers.find((r) => r.key === caps.registers[0])?.label ?? 'Registers'}</Link>} />
       {!caps.canEnter ? <Card><Empty title="No data entry rights" body="Your postings do not include entering figures for any KPI." /></Card> : (
         <>
-          <Card className="mb-4 space-y-3 p-4">
+          <Card className="mb-3 space-y-2.5 p-4">
             {ownRegisters.length > 0 && scopes.length > 0 && (
               <Segmented value={mode} onChange={setMode} options={[{ value: 'unit', label: UNIT_LABEL[entryLevel] }, { value: 'self', label: 'My own registers' }]} />
             )}
@@ -216,7 +217,7 @@ function EntrySheet({ unitId, roUserId, month }: { unitId: string; roUserId?: st
                 <div className="mb-3 grid grid-cols-2 gap-x-3 text-xs text-slate-500">
                   <span className="tabular-nums">Target {fmtValue(it.target?.target ?? 0, it.head.unit)} · YTD {fmtValue(it.ytd?.cur ?? 0, it.head.unit)}</span>
                   {it.head.arrears && <span className="tabular-nums">Arrears {fmtValue(it.target?.arrearDemand ?? 0, it.head.unit)} · YTD {fmtValue(it.ytd?.arr ?? 0, it.head.unit)}</span>}
-                  {it.head.unit === 'money' && <span className="col-span-2 text-[10px] text-slate-400">Target/YTD {MILLIONS} · enter amounts below in full</span>}
+                  {it.head.unit === 'money' && <span className="col-span-2 text-[11px] text-slate-400">Target/YTD {MILLIONS} · enter amounts below in full</span>}
                 </div>
                 <div className={it.head.arrears ? 'grid grid-cols-2 gap-3' : 'grid gap-3'}>
                   <Field label={it.head.arrears ? 'Current' : 'Achieved'}>{(id) => <Input id={id} type="number" inputMode="decimal" min={0} disabled={locked(it)} value={draft[it.head.code]?.current ?? ''} onChange={set(it.head.code, 'current')} />}</Field>
@@ -249,7 +250,7 @@ function EntrySheet({ unitId, roUserId, month }: { unitId: string; roUserId?: st
         </>
       )}
       <div className="mt-3"><FormError error={save.error} /></div>
-      <div className="pb-safe fixed inset-x-0 bottom-16 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:static lg:mt-4 lg:border-0 lg:bg-transparent lg:p-0 dark:border-slate-800 dark:bg-slate-900/95">
+      <div className="pb-safe fixed inset-x-0 bottom-16 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:static lg:mt-3 lg:border-0 lg:bg-transparent lg:p-0 dark:border-slate-800 dark:bg-slate-900/95">
         <Button block loading={save.isPending} onClick={() => save.mutate()}>
           <Save className="size-4" />{allAuto ? 'Save' : 'Submit for verification'}
         </Button>

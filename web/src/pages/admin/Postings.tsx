@@ -29,7 +29,7 @@ export default function Postings() {
   return (
     <>
       <PageHeader title="Postings" subtitle="Who holds charge of each unit" actions={unit && postsFor(unit.type).length > 0 && <Button size="sm" onClick={() => setAdding(true)}><Plus className="size-4" />Post officer</Button>} />
-      <div className="mb-4"><UnitField value={unit} onChange={setUnit} scope="work" /></div>
+      <div className="mb-3"><UnitField value={unit} onChange={setUnit} scope="work" /></div>
       {isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : (
         <>
           <SectionTitle>Current · {unit && UNIT_LABEL[unit.type]}</SectionTitle>
@@ -52,7 +52,7 @@ export default function Postings() {
               <SectionTitle>History</SectionTitle>
               <Card className="divide-y divide-slate-100 dark:divide-slate-800">
                 {past.map((c) => (
-                  <div key={c._id} className="px-4 py-2.5 text-sm text-slate-500">
+                  <div key={c._id} className="px-4 py-2 text-sm text-slate-500">
                     {c.userId.name} · {c.postLabel} · <span className="font-semibold">{fmtDate(c.from)}</span> – <span className="font-semibold">{fmtDate(c.to)}</span>
                   </div>
                 ))}
@@ -80,7 +80,7 @@ function PostSheet({ unit, onClose }: { unit: UnitRef; onClose: () => void }) {
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(undefined); };
   return (
     <Sheet open onClose={onClose} title={`Post to ${unit.name}`} footer={<Button form="post-form" type="submit" block disabled={!who} loading={save.isPending}>Post officer</Button>}>
-      <form id="post-form" onSubmit={submit} className="space-y-4">
+      <form id="post-form" onSubmit={submit} className="space-y-2.5">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Post">{(id) => <Select id={id} value={postCode} onChange={(e) => setPost(e.target.value as Post)}>{posts.map((p) => <option key={p} value={p}>{label(p)}</option>)}</Select>}</Field>
           <Field label="Charge">{(id) => <Select id={id} value={chargeType} onChange={(e) => setChargeType(e.target.value)}><option value="regular">Regular</option><option value="additional">Additional charge</option><option value="look_after">Look after</option></Select>}</Field>

@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { CalendarClock, CheckCircle2, Hourglass, OctagonX, Plus, Search, XCircle } from 'lucide-react';
-import { useDeferredValue, useState, type FormEvent } from 'react';
+import { useDeferredValue, useState, type FormEvent, useMemo } from 'react';
 import { ApiError, get, post } from '../lib/api';
 import { fmtDate, toDateInput } from '../lib/format';
 import { fmtFull, fmtPKR, MILLIONS, parentLevels, symCaption, T, useMeta, type UnitRef } from '../lib/rev';
@@ -33,7 +33,7 @@ const STATE: Record<TState, { label: string; tone: string; icon: typeof CheckCir
 
 export const StateChip = ({ state }: { state: TState }) => {
   const s = STATE[state];
-  return <span className={clsx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset', s.tone)}><s.icon className="size-3" />{s.label}</span>;
+  return <span className={clsx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-semibold ring-1 ring-inset', s.tone)}><s.icon className="size-3" />{s.label}</span>;
 };
 
 /** One assigned target: verified figures on top, bar with time-pace tick, pending (unverified) shown separately. */
@@ -49,7 +49,7 @@ export function TargetCard({ t, viewer, compact }: { t: AssignedTarget; viewer: 
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{t.headName}</div>
-          <div className="truncate text-[11px] text-slate-500">
+          <div className="truncate text-[12px] text-slate-500">
             {mine ? <>From <b>{t.assignedBy.name}</b></> : <>To <b>{t.assigneeId.name}</b></>} · {t.unitId?.name?.replace(' (test)', '')}
             {t.driveId && <span className="ml-1 rounded bg-brand-50 px-1 font-semibold text-brand-700">Area share</span>}
           </div>
@@ -59,21 +59,21 @@ export function TargetCard({ t, viewer, compact }: { t: AssignedTarget; viewer: 
       <div className="mt-2 grid grid-cols-3 divide-x divide-slate-100 rounded-lg bg-slate-50 py-1.5 text-center dark:divide-slate-800 dark:bg-slate-800/50">
         {[['Target', t.targetValue], ['Verified', t.achieved], ['Balance', Math.max(0, t.targetValue - t.achieved)]].map(([l, v]) => (
           <div key={l as string} className="px-1">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{l}</div>
+            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{l}</div>
             <div className={clsx('font-bold text-slate-900 tabular-nums dark:text-white', compact ? 'text-sm' : 'text-base')}>{fmt(v as number)}</div>
           </div>
         ))}
       </div>
       <div className="mt-2"><Bullet value={t.pct} pace={open ? t.elapsed : null} height={7} /></div>
       {t.achievedPending > 0 && (
-        <div className="mt-1 flex items-center gap-1 text-[11px] font-medium text-amber-700"><Hourglass className="size-3" />Awaiting verification {fmt(t.achievedPending)}</div>
+        <div className="mt-1 flex items-center gap-1 text-[12px] font-medium text-amber-700"><Hourglass className="size-3" />Awaiting verification {fmt(t.achievedPending)}</div>
       )}
-      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-slate-500">
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[12px] text-slate-500">
         <span className="flex items-center gap-1.5"><StateChip state={t.state} /><span>{PERIOD_LABEL[t.period]}</span></span>
         <span className="tabular-nums"><span className="font-semibold">{fmtDate(t.startDate)}</span> – <span className="font-semibold">{fmtDate(t.endDate)}</span>{t.state === 'running' && <b className="ml-1 text-slate-700 dark:text-slate-200">· {t.daysLeft}d left</b>}</span>
       </div>
-      {t.remainingAtAssign != null && <div className="mt-1 text-[11px] text-slate-400 tabular-nums">Share of remaining balance {fmt(t.remainingAtAssign)}</div>}
-      <div className="mt-auto pt-2 text-center text-[10px] font-medium text-slate-400">{t.money ? MILLIONS : '(Cases)'}</div>
+      {t.remainingAtAssign != null && <div className="mt-1 text-[12px] text-slate-400 tabular-nums">Share of remaining balance {fmt(t.remainingAtAssign)}</div>}
+      <div className="mt-auto pt-2 text-center text-[11px] font-medium text-slate-400">{t.money ? MILLIONS : '(Cases)'}</div>
       {(mine || assignedByMe) && open && (
         <div className="mt-2 flex gap-2">
           <Button size="sm" variant="secondary" className="flex-1" onClick={() => setLogging(true)}><Plus className="size-4" />Log progress</Button>
@@ -95,7 +95,7 @@ function ProgressSheet({ t, onClose }: { t: AssignedTarget; onClose: () => void 
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(undefined); };
   return (
     <Sheet open onClose={onClose} title={`Log progress · ${t.headName}`} footer={<Button form="prog-form" type="submit" block loading={save.isPending}>Save</Button>}>
-      <form id="prog-form" onSubmit={submit} className="space-y-4">
+      <form id="prog-form" onSubmit={submit} className="space-y-2.5">
         <div className="grid grid-cols-2 gap-3">
           <Field label={t.money ? `Amount ${T.achieved.toLowerCase()} ${symCaption()}` : `${T.items[0].toUpperCase()}${T.items.slice(1)} ${T.disposed.toLowerCase()}`}>{(id) => <Input id={id} type="number" inputMode="decimal" min={1} required autoFocus value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} />}</Field>
           <Field label="Date">{(id) => <Input id={id} type="date" required min={t.startDate.slice(0, 10)} max={maxDate} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />}</Field>
@@ -110,7 +110,7 @@ function ProgressSheet({ t, onClose }: { t: AssignedTarget; onClose: () => void 
                 <div key={p._id} className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm tabular-nums">
                   <span><span className="font-semibold">{fmtDate(p.date)}</span>{p.note && <span className="ml-1 text-xs text-slate-500">· {p.note}</span>}</span>
                   <span className="flex items-center gap-2">
-                    <span className={clsx('text-[11px] font-semibold capitalize', PSTATUS[p.status ?? 'submitted'])}>{p.status ?? 'submitted'}</span>
+                    <span className={clsx('text-[12px] font-semibold capitalize', PSTATUS[p.status ?? 'submitted'])}>{p.status ?? 'submitted'}</span>
                     <b>{t.money ? fmtFull(p.value) : p.value}</b>
                   </span>
                 </div>
@@ -193,7 +193,7 @@ function AreaForm({ onDone }: { onDone: () => void }) {
   const fmt = (v: number) => (plan?.head.money ? fmtPKR(v) : v.toLocaleString());
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2.5">
       <Field label="Area">{() => <UnitField value={area} onChange={(u) => { setArea(u); preview.reset(); }} accept={parentLevels()} scope="work" placeholder="Choose an area" />}</Field>
       <CommonFields f={f} setF={set} circleOnly />
       <div className="grid grid-cols-2 gap-3">
@@ -237,15 +237,15 @@ function AreaForm({ onDone }: { onDone: () => void }) {
       {!plan ? (
         <Button block variant="secondary" disabled={!area || !f.value} loading={preview.isPending} onClick={() => preview.mutate()}>Preview distribution</Button>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="grid grid-cols-3 divide-x divide-slate-200 rounded-lg bg-slate-50 py-2 text-center dark:divide-slate-700 dark:bg-slate-800">
-            <div><div className="text-[10px] font-medium uppercase text-slate-500">Remaining</div><div className="font-bold tabular-nums">{fmt(plan.remainingTotal)}</div></div>
-            <div><div className="text-[10px] font-medium uppercase text-slate-500">Target</div><div className="font-bold tabular-nums">{fmt(plan.targetTotal)}</div></div>
-            <div><div className="text-[10px] font-medium uppercase text-slate-500">Circles</div><div className="font-bold tabular-nums">{plan.rows.length}</div></div>
+            <div><div className="text-[11px] font-medium uppercase text-slate-500">Remaining</div><div className="font-bold tabular-nums">{fmt(plan.remainingTotal)}</div></div>
+            <div><div className="text-[11px] font-medium uppercase text-slate-500">Target</div><div className="font-bold tabular-nums">{fmt(plan.targetTotal)}</div></div>
+            <div><div className="text-[11px] font-medium uppercase text-slate-500">Circles</div><div className="font-bold tabular-nums">{plan.rows.length}</div></div>
           </div>
           <div className="max-h-72 overflow-auto rounded-lg ring-1 ring-slate-300 dark:ring-slate-600">
-            <table className="w-full border-separate border-spacing-0 text-[12px]">
-              <thead className="sticky top-0 bg-brand-700 text-center text-[11.5px] font-semibold uppercase tracking-wide text-white">
+            <table className="w-full border-separate border-spacing-0 text-[13px]">
+              <thead className="sticky top-0 bg-brand-700 text-center text-[12.5px] font-semibold uppercase tracking-wide text-white">
                 <tr>
                   <th className="w-8 border-r border-white/50 px-1 py-2 text-center">#</th>
                   <th className="border-r border-white/50 px-2 py-2 text-left">Unit · Officer</th>
@@ -257,7 +257,7 @@ function AreaForm({ onDone }: { onDone: () => void }) {
                 {plan.rows.map((r, i) => (
                   <tr key={r.unitId}>
                     <td className="border-b border-r border-b-slate-200 border-r-slate-400 text-center text-slate-500 tabular-nums">{i + 1}</td>
-                    <td className="border-b border-r border-b-slate-200 border-r-slate-400 px-2 py-1"><div className="font-medium">{r.circle.replace(' (test)', '')}</div><div className="text-[11px] text-slate-500">{r.patwari}</div></td>
+                    <td className="border-b border-r border-b-slate-200 border-r-slate-400 px-2 py-1"><div className="font-medium">{r.circle.replace(' (test)', '')}</div><div className="text-[12px] text-slate-500">{r.patwari}</div></td>
                     <td className="border-b border-r border-b-slate-200 border-r-slate-400 px-2 py-1 text-center tabular-nums">{fmt(r.remaining)}</td>
                     <td className="border-b border-b-slate-200 px-2 py-1 text-center font-semibold tabular-nums">{fmt(r.share)}</td>
                   </tr>
@@ -265,7 +265,7 @@ function AreaForm({ onDone }: { onDone: () => void }) {
               </tbody>
             </table>
           </div>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[12px] text-slate-500">
             Each unit gets the same share of its own remaining balance{f.basis === 'percent' ? ` (${f.value}%)` : ''} — larger balances carry larger targets.
             {plan.vacant.length > 0 && <> {plan.vacant.length} vacant unit(s) skipped.</>}
             {plan.zeroBalance > 0 && <> {plan.zeroBalance} unit(s) with no balance skipped.</>}
@@ -296,7 +296,7 @@ function IndividualForm({ onDone }: { onDone: () => void }) {
   );
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(undefined); };
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form onSubmit={submit} className="space-y-2.5">
       {who ? (
         <div className="flex items-center gap-3 rounded-xl p-3 ring-1 ring-slate-200 dark:ring-slate-700">
           <div className="min-w-0 flex-1"><div className="font-medium">{who.name}</div><div className="text-xs text-slate-500">{who.postLabel} · {who.unitName}</div></div>
@@ -344,6 +344,6 @@ export function useTargetSummary(unitId: string | undefined, post: string, fy: s
     queryFn: () => get<{ items: TSum[] }>(`/rev/assigned/summary?unitId=${unitId}&post=${post}&fy=${fy}`),
     enabled: enabled && !!unitId && !!fy,
   });
-  // keyed per officer per charge unit, matching the per-charge league rows
-  return new Map((data?.items ?? []).map((i) => [`${i.user._id}|${i.unitId}`, i]));
+  // keyed per officer per charge unit, matching the per-charge league rows (stable between renders)
+  return useMemo(() => new Map((data?.items ?? []).map((i) => [`${i.user._id}|${i.unitId}`, i])), [data]);
 }

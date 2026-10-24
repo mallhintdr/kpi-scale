@@ -1,9 +1,9 @@
 import clsx from 'clsx';
 import {
-  Award, Bell, ClipboardList, Scale, Landmark, KeyRound, MessageCircle, BarChart3, CalendarRange, Gauge, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
+  AlertTriangle, Award, Bell, ClipboardList, Scale, Landmark, KeyRound, MessageCircle, BarChart3, CalendarRange, Gauge, ClipboardEdit, Home, LayoutGrid, LogOut, Medal, MapPinned, PanelLeftClose, PanelLeftOpen,
   Crosshair, FileSpreadsheet, GitCompareArrows, Network, ShieldCheck, SlidersHorizontal, Table2, Target, Upload, UserCog, Workflow,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { Component, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { get } from '../lib/api';
@@ -24,6 +24,25 @@ export interface NavItem {
 }
 
 const isGuest = () => { try { return sessionStorage.getItem('guest') === '1'; } catch { return false; } };
+/** Icon colour by meaning: on the green sidebar (light shade) and on white (chip). */
+export const NAV_TONE: Record<string, { side: string; chip: string }> = {
+  '/': { side: 'text-sky-300', chip: 'bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300' },
+  '/explore': { side: 'text-emerald-300', chip: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300' },
+  '/assigned': { side: 'text-amber-300', chip: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300' },
+  '/staff': { side: 'text-cyan-300', chip: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-300' },
+  '/league': { side: 'text-yellow-300', chip: 'bg-yellow-50 text-yellow-600 dark:bg-yellow-500/15 dark:text-yellow-300' },
+  '/trends': { side: 'text-indigo-300', chip: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300' },
+  '/compare': { side: 'text-fuchsia-300', chip: 'bg-fuchsia-50 text-fuchsia-600 dark:bg-fuchsia-500/15 dark:text-fuchsia-300' },
+  '/reports': { side: 'text-lime-300', chip: 'bg-lime-50 text-lime-700 dark:bg-lime-500/15 dark:text-lime-300' },
+  '/entry': { side: 'text-sky-300', chip: 'bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300' },
+  '/verify': { side: 'text-teal-300', chip: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300' },
+  '/targets': { side: 'text-orange-300', chip: 'bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300' },
+  '/tasks': { side: 'text-violet-300', chip: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300' },
+  '/notifications': { side: 'text-rose-300', chip: 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300' },
+};
+const ADMIN_TONE = { side: 'text-purple-300', chip: 'bg-purple-50 text-purple-600 dark:bg-purple-500/15 dark:text-purple-300' };
+const DEFAULT_TONE = { side: 'text-brand-100', chip: 'bg-brand-50 text-brand-600 dark:bg-brand-500/15' };
+export const toneOf = (item: { to: string; group?: string }) => NAV_TONE[item.to] ?? (item.group === 'admin' ? ADMIN_TONE : DEFAULT_TONE);
 
 export const NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: Home },
@@ -54,6 +73,54 @@ export const visibleNav = (c: Caps) => NAV.filter((n) => !n.show || n.show(c));
 
 export const useUnread = () =>
   useQuery({ queryKey: ['notifications', 'count'], queryFn: () => get<{ count: number }>('/notifications/unread-count'), refetchInterval: 60_000, select: (d) => d.count });
+
+function useOnline() {
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
+  return online;
+}
+
+function OfflineBanner() {
+  if (useOnline()) return null;
+  return (
+    <div role="status" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200 print:hidden dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30">
+      You are offline — figures shown may be out of date.
+    </div>
+  );
+}
+
+function DemoBanner({ onSignIn }: { onSignIn: () => void }) {
+  return (
+    <div role="status" className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900 ring-1 ring-sky-200 print:hidden dark:bg-sky-500/10 dark:text-sky-200 dark:ring-sky-500/30">
+      <span className="flex-1">You are viewing a read-only demo with test data. Changes cannot be saved.</span>
+      <button type="button" onClick={onSignIn} className="font-semibold underline-offset-2 hover:underline">Sign in with your own account</button>
+    </div>
+  );
+}
+
+/** If a page fails, show a message (and keep the menu) instead of a blank screen. Resets on navigation. */
+class PageBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { console.error(error); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <Card className="mt-4">
+        <Empty icon={AlertTriangle} title="This page could not be shown" body="Something went wrong while displaying it. Try again, or open another page from the menu." action={<button className="h-10 rounded-xl px-4 text-sm font-medium ring-1 ring-slate-200" onClick={() => this.setState({ error: null })}>Try Again</button>} />
+      </Card>
+    );
+  }
+}
 
 const COLLAPSE_KEY = 'sidebar-collapsed';
 
@@ -106,7 +173,7 @@ export function AppShell() {
             <GovLogo className="size-[42px] shrink-0" />
             {!collapsed && (
               <div className="min-w-0 leading-tight">
-                <div className="line-clamp-2 text-[11px] font-bold uppercase leading-tight tracking-wide">{orgLine}</div>
+                <div className="line-clamp-2 text-[12px] font-bold uppercase leading-tight tracking-wide">{orgLine}</div>
               </div>
             )}
           </Link>
@@ -129,12 +196,12 @@ export function AppShell() {
             (collapsed ? (
               <div className="mx-2 my-1.5 border-t border-white/15" />
             ) : (
-              <div className="px-2.5 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-gold-400">Manage</div>
+              <div className="px-2.5 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wider text-gold-400">Manage</div>
             ))}
           {items.filter((i) => i.group === 'admin').map((i) => <SideLink key={i.to} item={i} collapsed={collapsed} />)}
         </nav>
         <div className={clsx('border-t border-white/10 py-2', collapsed ? 'px-1.5' : 'px-2')}>
-          {!collapsed && <div className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gold-400">View</div>}
+          {!collapsed && <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gold-400">View</div>}
           <ModeSwitch variant="side" collapsed={collapsed} />
         </div>
 
@@ -146,7 +213,7 @@ export function AppShell() {
           <div className="flex h-14 items-center gap-2 px-3 lg:px-4">
             <GovLogo className="size-9 shrink-0 lg:hidden" />
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-gold-400 sm:text-[11px] lg:hidden">{orgShort}</div>
+              <div className="truncate text-[11px] font-semibold uppercase tracking-wide text-gold-400 sm:text-[12px] lg:hidden">{orgShort}</div>
               <div className="truncate text-[14px] font-semibold leading-tight sm:text-base"><span className="sm:hidden">Dashboard</span><span className="hidden sm:inline">Employee Performance Dashboard</span></div>
               <div className="hidden truncate text-xs text-brand-100 sm:block">{session!.tenant.name}</div>
             </div>
@@ -155,7 +222,7 @@ export function AppShell() {
             <Link to="/notifications" aria-label={`Notifications${unread ? ` (${unread} unread)` : ''}`} title="Notifications" className="relative grid size-10 place-items-center rounded-lg hover:bg-white/15">
               <Bell className="size-[22px]" />
               {unread > 0 && (
-                <span className="absolute right-0.5 top-0.5 min-w-[18px] rounded-full bg-rose-500 px-1 text-center text-[10px] font-semibold leading-[18px] ring-2 ring-brand-700">
+                <span className="absolute right-0.5 top-0.5 min-w-[18px] rounded-full bg-rose-500 px-1 text-center text-[11px] font-semibold leading-[18px] ring-2 ring-brand-700">
                   {unread > 9 ? '9+' : unread}
                 </span>
               )}
@@ -164,7 +231,7 @@ export function AppShell() {
               <Avatar name={session!.user.name} size={34} />
               <div className="hidden max-w-36 leading-tight md:block">
                 <div className="truncate text-sm font-medium">{session!.user.name}</div>
-                <div className="truncate text-[11px] text-brand-100">{session!.user.designation ?? session!.user.role}</div>
+                <div className="truncate text-[12px] text-brand-100">{session!.user.designation ?? session!.user.role}</div>
               </div>
             </Link>
             <IconButton label="Sign out" onClick={() => logout().then(() => navigate('/login'))} className="hidden size-10 text-white hover:bg-white/15 lg:grid dark:text-white dark:hover:bg-white/15">
@@ -174,6 +241,8 @@ export function AppShell() {
         </div>
         {isGuest() && <div className="bg-gold-500/15 px-4 py-1.5 text-center text-[13px] text-amber-900 dark:text-amber-200">Demo guest view — read-only. Figures and settings cannot be changed.</div>}
         <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 pb-36 sm:px-4 lg:pb-5">
+          {session!.user.readOnly && <DemoBanner onSignIn={() => logout().then(() => navigate('/login'))} />}
+          <OfflineBanner />
           {meta.isLoading ? (
             <div className="py-16 text-center"><Spinner /></div>
           ) : meta.error ? (
@@ -184,10 +253,12 @@ export function AppShell() {
               />
             </Card>
           ) : (
-            <Outlet />
+            <Suspense fallback={<div className="py-16 text-center"><Spinner /></div>}>
+              <PageBoundary key={pathname}><Outlet /></PageBoundary>
+            </Suspense>
           )}
         </main>
-        <footer className="mx-auto hidden w-full max-w-[1600px] print:!hidden border-t border-slate-200 px-4 py-2.5 text-[11px] text-slate-500 lg:block dark:border-slate-800">
+        <footer className="mx-auto hidden w-full max-w-[1600px] print:!hidden border-t border-slate-200 px-4 py-2 text-[12px] text-slate-500 lg:block dark:border-slate-800">
           © {new Date().getFullYear()} {orgLine} · Employee Performance Dashboard · <span title="App version">v{__APP_VERSION__}</span>
         </footer>
       </div>
@@ -200,12 +271,12 @@ export function AppShell() {
             const active = isActive(t.to);
             const badge = t.to === '/notifications' ? unread : 0;
             return (
-              <Link key={t.to} to={t.to} className={clsx('relative flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium', active ? 'text-brand-700 dark:text-brand-200' : 'text-slate-500')}>
+              <Link key={t.to} to={t.to} className={clsx('relative flex h-16 flex-col items-center justify-center gap-1 text-[12px] font-medium', active ? 'text-brand-700 dark:text-brand-200' : 'text-slate-500')}>
                 <span className={clsx('grid h-7 w-14 place-items-center rounded-full transition', active && 'bg-brand-100 dark:bg-brand-500/20')}>
                   <t.icon className="size-[22px]" strokeWidth={active ? 2.4 : 2} />
                 </span>
                 {titleCase(t.label)}
-                {badge > 0 && <span className="absolute right-[22%] top-2 min-w-4 rounded-full bg-rose-500 px-1 text-center text-[10px] leading-4 text-white">{badge > 9 ? '9+' : badge}</span>}
+                {badge > 0 && <span className="absolute right-[22%] top-2 min-w-4 rounded-full bg-rose-500 px-1 text-center text-[11px] leading-4 text-white">{badge > 9 ? '9+' : badge}</span>}
               </Link>
             );
           })}
@@ -224,7 +295,7 @@ function SideLink({ item, badge = 0, collapsed }: { item: NavItem; badge?: numbe
       aria-label={collapsed ? item.label : undefined}
       className={({ isActive }) =>
         clsx(
-          'relative flex h-8 items-center gap-2.5 rounded-md text-[13px] font-medium transition',
+          'relative flex h-9 items-center gap-2.5 rounded-md text-[14px] font-medium transition',
           collapsed ? 'justify-center' : 'px-2.5',
           isActive
             ? 'bg-white/15 text-white before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-gold-400'
@@ -232,13 +303,13 @@ function SideLink({ item, badge = 0, collapsed }: { item: NavItem; badge?: numbe
         )
       }
     >
-      <item.icon className="size-[18px] shrink-0" />
+      <item.icon className={clsx('size-[18px] shrink-0', toneOf(item).side)} />
       {!collapsed && <span className="flex-1 truncate">{titleCase(item.label)}</span>}
       {badge > 0 &&
         (collapsed ? (
           <span className="absolute right-3 top-2 size-2 rounded-full bg-rose-500" />
         ) : (
-          <span className="rounded-full bg-rose-500 px-1.5 text-[11px] text-white">{badge}</span>
+          <span className="rounded-full bg-rose-500 px-1.5 text-[12px] text-white">{badge}</span>
         ))}
     </NavLink>
   );
@@ -259,7 +330,7 @@ function ModeSwitch({ variant, collapsed }: { variant: 'side' | 'bar'; collapsed
       <div className="space-y-px" role="group" aria-label="View mode">
         {MODES.map(({ m, label, icon: Icon, hint }) => (
           <button key={m} onClick={() => setMode(m)} aria-pressed={mode === m} title={collapsed ? `${label} — ${hint}` : hint}
-            className={clsx('flex h-8 w-full items-center gap-2.5 rounded-md text-[13px] font-medium transition', collapsed ? 'justify-center' : 'px-2.5',
+            className={clsx('flex h-8 w-full items-center gap-2.5 rounded-md text-[14px] font-medium transition', collapsed ? 'justify-center' : 'px-2.5',
               mode === m ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-100 hover:bg-white/10 hover:text-white')}>
             <Icon className="size-4 shrink-0" />
             {!collapsed && <span className="truncate">{label}</span>}
@@ -272,7 +343,7 @@ function ModeSwitch({ variant, collapsed }: { variant: 'side' | 'bar'; collapsed
     <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800" role="group" aria-label="View mode">
       {MODES.map(({ m, label, icon: Icon, hint }) => (
         <button key={m} onClick={() => setMode(m)} aria-pressed={mode === m} title={hint}
-          className={clsx('flex h-7 items-center justify-center gap-1.5 rounded-md text-[11.5px] font-semibold transition',
+          className={clsx('flex h-7 items-center justify-center gap-1.5 rounded-md text-[12.5px] font-semibold transition',
             mode === m ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300')}>
           <Icon className="size-3.5" />{m === 'kpi' ? 'KPI' : label}
         </button>
@@ -293,7 +364,7 @@ export function PageHeader({ title, subtitle, back, actions }: { title: string; 
           </button>
         )}
         <h1 className="line-clamp-2 break-words border-l-4 border-gold-500 pl-2.5 text-lg font-bold leading-snug text-brand-800 sm:text-xl lg:text-2xl dark:text-white">{titleCase(title)}</h1>
-        {subtitle && <div className="mt-0.5 pl-3.5 text-[13px] text-slate-500">{subtitle}</div>}
+        {subtitle && <div className="mt-0.5 pl-3.5 text-[14px] text-slate-500">{subtitle}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {actions}

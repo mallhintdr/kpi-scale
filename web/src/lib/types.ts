@@ -9,6 +9,8 @@ export interface User {
   role: Role;
   designation?: string;
   bps?: number | null;
+  /** Guest demo session: viewing only. */
+  readOnly?: boolean;
 }
 export interface Tenant {
   id: string;

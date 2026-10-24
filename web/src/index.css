@@ -1,6 +1,10 @@
 @import 'tailwindcss';
 
 @theme {
+  /* Text one step larger than Tailwind's defaults: easier on phones, still fits one line */
+  --text-xs: 0.8125rem; --text-xs--line-height: 1.15rem;
+  --text-sm: 0.9375rem; --text-sm--line-height: 1.35rem;
+  --text-base: 1.0625rem; --text-base--line-height: 1.5rem;
   --font-sans: 'Noto Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   /* Government of the Punjab green + gold */
   --color-brand-50: #ecf6ef;

@@ -39,7 +39,7 @@ export default function Platform() {
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-3">
           <OrgLogo className="size-9" />
           <div className="min-w-0 flex-1 leading-tight">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-gold-400">Platform console</div>
+            <div className="text-[12px] font-semibold uppercase tracking-wide text-gold-400">Platform console</div>
             <div className="truncate text-sm font-semibold">KPI Dashboard · {session?.user.name}</div>
           </div>
           <button className="grid size-10 place-items-center rounded-lg hover:bg-white/15" title="Sign out" onClick={() => logout().then(() => navigate('/login'))}><LogOut className="size-[18px]" /></button>
@@ -47,7 +47,7 @@ export default function Platform() {
       </header>
 
       <main className="mx-auto max-w-6xl px-3 py-4">
-        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[
             { l: 'Organisations', v: totals.orgs },
             { l: 'Active', v: totals.active },
@@ -56,7 +56,7 @@ export default function Platform() {
           ].map((s) => (
             <Card key={s.l} className="p-3">
               <div className="text-2xl font-bold tabular-nums">{s.v}</div>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{s.l}</div>
+              <div className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">{s.l}</div>
             </Card>
           ))}
         </div>
@@ -85,7 +85,7 @@ export default function Platform() {
                 </div>
                 <div className="mt-3 grid grid-cols-4 gap-1 text-center">
                   {[['People', t.stats.users], ['Units', t.stats.units], ['Postings', t.stats.postings], ['Entries', t.stats.entries]].map(([l, v]) => (
-                    <div key={l as string} className="rounded-lg bg-slate-50 py-1.5 dark:bg-slate-800"><div className="text-sm font-bold tabular-nums">{(v as number).toLocaleString()}</div><div className="text-[10px] uppercase tracking-wide text-slate-500">{l}</div></div>
+                    <div key={l as string} className="rounded-lg bg-slate-50 py-1.5 dark:bg-slate-800"><div className="text-sm font-bold tabular-nums">{(v as number).toLocaleString()}</div><div className="text-[11px] uppercase tracking-wide text-slate-500">{l}</div></div>
                   ))}
                 </div>
                 <div className="mt-2 text-xs text-slate-500">{t.blueprint ? `Setup v${t.blueprint.version} · ${t.blueprint.kpis} KPIs` : 'Not configured'} · plan {t.plan}{t.limits?.maxUsers ? ` · up to ${t.limits.maxUsers.toLocaleString()} people` : ''}</div>
@@ -126,7 +126,7 @@ function CreateSheet({ onClose }: { onClose: () => void }) {
   const tpl = templates.data?.find((t) => t.key === f.template);
   return (
     <Sheet open onClose={onClose} title="New organisation" footer={<Button form="org-form" type="submit" block loading={save.isPending}>Create organisation</Button>}>
-      <form id="org-form" onSubmit={submit} className="space-y-4">
+      <form id="org-form" onSubmit={submit} className="space-y-2.5">
         <Field label="Organisation name">{(id) => <Input id={id} required minLength={2} value={f.name} onChange={set('name')} placeholder="e.g. Acme Marketing (Pvt) Ltd" />}</Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Short id (optional)" hint="Used in its sign-in link">{(id) => <Input id={id} pattern="[a-z0-9-]{2,40}" value={f.slug} onChange={set('slug')} placeholder="acme" />}</Field>
@@ -148,7 +148,7 @@ function CreateSheet({ onClose }: { onClose: () => void }) {
         </div>
         <div className="border-t border-slate-200 pt-3 dark:border-slate-800">
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold"><UserPlus className="size-4" />First administrator</div>
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <Field label="Name">{(id) => <Input id={id} required minLength={2} value={f.adminName} onChange={set('adminName')} />}</Field>
             <Field label="Email">{(id) => <Input id={id} type="email" required value={f.adminEmail} onChange={set('adminEmail')} />}</Field>
             <Field label="Temporary password" hint="8+ characters with a letter and a number">{(id) => <PasswordInput id={id} required minLength={8} value={f.adminPassword} onChange={set('adminPassword')} />}</Field>
@@ -166,17 +166,17 @@ function AdminsSheet({ tenant, onClose }: { tenant: TenantRow; onClose: () => vo
   return (
     <Sheet open onClose={onClose} title={`Administrators · ${tenant.name}`}>
       {list.isLoading ? <Loading /> : (
-        <Card className="mb-4 divide-y divide-slate-100 dark:divide-slate-800">
+        <Card className="mb-3 divide-y divide-slate-100 dark:divide-slate-800">
           {list.data?.map((a) => (
             <div key={a._id} className="flex items-center gap-2 px-3 py-2 text-sm">
               <div className="min-w-0 flex-1"><div className="truncate font-medium">{a.name}</div><div className="truncate text-xs text-slate-500">{a.email}</div></div>
               <Badge>{a.role}</Badge>
-              <span className="text-[11px] text-slate-400">{a.lastLoginAt ? `seen ${new Date(a.lastLoginAt).toLocaleDateString()}` : 'never signed in'}</span>
+              <span className="text-[12px] text-slate-400">{a.lastLoginAt ? `seen ${new Date(a.lastLoginAt).toLocaleDateString()}` : 'never signed in'}</span>
             </div>
           ))}
         </Card>
       )}
-      <form onSubmit={(e) => { e.preventDefault(); add.mutate(undefined); }} className="space-y-3">
+      <form onSubmit={(e) => { e.preventDefault(); add.mutate(undefined); }} className="space-y-2.5">
         <div className="text-sm font-semibold">Add administrator</div>
         <Input required minLength={2} placeholder="Name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         <Input required type="email" placeholder="Email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />

@@ -38,7 +38,7 @@ export default function Profile() {
 
       <SectionTitle>Change password</SectionTitle>
       <Card className="p-4">
-        <form onSubmit={submit} className="space-y-4">
+        <form onSubmit={submit} className="space-y-2.5">
           <Field label="Current password">{(id) => <PasswordInput id={id} autoComplete="current-password" required value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} />}</Field>
           <Field label="New password" hint="At least 8 characters with a letter and a number">{(id) => <PasswordInput id={id} autoComplete="new-password" required minLength={8} value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} />}</Field>
           <Field label="Confirm new password">{(id) => <PasswordInput id={id} autoComplete="new-password" required value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} />}</Field>

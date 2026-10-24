@@ -126,3 +126,12 @@ export async function exportTableXlsx(table: HTMLTableElement | null, opts: { fi
   Object.assign(document.createElement('a'), { href: url, download: opts.filename.endsWith('.xlsx') ? opts.filename : `${opts.filename}.xlsx` }).click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+
+/** Download an object URL (anchor attached to the page, so Safari / Firefox honour it). */
+export function saveBlob(url: string, filename: string) {
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
