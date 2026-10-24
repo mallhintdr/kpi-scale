@@ -25,7 +25,7 @@ export function parseCsv(text: string): Row[] {
   return parse(text, { columns: (h: string[]) => h.map((x) => x.trim().toLowerCase().replace(/\s+/g, '_')), skip_empty_lines: true, trim: true, bom: true });
 }
 
-interface Ctx { bp: BP; dryRun: boolean; errors: { row: number; message: string }[]; created: number; updated: number; defaultPassword?: string; actorRole?: string }
+interface Ctx { bp: BP; dryRun: boolean; errors: { row: number; message: string }[]; created: number; updated: number; defaultPasswordHash?: string; actorRole?: string }
 
 async function importUnits(rows: Row[], c: Ctx) {
   const { bp } = c;
@@ -74,7 +74,7 @@ async function importUsers(rows: Row[], c: Ctx) {
     if (!ROLES.includes(role)) { c.errors.push({ row: i, message: `Unknown role "${r.role}"` }); continue; }
     // Only an owner may create owners; imports never change an existing person's role
     if (role === 'owner' && c.actorRole !== 'owner') { c.errors.push({ row: i, message: 'Only an organisation owner can create owners' }); continue; }
-    const pw = r.password || c.defaultPassword;
+    const pw = r.password;
     const data = { name: r.name, role, designation: r.designation || undefined, employeeCode: r.employee_code || undefined, phone: r.phone || undefined, phoneE164: normalizePhone(r.phone) || undefined };
     if (existing.has(email)) {
       const { role: _ignored, ...profile } = data;
@@ -82,8 +82,8 @@ async function importUsers(rows: Row[], c: Ctx) {
       c.updated++;
       continue;
     }
-    if (!pw || pw.length < 8) { c.errors.push({ row: i, message: 'A password of 8+ characters is required (column or default)' }); continue; }
-    if (!c.dryRun) await User.create({ ...data, email, passwordHash: await hashPassword(pw) });
+    if ((!pw && !c.defaultPasswordHash) || (pw && pw.length < 8)) { c.errors.push({ row: i, message: 'A password of 8+ characters is required (column or default)' }); continue; }
+    if (!c.dryRun) await User.create({ ...data, email, passwordHash: pw ? await hashPassword(pw) : c.defaultPasswordHash });
     existing.set(email, {} as any);
     c.created++;
   }
@@ -116,16 +116,18 @@ async function importCharges(rows: Row[], c: Ctx) {
 }
 
 defineJob('import', async (d) => {
-  const run = await ImportRun.findById(d.runId);
+  // The CSV and options live on the run document, never in the queue's job data
+  const run = await ImportRun.findById(d.runId).select('+payload');
   if (!run) return;
+  const payload = (run.get('payload') ?? {}) as { csv?: string; defaultPasswordHash?: string; actorRole?: string };
   run.status = 'running';
   await run.save();
   try {
     const bp = await getBlueprint(String(d.tenantId));
     if (!bp) throw new Error('Organisation is not configured');
-    const rows = parseCsv(String(d.csv));
+    const rows = parseCsv(String(payload.csv ?? ''));
     run.total = rows.length;
-    const ctx: Ctx = { bp, dryRun: run.dryRun, errors: [], created: 0, updated: 0, defaultPassword: d.defaultPassword as string | undefined, actorRole: d.actorRole as string | undefined };
+    const ctx: Ctx = { bp, dryRun: run.dryRun, errors: [], created: 0, updated: 0, defaultPasswordHash: payload.defaultPasswordHash, actorRole: payload.actorRole };
     if (run.kind === 'units') {
       const t = await Tenant.findById(d.tenantId).select('limits').lean();
       const now = await Unit.countDocuments();
@@ -141,5 +143,6 @@ defineJob('import', async (d) => {
   } catch (err) {
     run.set({ status: 'failed', errors: [{ row: 0, message: (err as Error).message }], finishedAt: new Date() });
   }
+  run.set('payload', undefined);
   await run.save();
 });

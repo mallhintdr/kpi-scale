@@ -13,6 +13,8 @@ export interface AuthUser {
   email: string;
   /** Signed in to the platform tenant (super-admin console). */
   isPlatform?: boolean;
+  /** Guest demo session: may only read. */
+  readOnly?: boolean;
 }
 
 declare global {
@@ -56,7 +58,10 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     name: user.name,
     email: user.email,
     isPlatform: !!tenant.isPlatform,
+    readOnly: !!payload.ro,
   };
+  // Guest demo: reading only. Enforced here so no route can be missed.
+  if (payload.ro && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) throw forbidden('This is a read-only demo. Sign in with your own account to make changes.');
   runWithContext({ tenantId: payload.tid, userId: req.user.id }, () => next());
 }
 

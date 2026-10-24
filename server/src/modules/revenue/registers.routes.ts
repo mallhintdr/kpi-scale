@@ -5,10 +5,11 @@ import { badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { audit, notify } from '../../lib/notify.js';
 import { requireRole, type AuthUser } from '../../middleware/auth.js';
 import { objectId, q, validate } from '../../middleware/validate.js';
-import { AuditPara, Charge, ScoreConfig, Task, Unit, User } from '../../models/index.js';
+import { AuditPara, Charge, ScoreConfig, Task, Tenant, Unit, User } from '../../models/index.js';
+import { runUnscoped } from '../../lib/tenantContext.js';
 import type { BP } from '../org/blueprint.js';
 import { bpOf } from '../org/service.js';
-import { activeFilter, assertCanRead, assertCanSee, hasCap, hasGrant, holdsOn, myCharges, scopeRoots } from './access.js';
+import { activeFilter, assertCanRead, assertCanSee, grantsOf, hasCap, hasGrant, holdsOn, myCharges, scopeRoots } from './access.js';
 import { configResolver } from './scoring.js';
 
 const router = Router();
@@ -48,7 +49,10 @@ router.get(
 const canMaintain = async (me: AuthUser, bp: BP, regKey: string, unit: { anc: Types.ObjectId[]; type: string }) => {
   const reg = bp.register.get(regKey);
   if (!reg || !reg.levels.includes(unit.type)) return false;
-  if ((await hasGrant(me, 'manage_registers', unit)) || (await hasGrant(me, 'enter', unit))) return true;
+  if (await hasGrant(me, 'manage_registers', unit)) return true;
+  // An 'enter' grant counts only when unrestricted, or when it names this register
+  const enter = (await grantsOf(me)).some((g) => g.rights.includes('enter') && unit.anc.some((a) => String(a) === g.unitId) && (!g.metrics.length || g.metrics.includes(regKey)));
+  if (enter) return true;
   return holdsOn(me, reg.enterPosts, unit);
 };
 
@@ -84,6 +88,7 @@ router.patch('/audit-paras/:id', validate({ params: z.object({ id: objectId }), 
   if (!para) throw notFound('Item');
   const unit = await Unit.findById(para.unitId).lean();
   if (!unit || !(await canMaintain(req.user!, bp, para.register, unit))) throw forbidden();
+  if (req.body.category !== undefined && !bp.register.get(para.register)?.categories.includes(req.body.category)) throw badRequest('Unknown category');
   const wasSettled = para.status === 'settled';
   Object.assign(para, req.body);
   if (para.recovered > para.amount) throw badRequest('Recovered cannot exceed the amount');
@@ -152,6 +157,11 @@ router.post(
   async (req, res) => {
     const unit = await assertCanSee(req.user!, req.body.unitId, bpOf(req));
     if (req.body.assigneeId === req.user!.id) throw badRequest('You cannot assign a task to yourself');
+    {
+      const tenant = await runUnscoped(() => Tenant.findById(req.user!.tenantId).select('settings').lean());
+      const day = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: (tenant as any)?.settings?.timezone ?? 'Asia/Karachi' });
+      if (Number.isNaN(req.body.dueDate.getTime()) || day(req.body.dueDate) < day(new Date())) throw badRequest('Due date cannot be in the past');
+    }
     const holds = await Charge.exists({ userId: req.body.assigneeId, unitId: unit._id, ...activeFilter() });
     if (!holds) throw badRequest('That officer does not hold charge of this unit');
     const task = await Task.create({ ...req.body, anc: unit.anc, assignedBy: req.user!.id });

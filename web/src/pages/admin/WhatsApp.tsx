@@ -5,7 +5,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { AlertTriangle, MessageCircle, Plus, RotateCcw, Save, Send, Trash2, UserRound } from 'lucide-react';
-import { useDeferredValue, useEffect, useState } from 'react';
+import { useDeferredValue, useRef, useState } from 'react';
 import { PageHeader } from '../../components/AppShell';
 import { Badge, Button, Card, Empty, ErrorState, Field, FormError, Input, Loading, SectionTitle, Segmented, Select, useToast } from '../../components/ui';
 import { del, get, post, put } from '../../lib/api';
@@ -47,8 +47,8 @@ export default function WhatsApp() {
         ].map((s) => (
           <Card key={s.l} className="p-3">
             <div className={clsx('text-xl font-bold tabular-nums', s.tone)}>{s.v}</div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{s.l}</div>
-            {s.sub && <div className="text-[11px] text-rose-600">{s.sub}</div>}
+            <div className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">{s.l}</div>
+            {s.sub && <div className="text-[12px] text-rose-600">{s.sub}</div>}
           </Card>
         ))}
       </div>
@@ -69,13 +69,18 @@ export default function WhatsApp() {
 
 function SettingsForm({ initial, tz, withPhone }: { initial: Settings; tz?: string; withPhone: number }) {
   const [s, setS] = useState<Settings>(initial);
+  // Client-only stable keys for the follow-up time rows (kept in step with s.followupsAt).
+  const fuSeq = useRef(0);
+  const fuIds = useRef<number[]>([]);
+  while (fuIds.current.length < s.followupsAt.length) fuIds.current.push(++fuSeq.current);
+  fuIds.current.length = s.followupsAt.length;
   const [holiday, setHoliday] = useState('');
   const save = useSave(() => put('/org/whatsapp', s), [['org', 'whatsapp']], 'WhatsApp settings saved');
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS({ ...s, [k]: v });
   const esc = (k: keyof Settings['escalation'], v: number | boolean) => setS({ ...s, escalation: { ...s.escalation, [k]: v } });
   return (
-    <div className="space-y-3">
-      <Card className="space-y-3 p-4">
+    <div className="space-y-2.5">
+      <Card className="space-y-2.5 p-4">
         <label className="flex items-center gap-3">
           <input type="checkbox" className="size-5 accent-brand-600" checked={s.enabled} onChange={(e) => set('enabled', e.target.checked)} />
           <span><b>Send daily WhatsApp coaching</b><span className="block text-xs text-slate-500">{withPhone.toLocaleString()} people have a phone number on file. Add numbers under People or by import.</span></span>
@@ -88,16 +93,16 @@ function SettingsForm({ initial, tz, withPhone }: { initial: Settings; tz?: stri
       </Card>
 
       <SectionTitle>Daily schedule {tz && <span className="text-xs font-normal normal-case text-slate-400">· {tz}</span>}</SectionTitle>
-      <Card className="space-y-3 p-4">
+      <Card className="space-y-2.5 p-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="☀️ Morning goals">{(id) => <Input id={id} type="time" value={s.morningAt} onChange={(e) => set('morningAt', e.target.value)} />}</Field>
           <Field label="⏰ Follow-ups">
             {() => (
               <div className="space-y-1.5">
                 {s.followupsAt.map((f, i) => (
-                  <div key={i} className="flex gap-1.5">
+                  <div key={fuIds.current[i]} className="flex gap-1.5">
                     <Input type="time" value={f} onChange={(e) => set('followupsAt', s.followupsAt.map((x, j) => (j === i ? e.target.value : x)))} />
-                    <Button type="button" variant="ghost" onClick={() => set('followupsAt', s.followupsAt.filter((_, j) => j !== i))}><Trash2 className="size-4" /></Button>
+                    <Button type="button" variant="ghost" onClick={() => { fuIds.current.splice(i, 1); set('followupsAt', s.followupsAt.filter((_, j) => j !== i)); }}><Trash2 className="size-4" /></Button>
                   </div>
                 ))}
                 {s.followupsAt.length < 4 && <Button type="button" size="sm" variant="ghost" onClick={() => set('followupsAt', [...s.followupsAt, '16:00'])}><Plus className="size-4" />Follow-up</Button>}
@@ -130,7 +135,7 @@ function SettingsForm({ initial, tz, withPhone }: { initial: Settings; tz?: stri
       </Card>
 
       <SectionTitle>Escalation for people falling behind</SectionTitle>
-      <Card className="space-y-3 p-4">
+      <Card className="space-y-2.5 p-4">
         <label className="flex items-center gap-3">
           <input type="checkbox" className="size-5 accent-brand-600" checked={s.escalation.enabled} onChange={(e) => esc('enabled', e.target.checked)} />
           <b>Warn people who keep falling behind</b>
@@ -181,12 +186,12 @@ function PersonPicker({ value, onChange }: { value: UserRow | null; onChange: (u
 
 /** WhatsApp-like bubble; *bold* and _italic_ rendered. */
 function Bubble({ text, mine = false, meta }: { text: string; mine?: boolean; meta?: string }) {
-  const html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/_([^_\n]+)_/g, '<i>$1</i>');
+  const html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/_([^_\n]+)_/g, '<i>$1</i>');
   return (
     <div className={clsx('flex', mine ? 'justify-end' : 'justify-start')}>
-      <div className={clsx('max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-[13.5px] leading-snug shadow-sm', mine ? 'rounded-br-sm bg-[#d9fdd3] text-slate-900' : 'rounded-bl-sm bg-white text-slate-900')} dir="auto">
+      <div className={clsx('max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-[14.5px] leading-snug shadow-sm', mine ? 'rounded-br-sm bg-[#d9fdd3] text-slate-900' : 'rounded-bl-sm bg-white text-slate-900')} dir="auto">
         <span dangerouslySetInnerHTML={{ __html: html }} />
-        {meta && <div className="mt-1 text-right text-[10px] text-slate-500">{meta}</div>}
+        {meta && <div className="mt-1 text-right text-[11px] text-slate-500">{meta}</div>}
       </div>
     </div>
   );
@@ -199,8 +204,7 @@ function PreviewTool() {
   const [slot, setSlot] = useState<'morning' | 'followup' | 'evening'>('morning');
   const [reply, setReply] = useState('STATUS');
   const preview = useQuery({ queryKey: ['org', 'whatsapp', 'preview', who?._id, slot], queryFn: () => get<{ text: string }>(`/org/whatsapp/preview?userId=${who!._id}&slot=${slot}`), enabled: !!who, retry: false });
-  const thread = useQuery({ queryKey: ['org', 'whatsapp', 'thread', who?._id], queryFn: () => get<{ items: Msg[] }>(`/org/whatsapp/messages?userId=${who!._id}`), enabled: !!who, refetchInterval: 3000 });
-  useEffect(() => { preview.refetch(); }, [slot]); // eslint-disable-line react-hooks/exhaustive-deps
+  const thread = useQuery({ queryKey: ['org', 'whatsapp', 'thread', who?._id], queryFn: () => get<{ items: Msg[] }>(`/org/whatsapp/messages?userId=${who!._id}`), enabled: !!who, refetchInterval: 10_000, refetchIntervalInBackground: false });
   const send = async () => {
     const r = await post<{ queued: number }>('/org/whatsapp/send', { slot, userId: who!._id });
     toast(r.queued ? 'Sent' : 'Nothing sent (no phone number?)');
@@ -212,7 +216,7 @@ function PreviewTool() {
   };
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,22rem)_1fr]">
-      <Card className="space-y-3 p-4">
+      <Card className="space-y-2.5 p-4">
         <Field label="Person">{() => <PersonPicker value={who} onChange={setWho} />}</Field>
         <Segmented value={slot} onChange={setSlot} options={[{ value: 'morning', label: 'Morning' }, { value: 'followup', label: 'Follow-up' }, { value: 'evening', label: 'Evening' }]} />
         <Button block disabled={!who} onClick={send}><Send className="size-4" />Send this now to {who?.name.split(' ')[0] ?? '…'}</Button>
@@ -223,9 +227,9 @@ function PreviewTool() {
       <div className="space-y-2 rounded-2xl bg-[#efeae2] p-3 dark:bg-slate-800">
         {!who ? <div className="py-16 text-center text-sm text-slate-500">Choose a person to see exactly what they receive.</div> : (
           <>
-            <div className="text-center text-[11px] text-slate-500">Preview — not sent</div>
+            <div className="text-center text-[12px] text-slate-500">Preview — not sent</div>
             {preview.isLoading ? <Loading /> : preview.error ? <div className="text-center text-sm text-rose-700">{(preview.error as Error).message}</div> : <Bubble text={preview.data!.text} />}
-            {!!thread.data?.items.length && <div className="pt-3 text-center text-[11px] text-slate-500">Conversation</div>}
+            {!!thread.data?.items.length && <div className="pt-3 text-center text-[12px] text-slate-500">Conversation</div>}
             {thread.data?.items.slice().reverse().slice(-12).map((m) => (
               <Bubble key={m._id} text={m.text} mine={m.direction === 'in'} meta={`${new Date(m.createdAt).toLocaleString()} · ${m.kind}${m.direction === 'out' ? ` · ${m.status}` : ''}`} />
             ))}
@@ -284,13 +288,13 @@ function Review() {
   const markLeave = useSave(() => put(`/org/whatsapp/leave/${who!._id}`, { from, until, note: note || undefined }), [['org', 'whatsapp']], 'Marked on leave — no messages or warnings for that period', () => { setWho(null); setNote(''); });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2.5">
       <div>
         <SectionTitle>Under review</SectionTitle>
         {isLoading ? <Loading /> : !data?.length ? <Card><Empty title="Nobody is behind" body="People who fall behind appear here with their level and the reason." /></Card> : (
           <Card className="divide-y divide-slate-100 dark:divide-slate-800">
             {data.map((e) => (
-              <div key={e._id} className="flex flex-wrap items-start gap-3 px-3 py-2.5 text-sm">
+              <div key={e._id} className="flex flex-wrap items-start gap-3 px-3 py-2 text-sm">
                 <Badge tone={LEVEL_TONE[e.level]}>{LEVEL[e.level]}</Badge>
                 <div className="min-w-0 flex-1">
                   <div className="font-medium">{e.userId?.name} <span className="text-xs font-normal text-slate-500">{e.userId?.designation}</span></div>
@@ -311,7 +315,7 @@ function Review() {
 
       <div>
         <SectionTitle>On leave</SectionTitle>
-        <Card className="space-y-3 p-4">
+        <Card className="space-y-2.5 p-4">
           <p className="text-xs text-slate-500">People on leave receive no WhatsApp messages and their days do not count towards warnings. Marking leave also withdraws any current warning, and the person is informed.</p>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_repeat(2,minmax(0,0.7fr))_minmax(0,1fr)_auto] lg:items-end">
             <Field label="Person">{() => <PersonPicker value={who} onChange={setWho} />}</Field>

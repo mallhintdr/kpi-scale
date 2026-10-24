@@ -54,7 +54,7 @@ const restricted = { ...bp.doc, access: { viewScope: 'jurisdiction' } };
 check((await call(adm, 'PUT', '/org/blueprint', { doc: restricted, note: 'test: restrict viewing' })).s === 200, 'admin limits viewing to jurisdiction');
 check((await call(p1, 'GET', `/rev/units/${otherTehsil._id}`)).s === 403, 'now another tehsil is hidden from the patwari');
 check((await call(p1, 'GET', `/rev/units/${tehsil._id}`)).s === 200, 'his granted tehsil stays visible');
-check((await call(p1, 'GET', `/rev/units/${me1.browseRoots[0]._id}`)).s === 200, 'the division above him stays visible (to see where he stands)');
+check((await call(p1, 'GET', `/rev/units/${me1.browseRoots[0]._id}`)).s === 403, "the division above him is not opened in full (siblings' scores stay private)");
 g = await call(adm, 'POST', '/org/access', { userId: p1id, unitId: otherTehsil._id, rights: ['view'] });
 created.push(g.b._id);
 check((await call(p1, 'GET', `/rev/units/${otherTehsil._id}`)).s === 200, 'a "View" grant opens that tehsil to him');

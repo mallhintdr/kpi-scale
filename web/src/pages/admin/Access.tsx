@@ -68,8 +68,8 @@ export default function Access() {
         <Card><Empty icon={KeyRound} title="No direct grants" body="Everyone works with the rights of their posts. Give access to let someone enter, verify or set targets beyond their posting." /></Card>
       ) : (
         <Card className="overflow-x-auto">
-          <table className="w-full min-w-[720px] border-separate border-spacing-0 text-[13px]">
-            <thead className="bg-brand-700 text-center text-[12.5px] text-white">
+          <table className="w-full min-w-[720px] border-separate border-spacing-0 text-[14px]">
+            <thead className="bg-brand-700 text-center text-[13.5px] text-white">
               <tr>
                 {['Person', 'Area', 'Rights', 'KPIs', 'Until', ''].map((h) => <th key={h} className="border-b border-r border-white/50 px-3 py-2">{h}</th>)}
               </tr>
@@ -79,12 +79,12 @@ export default function Access() {
                 <tr key={g._id} className={clsx(g.expired && 'opacity-50')}>
                   <td className="border-b border-r border-slate-200 px-3 py-2 dark:border-slate-700">
                     <button className="text-left font-bold hover:underline" onClick={() => setPerson(g.userId._id)}>{g.userId?.name}</button>
-                    <div className="text-[11px] text-slate-500">{g.userId?.designation ?? g.userId?.email}</div>
+                    <div className="text-[12px] text-slate-500">{g.userId?.designation ?? g.userId?.email}</div>
                   </td>
-                  <td className="border-b border-r border-slate-200 px-3 py-2 dark:border-slate-700">{g.unitId ? <>{g.unitId.name}<div className="text-[11px] text-slate-500">{UNIT_LABEL[g.unitId.type]} and below</div></> : '—'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2 dark:border-slate-700">{g.unitId ? <>{g.unitId.name}<div className="text-[12px] text-slate-500">{UNIT_LABEL[g.unitId.type]} and below</div></> : '—'}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2 dark:border-slate-700"><div className="flex flex-wrap gap-1">{g.rights.map((r) => <Badge key={r} tone="bg-brand-50 text-brand-800 dark:bg-brand-500/15 dark:text-brand-200">{LABEL[r] ?? r}</Badge>)}</div></td>
-                  <td className="border-b border-r border-slate-200 px-3 py-2 text-[12px] dark:border-slate-700">{g.metrics.length ? g.metrics.length === 1 ? g.metrics[0] : `${g.metrics.length} KPIs` : 'All'}</td>
-                  <td className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 text-[12px] dark:border-slate-700">{g.expiresAt ? <><span className="font-semibold">{new Date(g.expiresAt).toLocaleDateString()}</span>{g.expired && <Badge className="ml-1">Expired</Badge>}</> : 'No end'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2 text-[13px] dark:border-slate-700">{g.metrics.length ? g.metrics.length === 1 ? g.metrics[0] : `${g.metrics.length} KPIs` : 'All'}</td>
+                  <td className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 text-[13px] dark:border-slate-700">{g.expiresAt ? <><span className="font-semibold">{new Date(g.expiresAt).toLocaleDateString()}</span>{g.expired && <Badge className="ml-1">Expired</Badge>}</> : 'No end'}</td>
                   <td className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-center dark:border-slate-700">
                     <button className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit" onClick={() => setEditing(g)}><Pencil className="size-4" /></button>
                     <button className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Remove" onClick={() => confirm(`Remove ${g.userId?.name}'s access to ${g.unitId?.name}?`) && remove.mutate(g._id)}><Trash2 className="size-4" /></button>
@@ -122,7 +122,7 @@ function GrantSheet({ grant, onClose }: { grant: Grant | null; onClose: () => vo
   return (
     <Sheet open onClose={onClose} title={grant ? `Access · ${grant.userId.name}` : 'Give access'}
       footer={<Button form="grant-form" type="submit" block disabled={!who || !unit || !rights.length} loading={save.isPending}>{grant ? 'Save' : 'Give access'}</Button>}>
-      <form id="grant-form" onSubmit={submit} className="space-y-4">
+      <form id="grant-form" onSubmit={submit} className="space-y-2.5">
         <Field label="Person">
           {() => who ? (
             <Card className="flex items-center gap-3 p-3">
@@ -148,7 +148,7 @@ function GrantSheet({ grant, onClose }: { grant: Grant | null; onClose: () => vo
               {RIGHTS.map((r) => (
                 <label key={r.key} className={clsx('flex cursor-pointer items-start gap-2 rounded-lg p-2 ring-1', rights.includes(r.key) ? 'bg-brand-50 ring-brand-300 dark:bg-brand-500/10' : 'ring-slate-200 dark:ring-slate-700')}>
                   <input type="checkbox" className="mt-0.5 size-4 accent-brand-600" checked={rights.includes(r.key)} onChange={() => toggle(rights, setRights, r.key)} />
-                  <span className="text-sm"><b className="font-medium">{r.label}</b><span className="block text-[11px] text-slate-500">{r.hint}</span></span>
+                  <span className="text-sm"><b className="font-medium">{r.label}</b><span className="block text-[12px] text-slate-500">{r.hint}</span></span>
                 </label>
               ))}
             </div>
@@ -186,7 +186,7 @@ function PersonSheet({ userId, onClose, onAdd }: { userId: string; onClose: () =
   return (
     <Sheet open onClose={onClose} title={data ? `Rights · ${data.user.name}` : 'Rights'}>
       {isLoading || !data ? <Loading /> : (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {data.isAdmin && <Card className="p-3 text-sm"><Badge tone="bg-amber-100 text-amber-800">Organisation {data.user.role}</Badge> — has every right everywhere.</Card>}
           <SectionTitle>From postings</SectionTitle>
           {!data.fromPosts.length ? <Card className="p-3 text-sm text-slate-500">No current posting.</Card> : data.fromPosts.map((p, i) => (

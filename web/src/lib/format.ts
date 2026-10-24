@@ -3,7 +3,7 @@ import type { Band, Unit } from './types';
 export const fmtNum = (v: number | null | undefined, digits = 1) =>
   v == null ? '—' : Number(v).toLocaleString(undefined, { maximumFractionDigits: digits });
 
-export const fmtUnit = (v: number | null | undefined, unit: Unit, currency = 'USD') => {
+export const fmtUnit = (v: number | null | undefined, unit: Unit, currency = 'PKR') => {
   if (v == null) return '—';
   switch (unit) {
     case 'percent': return `${fmtNum(v)}%`;
@@ -42,4 +42,6 @@ export const BAND: Record<Band, { label: string; tone: string; hex: string }> = 
 export const scoreColor = (v: number | null | undefined) =>
   v == null ? '#94a3b8' : v >= 100 ? '#059669' : v >= 85 ? '#0284c7' : v >= 60 ? '#d97706' : '#e11d48';
 
-export const toDateInput = (d: Date = new Date()) => d.toISOString().slice(0, 10);
+/** yyyy-mm-dd in the user's local time zone (toISOString would shift to UTC). */
+export const toDateInput = (d: Date = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

@@ -31,13 +31,13 @@ export function BlockBars({ blocks, weights, note = true }: { blocks: Record<Blo
           <div key={b} className={clsx('flex items-center gap-3 rounded-xl p-2.5 ring-1 ring-slate-100 dark:ring-slate-800', blocks[b] == null && 'opacity-60')}>
             <Ring value={blocks[b]} size={52} stroke={5} />
             <div className="min-w-0">
-              <div className="text-[13px] font-medium leading-tight text-slate-700 dark:text-slate-200">{BLOCK_LABEL[b]}</div>
-              <div className="mt-0.5 text-[11px] text-slate-400">{blocks[b] == null ? 'Not applicable' : weights ? `Weight ${weights[b]}%` : note ? '' : 'Achieved'}</div>
+              <div className="text-[14px] font-medium leading-tight text-slate-700 dark:text-slate-200">{BLOCK_LABEL[b]}</div>
+              <div className="mt-0.5 text-[12px] text-slate-400">{blocks[b] == null ? 'Not applicable' : weights ? `Weight ${weights[b]}%` : note ? '' : 'Achieved'}</div>
             </div>
           </div>
         ))}
       </div>
-      {note && <p className="mt-2 text-[11px] text-slate-400">Blocks marked “Not applicable” are left out; their weight is shared by the others.</p>}
+      {note && <p className="mt-2 text-[12px] text-slate-400">Blocks marked “Not applicable” are left out; their weight is shared by the others.</p>}
     </div>
   );
 }

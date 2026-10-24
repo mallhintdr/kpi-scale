@@ -12,7 +12,7 @@ import { activeFilter, assertCanSee, autoVerifies, canEditVerified, canEnter, ca
 
 const router = Router();
 const num = z.number().min(0).max(1e12);
-const month = z.string().regex(/^\d{4}-\d{2}$/);
+const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Invalid month');
 const metricOf = (bp: BP, code: string) => {
   const m = bp.metric.get(code);
   if (!m) throw badRequest('Unknown KPI');
@@ -75,6 +75,16 @@ router.put(
     if (!(await canSetTargets(req.user!, bp, parent))) throw forbidden('You cannot set targets here');
     const units = new Map((await Unit.find({ _id: { $in: rows.map((r: any) => r.unitId) }, anc: parent._id, type: def.level }).select('anc').lean()).map((u) => [String(u._id), u]));
     if (units.size !== new Set(rows.map((r: any) => r.unitId)).size) throw badRequest(`Some units are not ${bp.level.get(def.level)?.plural ?? def.level} of ${parent.name}`);
+    // roUserId only for per-person KPIs, and then only for actual holders on that unit
+    if (!def.perHolder) {
+      if (rows.some((r: any) => r.roUserId)) throw badRequest('This KPI is not kept per person');
+    } else {
+      if (rows.some((r: any) => !r.roUserId)) throw badRequest('Per-person targets need a person');
+      for (const uid of new Set<string>(rows.map((r: any) => String(r.unitId)))) {
+        const ok = new Set((await holdersIn(bp, uid, def.holderPosts)).map((h) => String(h._id)));
+        if (rows.some((r: any) => String(r.unitId) === uid && !ok.has(String(r.roUserId)))) throw badRequest('Some people do not hold a post for this KPI here');
+      }
+    }
     const tenantId = parent.tenantId;
     await RevTarget.bulkWrite(
       rows.map((r: any) => ({
@@ -156,13 +166,25 @@ router.put(
     const fy = bp.fy.of(new Date(`${mo}-15`));
     const now = new Date();
     if (mo > `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`) throw badRequest('Cannot enter figures for a future month');
+    if (!bp.fy.valid(fy)) throw badRequest('Invalid financial year');
     const ro = roUserId ?? null;
+
+    // Validate every item before writing any
+    const holders = ro ? new Set((await holdersIn(bp, unit._id, [...new Set<string>(items.flatMap((it: any) => bp.metric.get(it.head)?.holderPosts ?? []))])).map((h) => String(h._id))) : null;
+    for (const it of items) {
+      const m = metricOf(bp, it.head);
+      if (!m.perHolder && ro) throw badRequest(`${m.name} is not kept per person`);
+      if (m.perHolder && !ro) throw badRequest(`${m.name} is kept per person — choose the person`);
+      if (m.perHolder && !holders!.has(String(ro))) throw badRequest('That person does not hold a post for this KPI here');
+      if (!(await canEnter(req.user!, bp, it.head, unit, ro))) throw forbidden(`You cannot enter ${m.name} here`);
+      const existing = await RevEntry.findOne({ fy, month: mo, head: it.head, unitId: unit._id, roUserId: ro ? new Types.ObjectId(ro) : null }).select('status').lean();
+      if (existing?.status === 'verified' && !(await autoVerifies(req.user!, bp, it.head, unit)) && !(await canEditVerified(req.user!, bp, it.head, unit))) throw forbidden(`${m.name} for ${mo} is already verified`);
+    }
 
     const saved = [];
     const submittedCodes = new Set<string>();
     for (const it of items) {
       const m = metricOf(bp, it.head);
-      if (!(await canEnter(req.user!, bp, it.head, unit, ro))) throw forbidden(`You cannot enter ${m.name} here`);
       const filter = { fy, month: mo, head: it.head, unitId: unit._id, roUserId: ro ? new Types.ObjectId(ro) : null };
       const existing = await RevEntry.findOne(filter);
       const auto = await autoVerifies(req.user!, bp, it.head, unit);

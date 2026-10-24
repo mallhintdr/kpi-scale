@@ -36,6 +36,11 @@ const schema = z.object({
   /** Demo: /guest signs visitors in as this account, read-only. Empty = no guest access. */
   GUEST_EMAIL: z.string().trim().toLowerCase().default(''),
   /** Platform super-admin seeded on first start (only if no super-admin exists). */
+  /** Override the refresh cookie's Secure flag (defaults to on in production). */
+  COOKIE_SECURE: z.preprocess((v) => (v === '' ? undefined : v), z.enum(['true', 'false']).optional()),
+  /** Guest demo: "View demo as guest" signs visitors in to this account in read-only mode. Off unless both are set. */
+  DEMO_TENANT_SLUG: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
+  DEMO_LOGIN_EMAIL: z.preprocess((v) => (v === '' ? undefined : v), z.string().email().optional()),
   // Empty in .env means "not set" (the example file lists them blank)
   SUPERADMIN_EMAIL: z.preprocess((v) => (v === '' ? undefined : v), z.string().email().optional()),
   SUPERADMIN_PASSWORD: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(10).optional()),
@@ -50,5 +55,7 @@ if (!parsed.success) {
 export const env = {
   ...parsed.data,
   isProd: parsed.data.NODE_ENV === 'production',
+  demoEnabled: !!(parsed.data.DEMO_TENANT_SLUG && parsed.data.DEMO_LOGIN_EMAIL),
+  cookieSecure: parsed.data.COOKIE_SECURE ? parsed.data.COOKIE_SECURE === 'true' : parsed.data.NODE_ENV === 'production',
   corsOrigins: parsed.data.CORS_ORIGINS.split(',').map((s) => s.trim()),
 };

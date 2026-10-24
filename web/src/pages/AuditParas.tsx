@@ -55,7 +55,7 @@ export default function AuditParas() {
                 {data.summary.map((s) => {
                   const p = s.amount ? (s.recovered / s.amount) * 100 : null;
                   return (
-                    <div key={s._id} className="px-4 py-2.5">
+                    <div key={s._id} className="px-4 py-2">
                       <div className="mb-1 flex justify-between text-sm"><span className="font-medium">{s._id}</span><span className="text-slate-500 tabular-nums">{s.settled}/{s.n} · {fmtPKR(s.recovered)} / {fmtPKR(s.amount)}</span></div>
                       <Bar value={p} />
                     </div>
@@ -92,8 +92,8 @@ export default function AuditParas() {
 const Mini = ({ label, value, sub, unit }: { label: string; value: string; sub?: string; unit?: string }) => (
   <div className="p-3 text-center">
     <div className="text-lg font-bold tabular-nums">{value}</div>
-    <div className="text-[11px] text-slate-500">{label}{sub && ` · ${sub}`}</div>
-    {unit && <div className="text-[10px] text-slate-400">{unit}</div>}
+    <div className="text-[12px] text-slate-500">{label}{sub && ` · ${sub}`}</div>
+    {unit && <div className="text-[11px] text-slate-400">{unit}</div>}
   </div>
 );
 
@@ -117,7 +117,7 @@ function ParaSheet({ para, defaultUnit, onClose }: { para: Para | null; defaultU
   };
   return (
     <Sheet open onClose={onClose} title={para ? `No. ${para.paraNo}` : `New entry · ${reg?.label ?? ''}`} footer={<Button form="para-form" type="submit" block loading={save.isPending}>Save</Button>}>
-      <form id="para-form" onSubmit={submit} className="space-y-4">
+      <form id="para-form" onSubmit={submit} className="space-y-2.5">
         {!para && <Field label={regLevels.map((l) => UNIT_LABEL[l]).join(' or ')}>{() => <UnitField value={unit} onChange={setUnit} accept={regLevels} scope="work" />}</Field>}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Category">{(id) => <Select id={id} value={f.category} onChange={set('category')}>{meta?.auditCategories.map((c) => <option key={c}>{c}</option>)}</Select>}</Field>

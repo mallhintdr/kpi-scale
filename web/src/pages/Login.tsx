@@ -96,10 +96,10 @@ export default function Login() {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-gradient-to-b from-brand-600 to-brand-800 px-4 py-4 pt-safe pb-safe">
       <div className="w-full max-w-sm">
-        <div className="mb-4 flex items-center gap-3 text-white">
+        <div className="mb-3 flex items-center gap-3 text-white">
           <OrgLogo src={brand?.branding.logoUrl} className="size-16 shrink-0" />
           <div className="min-w-0 border-l-2 border-gold-500 pl-3 leading-tight">
-            <div className="truncate text-[11px] font-bold uppercase tracking-[0.14em] text-gold-400">{tagline}</div>
+            <div className="truncate text-[12px] font-bold uppercase tracking-[0.14em] text-gold-400">{tagline}</div>
             <h1 className="text-lg font-bold">{title}</h1>
             <div className="text-xs text-brand-100">Employee Performance Dashboard</div>
           </div>
@@ -107,7 +107,7 @@ export default function Login() {
 
         <div className="rounded-2xl bg-white p-4 shadow-xl dark:bg-slate-900">
           {orgs ? (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               <h2 className="text-lg font-semibold">Choose your organisation</h2>
               <p className="text-sm text-slate-500">Your email is linked to more than one organisation.</p>
               {orgs.map((o) => (
@@ -120,7 +120,7 @@ export default function Login() {
               <Button variant="ghost" block onClick={() => setOrgs(null)}>Back</Button>
             </div>
           ) : (
-            <form onSubmit={(e) => submit(e, brand?.slug)} className="space-y-3">
+            <form onSubmit={(e) => submit(e, brand?.slug)} className="space-y-2.5">
               <h2 className="text-base font-semibold">Sign in</h2>
               <Field label="Email">{(id) => <Input id={id} type="email" required autoComplete="email" inputMode="email" value={form.email} onChange={set('email')} placeholder="you@example.com" />}</Field>
               <Field label="Password">{(id) => <PasswordInput id={id} required autoComplete="current-password" value={form.password} onChange={set('password')} />}</Field>
@@ -139,7 +139,7 @@ export default function Login() {
             </form>
           )}
         </div>
-        <p className="mt-3 text-center text-[11px] text-brand-100">© {new Date().getFullYear()} {brand?.branding.tagline ?? brand?.name ?? 'KPI Dashboard'} · v{__APP_VERSION__}</p>
+        <p className="mt-3 text-center text-[12px] text-brand-100">© {new Date().getFullYear()} {brand?.branding.tagline ?? brand?.name ?? 'KPI Dashboard'} · v{__APP_VERSION__}</p>
       </div>
     </div>
   );

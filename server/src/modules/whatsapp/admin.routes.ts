@@ -4,7 +4,9 @@
  */
 import { Router } from 'express';
 import { z } from 'zod';
-import { badRequest, notFound } from '../../lib/errors.js';
+import { AppError, badRequest, notFound } from '../../lib/errors.js';
+import { env } from '../../config/env.js';
+import { redis } from '../../lib/redis.js';
 import { audit } from '../../lib/notify.js';
 import { requireRole } from '../../middleware/auth.js';
 import { objectId, q, validate } from '../../middleware/validate.js';
@@ -71,21 +73,37 @@ router.get('/whatsapp/preview', validate({ query: z.object({ userId: objectId, s
   res.json({ text: r.preview[0].text });
 });
 
-/* Send a slot now — to one person (test) or everyone */
-router.post('/whatsapp/send', validate({ body: z.object({ slot: z.enum(['morning', 'followup', 'evening']), userId: objectId.optional(), day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }) }), async (req, res) => {
+/* Send a slot now — to one person (test) or everyone.
+ * `day` other than today (org timezone) is only a preview (dryRun), so past days can never advance the
+ * escalation ladder. Outside production future test days are still allowed (used by the e2e suite). */
+router.post('/whatsapp/send', validate({ body: z.object({ slot: z.enum(['morning', 'followup', 'evening']), userId: objectId.optional(), day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), dryRun: z.boolean().optional() }) }), async (req, res) => {
   const t = await Tenant.findById(req.user!.tenantId).select('settings').lean();
-  // day: which working day the escalation ladder counts this run as (defaults to today)
-  const day = req.body.day ?? localNow(t?.settings?.timezone ?? 'Asia/Karachi').day;
-  const r = await runSlot(req.user!.tenantId, req.body.slot, day, { onlyUserId: req.body.userId });
+  const today = localNow(t?.settings?.timezone ?? 'Asia/Karachi').day;
+  const day = req.body.day ?? today;
+  const dryRun = !!req.body.dryRun;
+  if (!dryRun && day !== today && (day < today || env.isProd)) throw badRequest('Only today can be sent; use dryRun to preview another day');
+  const r = await runSlot(req.user!.tenantId, req.body.slot, day, { onlyUserId: req.body.userId, dryRun });
+  if (dryRun) return res.json({ queued: 0, preview: r.preview });
   await audit('whatsapp.send', 'Tenant', req.user!.tenantId, { slot: req.body.slot, userId: req.body.userId, queued: r.queued });
   res.json({ queued: r.queued });
 });
 
-/* A free-form test message to any number */
-router.post('/whatsapp/test', validate({ body: z.object({ phone: z.string().max(30), text: z.string().trim().min(1).max(1000) }) }), async (req, res) => {
+/* A test message to a member of this organisation (or the admin's own phone); rate-limited per organisation */
+const TEST_PER_HOUR = 20;
+router.post('/whatsapp/test', validate({ body: z.object({ phone: z.string().max(30), text: z.string().trim().min(1).max(500) }) }), async (req, res) => {
   const phone = normalizePhone(req.body.phone);
   if (!phone) throw badRequest('Invalid phone number');
-  const m = await queueMessage(req.user!.tenantId, { phone, kind: 'test', text: req.body.text });
+  if (!(await User.exists({ phoneE164: phone, status: 'active' }))) throw badRequest('Test messages can only go to an active member of this organisation');
+  const r = redis();
+  if (r) {
+    const key = `wa:test:${req.user!.tenantId}:${new Date().toISOString().slice(0, 13)}`;
+    const n = await r.incr(key);
+    if (n === 1) await r.expire(key, 3600);
+    if (n > TEST_PER_HOUR) throw new AppError(429, 'Too many test messages — try again later', 'RATE_LIMITED');
+  }
+  const t = await Tenant.findById(req.user!.tenantId).select('name').lean();
+  const m = await queueMessage(req.user!.tenantId, { phone, kind: 'test', text: `[${t?.name ?? 'Test'}] ${req.body.text}` });
+  await audit('whatsapp.test', 'Tenant', req.user!.tenantId, { phone });
   res.json({ queued: true, id: m._id, phone });
 });
 

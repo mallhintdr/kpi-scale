@@ -74,6 +74,7 @@ export default function Import() {
       qc.invalidateQueries({ queryKey: ['users'] });
       if (r.status === 'done') toast(`Imported: ${r.created} created, ${r.updated} updated`);
     }
+    // Intentional: fire once when a run finishes, not on every poll of `r`.
   }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const start = async (dryRun: boolean) => {
@@ -102,7 +103,7 @@ export default function Import() {
       <PageHeader title="Bulk import" subtitle="Load your hierarchy, people and postings from CSV files — in this order" />
       <div className="mb-3"><Segmented value={kind} onChange={(k) => { setKind(k); setCsv(''); setFileName(''); setRunId(null); }} options={KINDS.map((k) => ({ value: k.value, label: k.label }))} /></div>
 
-      <Card className="space-y-3 p-4">
+      <Card className="space-y-2.5 p-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">{KINDS.find((k) => k.value === kind)!.help}</p>
         <div className="flex flex-wrap gap-2">
           <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-brand-600 px-4 text-sm font-medium text-white hover:bg-brand-700">
@@ -138,7 +139,7 @@ export default function Import() {
             {!!r.errors?.length && (
               <div className="max-h-72 overflow-auto rounded-lg ring-1 ring-rose-200 dark:ring-rose-500/30">
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-rose-50 text-center text-[12px] text-rose-900 dark:bg-rose-500/15 dark:text-rose-100"><tr><th className="w-16 px-2 py-1.5">Row</th><th className="px-2 py-1.5 text-left">Problem</th></tr></thead>
+                  <thead className="sticky top-0 bg-rose-50 text-center text-[13px] text-rose-900 dark:bg-rose-500/15 dark:text-rose-100"><tr><th className="w-16 px-2 py-1.5">Row</th><th className="px-2 py-1.5 text-left">Problem</th></tr></thead>
                   <tbody>{r.errors.map((e, i) => <tr key={i} className="border-t border-rose-100 dark:border-rose-500/20"><td className="px-2 py-1 text-center tabular-nums">{e.row || '—'}</td><td className="px-2 py-1">{e.message}</td></tr>)}</tbody>
                 </table>
               </div>

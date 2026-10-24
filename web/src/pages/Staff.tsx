@@ -1,22 +1,26 @@
 import { useQuery } from '@tanstack/react-query';
-import { Download, Search, Printer, LayoutList, Table2 } from 'lucide-react';
-import { exportTableXlsx } from '../lib/xlsx';
-import { useDeferredValue, useEffect, useMemo, useState, useRef } from 'react';
+import { CalendarRange, Search } from 'lucide-react';
+import { LeagueYears, YearsPicker } from '../components/yearCompare';
+import clsx from 'clsx';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { achievement, useViewMode } from '../lib/mode';
 import { useTargetSummary } from '../components/targets';
 import { PageHeader } from '../components/AppShell';
 import { BandChip } from '../components/charts';
 import { FyPicker, UnitField } from '../components/rev';
-import { Card, Empty, ErrorState, Field, Input, Loading, Select, Segmented } from '../components/ui';
+import { Card, Empty, ErrorState, Field, Input, Loading, Select } from '../components/ui';
 import { get } from '../lib/api';
 import { fmtPKR, getOrg, groupLevels, MILLIONS, parentLevels, T, UNIT_LABEL, useCaps, useFy, useMeta, type Block, type Post, type RevBand, type UnitRef } from '../lib/rev';
 import { POSTS_BY_UNIT } from './League';
-import { OfficerWise } from './Reports';
+import { fullCard, fullScroll, fullWrap, OfficerWise, ReportToolbar, useCollapse, useFullScreen, type Layout, type Measure } from '../components/reportTools';
+import { exportTableXlsx, saveBlob } from '../lib/xlsx';
+import { useProgressive } from '../lib/progressive';
+import { locationLines, mergeByOfficer } from '../lib/officerRows';
 
 interface Cell { pct: number | null; done: number; of: number }
 interface StaffRow {
-  user: { _id: string; name: string; designation?: string; bps?: number; phone?: string };
+  user: { _id: string; name: string; designation?: string; phone?: string };
   charges: string[]; context: string; score: number | null; band: RevBand; blocks: Record<Block, number | null>;
   rank: number | null; target: number; collected: number; heads: Record<string, Cell>;
   unitId: string; chargeType: string; chargeCount: number; areas?: Record<string, string>;
@@ -35,6 +39,12 @@ export default function Staff() {
   const [unit, setUnit] = useState<UnitRef | null>(null);
   const [post, setPost] = useState<Post>('patwari');
   const [search, setSearch] = useState('');
+  const [compare, setCompare] = useState(false);
+  const [years, setYears] = useState<string[]>([]);
+  const fysKey = (meta?.fys ?? []).join();
+  useEffect(() => {
+    if (!years.length && meta?.fys.length) setYears(meta.fys.slice(0, 2).sort());
+  }, [fysKey]); // eslint-disable-line react-hooks/exhaustive-deps -- only when the year list arrives
   const [params, setParams] = useSearchParams();
   const focus = params.get('head');
   const term = useDeferredValue(search.trim().toLowerCase());
@@ -42,9 +52,10 @@ export default function Staff() {
     if (!unit && caps.viewRoot) setUnit(caps.viewRoot);
   }, [caps.viewRoot, unit]);
   const options = POSTS_BY_UNIT[unit?.type ?? 'tehsil'] ?? [];
+  const optionKey = options.map((o) => o.code).join();
   useEffect(() => {
     if (options.length && !options.some((o) => o.code === post)) setPost(options[options.length - 1].code);
-  }, [unit]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [optionKey, post]); // eslint-disable-line react-hooks/exhaustive-deps -- options is rebuilt each render; optionKey tracks it
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['rev', 'league', unit?._id, post, fy],
@@ -63,18 +74,24 @@ export default function Staff() {
   const tmode = mode === 'targets';
   const tsum = useTargetSummary(unit?._id, post, fy, tmode);
   // Overall column: revenue achievement (Performance), assigned-target achievement (Targets) or KPI score
-  const overall = (r: StaffRow) => {
-    if (tmode) return tsum.get(`${r.user._id}|${r.unitId}`)?.pct ?? null;
-    if (!perf) return r.score;
-    const rev = Object.entries(r.heads).filter(([k]) => meta?.heads.some((h) => h.code === k && h.kind === 'revenue'));
-    return achievement(rev.reduce((s, [, c]) => s + c.done, 0), rev.reduce((s, [, c]) => s + c.of, 0));
-  };
-  const rows = (data?.items ?? [])
-    .map((r) => ({ ...r, overall: overall(r) }))
-    .sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1))
-    .map((r, i) => ({ ...r, rank: r.overall == null ? null : i + 1 }))
-    .filter((r) => !term || r.user.name.toLowerCase().includes(term) || r.charges.join(' ').toLowerCase().includes(term))
-    .sort((a, b) => (focus ? (b.heads[focus]?.pct ?? -1) - (a.heads[focus]?.pct ?? -1) : 0));
+  // Computed once per data change (not on every tap): thousands of rows make this the expensive part
+  const rows = useMemo(() => {
+    const revenue = new Set((meta?.heads ?? []).filter((h) => h.kind === 'revenue').map((h) => h.code));
+    const overall = (r: StaffRow) => {
+      if (tmode) return tsum.get(`${r.user._id}|${r.unitId}`)?.pct ?? null;
+      if (!perf) return r.score;
+      let done = 0, of = 0;
+      for (const [k, c] of Object.entries(r.heads)) if (revenue.has(k)) { done += c.done; of += c.of; }
+      return achievement(done, of);
+    };
+    // Performance mode: an official's units under one parent become one row (figures summed)
+    return (perf && !tmode ? mergeByOfficer(data?.items ?? []) : (data?.items ?? []))
+      .map((r) => ({ ...r, overall: overall(r) }))
+      .sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1))
+      .map((r, i) => ({ ...r, rank: r.overall == null ? null : i + 1 }))
+      .filter((r) => !term || r.user.name.toLowerCase().includes(term) || r.charges.join(' ').toLowerCase().includes(term))
+      .sort((a, b) => (focus ? (b.heads[focus]?.pct ?? -1) - (a.heads[focus]?.pct ?? -1) : 0));
+  }, [data, meta, tsum, perf, tmode, term, focus]);
   const focusName = focus && columns.find((c) => c.code === focus)?.name;
   // Show District / Tehsil columns only when the list spans more than one of them
   // Hierarchy columns (e.g. District, Tehsil) appear only when the list spans more than one of them
@@ -82,108 +99,102 @@ export default function Staff() {
   // Clicked row stays highlighted so the officer's figures can be read across the whole table
   const [selected, setSelected] = useState<string | null>(null);
 
+  const exportCsv = () => {
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['S.No', ...groupCols.map((l) => UNIT_LABEL[l]), 'Name', 'Area', perf ? `${T.money} achievement %` : 'KPI score', ...columns.flatMap((c) => [`${c.name} %`, `${c.name} done`, `${c.name} of`])];
+    const lines = rows.map((r) => [r.rank, ...groupCols.map((l) => r.areas?.[l] ?? ''), r.user.name, r.charges.join(' + '), r.overall == null ? '' : Math.round(r.overall * 10) / 10, ...columns.flatMap((c) => [r.heads[c.code]?.pct, r.heads[c.code]?.done, r.heads[c.code]?.of])].map(esc).join(','));
+    saveBlob(URL.createObjectURL(new Blob([[header.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv' })), `staff-${post}-${unit?.name}-${fy}.csv`);
+  };
+
   const tableRef = useRef<HTMLTableElement>(null);
-  // Layout: officer-wise (a block per officer, a row per KPI) or the wide table; officer-wise above 3 KPIs
-  const [layout, setLayout] = useState<'officer' | 'table' | null>(null);
+  const [layout, setLayout] = useState<Layout | null>(null);
   const view = layout ?? (columns.length > 3 ? 'officer' : 'table');
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggleOfficer = (k: string) => setCollapsed((c) => { const n = new Set(c); if (n.has(k)) n.delete(k); else n.add(k); return n; });
-  const cellValue = (c: Cell | undefined, m: 'target' | 'achieved' | 'balance' | 'pct', money: boolean) => {
+  const blocks = useCollapse(rows.map((r) => `${r.user._id}-${r.unitId}`));
+  const [full, setFull] = useFullScreen();
+  // Long lists are drawn a page at a time (see lib/progressive)
+  const prog = useProgressive(rows.length, 40, `${unit?._id}|${post}|${fy}|${view}|${term}|${mode}`);
+  const exportXlsx = () => exportTableXlsx(tableRef.current, {
+    filename: `staff-${post}-${unit?.name}-${fy}`, sheet: 'Staff performance', freezeCols: view === 'officer' ? 1 : 3 + groupCols.length,
+    title: `${data?.postLabel ?? 'Staff'} performance · ${unit?.name} · FY ${fy}`,
+    subtitle: `Generated ${new Date().toLocaleString()} · ${view === 'officer' ? 'Officer-wise' : 'Table'} · money figures ${MILLIONS}`,
+  });
+  const measures: { key: Measure; label: string }[] = [{ key: 'target', label: 'Target' }, { key: 'achieved', label: T.achieved }, { key: 'balance', label: 'Balance' }, { key: 'pct', label: '%' }];
+  const cellValue = (c: Cell | undefined, m: Measure, money: boolean) => {
     if (!c) return '';
     const f = (v: number) => (money ? fmtPKR(v) : v.toLocaleString());
     return m === 'target' ? f(c.of) : m === 'achieved' ? f(c.done) : m === 'balance' ? f(Math.max(0, c.of - c.done)) : c.pct == null ? '' : `${Math.round(c.pct)}%`;
   };
-  const exportXlsx = () => exportTableXlsx(tableRef.current, {
-    filename: `staff-${post}-${unit?.name}-${fy}`, sheet: 'Staff performance', freezeCols: view === 'officer' ? 1 : 3 + groupCols.length,
-    title: `Staff performance · ${unit?.name ?? ''} · FY ${fy}`, subtitle: `Generated ${new Date().toLocaleString()}`,
-  });
-  const exportCsv = () => {
-    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['S.No', ...groupCols.map((l) => UNIT_LABEL[l]), 'Name', 'Area', 'BPS', perf ? `${T.money} achievement %` : 'KPI score', ...columns.flatMap((c) => [`${c.name} %`, `${c.name} done`, `${c.name} of`])];
-    const lines = rows.map((r) => [r.rank, ...groupCols.map((l) => r.areas?.[l] ?? ''), r.user.name, r.charges.join(' + '), r.user.bps, r.overall == null ? '' : Math.round(r.overall * 10) / 10, ...columns.flatMap((c) => [r.heads[c.code]?.pct, r.heads[c.code]?.done, r.heads[c.code]?.of])].map(esc).join(','));
-    const url = URL.createObjectURL(new Blob([[header.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv' }));
-    Object.assign(document.createElement('a'), { href: url, download: `staff-${post}-${unit?.name}-${fy}.csv` }).click();
-    URL.revokeObjectURL(url);
-  };
+  const officerRows = useMemo(() => rows.map((r, i) => ({
+    key: `${r.user._id}-${r.unitId}`, userId: r.user._id, name: r.user.name, pct: r.overall,
+    serial: r.rank != null ? `#${r.rank}` : i + 1,
+    facts: locationLines(r, unit?.type),
+    headline: r.overall == null ? null : { label: tmode ? 'Targets met' : perf ? 'Achieved' : 'KPI score', value: perf ? `${Math.round(r.overall)}%` : String(Math.round(r.overall)) },
+    heads: r.heads,
+  })), [rows, unit?.type, perf, tmode]); // eslint-disable-line react-hooks/exhaustive-deps -- helpers derive from these
 
   return (
     <>
       <PageHeader title="Staff performance" subtitle="Every subordinate, every KPI" actions={<FyPicker />} />
-      <Card className="mb-4 grid gap-3 p-4 md:grid-cols-[1fr_1fr_1fr_auto] md:items-end print:hidden">
-        <Field label="Area">{() => <UnitField value={unit} onChange={setUnit} accept={parentLevels()} />}</Field>
+      <Card className="mb-3 grid grid-cols-2 items-end gap-x-3 gap-y-2 p-3 sm:p-4 md:grid-cols-3">
+        <Field label="Area" className="col-span-2 md:col-span-1">{() => <UnitField value={unit} onChange={setUnit} accept={parentLevels()} />}</Field>
         <Field label="Staff">{(id) => <Select id={id} value={post} onChange={(e) => setPost(e.target.value as Post)}>{options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}</Select>}</Field>
         <Field label="Search">
           {(id) => (
             <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-sky-600" />
               <Input id={id} type="search" placeholder="Name or unit" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
           )}
         </Field>
-        <div className="flex gap-2">
-          <button onClick={exportXlsx} disabled={!rows.length} className="flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:ring-slate-700 dark:hover:bg-slate-800">
-            <Download className="size-4" />Excel
-          </button>
-          <button onClick={() => window.print()} disabled={!rows.length} className="flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:ring-slate-700 dark:hover:bg-slate-800">
-            <Printer className="size-4" />Print
-          </button>
-          <button onClick={exportCsv} disabled={!rows.length} className="h-11 px-2 text-xs text-slate-500 hover:underline disabled:opacity-50">CSV</button>
+        <div className="col-span-2 md:col-span-3">
+          <label className="flex h-8 cursor-pointer items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+            <input type="checkbox" className="size-4 accent-indigo-600" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
+            <CalendarRange className="size-4 text-indigo-600" />Compare Financial Years
+          </label>
+          {compare && <YearsPicker value={years} onChange={setYears} />}
         </div>
       </Card>
 
-      {!options.length ? <Card><Empty title="Choose an area" /></Card> : isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !rows.length ? (
+      {compare && unit ? (
+        years.length < 2 ? <Card><Empty icon={CalendarRange} title="Choose two or more years" /></Card>
+        : <LeagueYears unitId={unit._id} post={post} fys={years} scopeType={unit.type} merge={perf && !tmode} heads={columns.length ? columns : (meta?.heads ?? []).map((h) => ({ code: h.code, name: h.name, money: h.unit === 'money' }))} />
+      ) : !options.length ? <Card><Empty title="Choose an area" /></Card> : isLoading ? <Loading /> : error ? <ErrorState error={error} retry={refetch} /> : !rows.length ? (
         <Card><Empty title="No staff found" /></Card>
       ) : (
-        <>
+        <div className={clsx(fullWrap(full))}>
           <div className="hidden print:mb-2 print:block">
             <div className="text-lg font-bold">Staff Performance · {data?.postLabel} · {unit?.name} · FY {fy}</div>
             <div className="text-xs">{rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS} · generated <span className="font-semibold">{new Date().toLocaleString()}</span></div>
           </div>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500 print:hidden">
-            <span className="flex flex-wrap items-center gap-2">
-              <Segmented value={view} onChange={(v) => setLayout(v)} options={[
-                { value: 'officer', label: <span className="flex items-center gap-1 whitespace-nowrap" title="One block per officer, a row per KPI"><LayoutList className="size-4" />Officer-wise</span> },
-                { value: 'table', label: <span className="flex items-center gap-1 whitespace-nowrap" title="KPIs across, officers down"><Table2 className="size-4" />Table</span> },
-              ]} />
-              {view === 'officer' && <>
-                <button className="font-medium text-brand-700 hover:underline" onClick={() => setCollapsed(new Set())}>Expand all</button>
-                <button className="font-medium text-brand-700 hover:underline" onClick={() => setCollapsed(new Set(rows.map((x) => `${x.user._id}-${x.unitId}`)))}>Collapse all</button>
-              </>}
-            </span>
-            <span>
-              {rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS} · tap a row to highlight it · tap a name for the profile
+          <ReportToolbar
+            info={<span className="text-xs text-slate-500">
+              {rows.length} {data?.postLabel ?? 'officers'} · money figures {MILLIONS}
               {focusName && (
                 <> · sorted by <b className="text-slate-700 dark:text-slate-200">{focusName}</b>{' '}
-                  <button className="font-medium text-brand-600 hover:underline" onClick={() => setParams({}, { replace: true })}>clear</button>
+                  <button className="font-medium text-brand-600 hover:underline" onClick={() => setParams({}, { replace: true })}>Clear</button>
                 </>
               )}
-            </span>
-          </div>
-          {view === 'officer' ? (
-            <Card className="overflow-hidden">
-              <div className="max-h-[70vh] overflow-auto print:max-h-none print:overflow-visible">
-                <OfficerWise rows={rows} heads={columns} measures={[{ key: 'target', label: 'Target' }, { key: 'achieved', label: 'Achieved' }, { key: 'balance', label: 'Balance' }, { key: 'pct', label: '%' }]}
-                  details={[{ key: 'rank', label: 'Rank' }, { key: 'overall', label: 'Overall' }, { key: 'bps', label: 'BPS' }]} perf={perf}
-                  areaOf={(r) => r.charges.join(', ').replace(/ \(test\)/g, '') + (r.chargeType && r.chargeType !== 'regular' ? (r.chargeType === 'additional' ? ' (Addl. charge)' : ' (Look after)') : '')}
-                  detailValue={(r, d) => (d === 'bps' ? (r.user.bps ? `BPS-${r.user.bps}` : '') : '')} value={cellValue}
-                  groupCols={groupCols} collapsed={collapsed} toggle={toggleOfficer} tableRef={tableRef} />
-              </div>
-            </Card>
-          ) : (
-          <Card className="overflow-hidden">
-            <div className="max-h-[70vh] overflow-auto">
+            </span>}
+            view={view} onView={setLayout} allOpen={blocks.allOpen} onToggleAll={blocks.toggleAll}
+            full={full} onFull={setFull} onExcel={() => prog.withAll(exportXlsx)} onCsv={exportCsv} onPrint={() => prog.withAll(() => window.print())}
+          />
+          <Card className={fullCard(full)}>
+            <div className={fullScroll(full)}>
+              {view === 'officer' ? (
+                <OfficerWise rows={officerRows} heads={columns} measures={measures} value={cellValue} collapsed={blocks.collapsed} toggle={blocks.toggle} tableRef={tableRef} shown={prog.shown} sentinel={prog.sentinel} linkSuffix={`?fy=${fy}`} toneOf={(r) => (r as (typeof officerRows)[number]).pct} />
+              ) : (
               <table ref={tableRef} className="w-max min-w-full border-separate border-spacing-0 text-sm">
                 {/* Two header rows: group (head) on top, its sub-columns below. Headers ~15% larger, centred. */}
-                <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white">
+                <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[13.5px] font-semibold text-white">
                   <tr>
-                    <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2.5">#</th>
-                    {groupCols.map((l) => <th key={l} rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">{UNIT_LABEL[l]}</th>)}
-                    <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2.5">Name</th>
-                    <th rowSpan={2} className="border-b border-r border-white/60 px-3 py-2.5">Area</th>
+                    <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2">#</th>
+                    {groupCols.map((l) => <th key={l} rowSpan={2} className="border-b border-r border-white/60 px-3 py-2">{UNIT_LABEL[l]}</th>)}
+                    <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2">Name</th>
+                    <th rowSpan={2} className="border-b border-r border-white/60 px-3 py-2">Area</th>
                     {perf ? (
                       <th colSpan={4} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-3 py-2">{tmode ? 'Assigned Targets' : `${T.money} (all KPIs)`}</th>
                     ) : (
-                      <th rowSpan={2} className="border-b border-r-2 border-white/60 border-r-white/80 px-3 py-2.5">KPI score</th>
+                      <th rowSpan={2} className="border-b border-r-2 border-white/60 border-r-white/80 px-3 py-2">KPI score</th>
                     )}
                     {columns.map((c) => (
                       <th
@@ -198,7 +209,7 @@ export default function Staff() {
                       </th>
                     ))}
                   </tr>
-                  <tr className="bg-brand-600 text-[11.5px] font-medium text-brand-50">
+                  <tr className="bg-brand-600 text-[12.5px] font-medium text-brand-50">
                     {perf && (tmode ? ['Assigned', 'Met', 'Not Met', '%'] : ['Target', T.achieved, 'Balance', '%']).map((l, i) => (
                       <th key={`o${l}`} className={`border-b border-white/30 px-2.5 py-1.5 ${i === 3 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25'}`}>{l}</th>
                     ))}
@@ -208,25 +219,25 @@ export default function Staff() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => {
+                  {rows.slice(0, prog.shown).map((r) => {
                     const key = `${r.user._id}-${r.unitId}`;
                     const on = selected === key;
-                    const stickyBg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-inherit';
+                    const stickyBg = on ? 'bg-amber-100 dark:bg-amber-500/25' : 'bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800';
                     const ts = tsum.get(`${r.user._id}|${r.unitId}`);
                     return (
                     <tr key={key} onClick={() => setSelected(on ? null : key)} aria-selected={on}
                       className={`group cursor-pointer ${on ? 'bg-amber-100 outline outline-2 -outline-offset-2 outline-amber-400 dark:bg-amber-500/25' : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
                       <td className={`sticky left-0 z-10 w-10 min-w-10 border-b border-r border-b-slate-300 border-r-slate-400 px-1 py-2 text-center text-xs font-bold text-slate-500 tabular-nums dark:border-slate-700 ${stickyBg}`}>{r.rank ?? '–'}</td>
-                      {groupCols.map((l) => <td key={l} className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[13px] dark:border-slate-700">{r.areas?.[l]}</td>)}
+                      {groupCols.map((l) => <td key={l} className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[14px] dark:border-slate-700">{r.areas?.[l]}</td>)}
                       <td className={`sticky left-10 z-10 border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 dark:border-slate-700 ${stickyBg}`}>
                         <Link to={`/officers/${r.user._id}?fy=${fy}`} onClick={(e) => e.stopPropagation()} title={`Open ${r.user.name}'s profile`}
                           className={`block max-w-[7.5rem] truncate font-bold text-slate-900 sm:max-w-48 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline ${on ? 'underline' : ''}`}>
                           {r.user.name}
                         </Link>
                       </td>
-                      <td className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[12px] text-slate-700 dark:border-slate-700 dark:text-slate-300">
+                      <td className="whitespace-nowrap border-b border-r border-b-slate-300 border-r-slate-400 px-3 py-2 text-[13px] text-slate-700 dark:border-slate-700 dark:text-slate-300">
                         {r.charges.join(', ').replace(' (test)', '')}
-                        {r.chargeType !== 'regular' && <span className="ml-1.5 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">{r.chargeType === 'additional' ? 'Addl. charge' : 'Look after'}</span>}
+                        {r.chargeType !== 'regular' && <span className="ml-1.5 rounded bg-amber-100 px-1 text-[11px] font-semibold text-amber-800">{r.chargeType === 'additional' ? 'Addl. charge' : 'Look after'}</span>}
                       </td>
                       {perf ? (
                         tmode ? (
@@ -246,12 +257,13 @@ export default function Staff() {
                     </tr>
                     );
                   })}
+                  {prog.more && <tr ref={prog.sentinel}><td colSpan={99} className="py-3 text-center text-xs text-slate-400">Loading more…</td></tr>}
                 </tbody>
               </table>
+              )}
             </div>
           </Card>
-          )}
-        </>
+        </div>
       )}
     </>
   );

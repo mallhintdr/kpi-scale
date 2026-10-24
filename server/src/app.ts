@@ -10,10 +10,11 @@ import mongoose from 'mongoose';
 import { pinoHttp } from 'pino-http';
 import { RedisStore } from 'rate-limit-redis';
 import { env } from './config/env.js';
-import { logger } from './lib/logger.js';
+import { logger, redactReqUrl } from './lib/logger.js';
 import { redis } from './lib/redis.js';
 import { authenticate } from './middleware/auth.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
+import { verifyAccessToken } from './modules/auth/tokens.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import notificationRoutes from './modules/notifications/notifications.routes.js';
 import './modules/org/imports.js';
@@ -48,8 +49,16 @@ const store = (prefix: string) => {
 
 /** Officers in one office share a public IP: limit per signed-in session where possible. */
 const clientKey = (req: Request) => {
+  // Key on the verified subject only: unverified tokens would let a client mint fresh buckets at will.
   const h = req.headers.authorization;
-  return h?.startsWith('Bearer ') ? `t:${createHash('sha1').update(h.slice(7)).digest('hex').slice(0, 20)}` : `ip:${req.ip}`;
+  if (h?.startsWith('Bearer ')) {
+    try {
+      const p = verifyAccessToken(h.slice(7));
+      // Guests share one demo account, so each guest is limited by their own IP.
+      return p.ro ? `ip:${req.ip}` : `u:${p.sub}`;
+    } catch { /* invalid/expired → fall back to IP */ }
+  }
+  return `ip:${req.ip}`;
 };
 
 export function createApp() {
@@ -65,7 +74,7 @@ export function createApp() {
   const json = express.json({ limit: '200kb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } });
   app.use((req, res, next) => (req.path === '/api/org/imports' || req.path === '/api/tameel/parse' || /^\/api\/litigation\/([^/]+\/docs|import)$/.test(req.path) || /^\/api\/state-land\/[^/]+\/docs$/.test(req.path) ? next() : json(req, res, next)));
   app.use(cookieParser());
-  app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/health' } }));
+  app.use(pinoHttp({ logger, serializers: { req: redactReqUrl }, autoLogging: { ignore: (req) => req.url === '/health' } }));
 
   app.get('/health', async (_req, res) => {
     const db = mongoose.connection.readyState === 1;
@@ -86,7 +95,9 @@ export function createApp() {
   if (!env.SINGLE_TENANT) api.use('/platform', platformRoutes);
   api.use('/users', userRoutes);
   api.use('/notifications', notificationRoutes);
-  api.use('/org', orgRoutes, accessRoutes, waAdminRoutes);
+  api.use('/org', orgRoutes, accessRoutes);
+  // waAdminRoutes applies requireRole('admin') to everything it sees; only hand it /org/whatsapp* so other unknown /org paths 404.
+  api.use('/org', (req, res, next) => (/^\/whatsapp(\/|$)/.test(req.path) ? waAdminRoutes(req, res, next) : next()));
   api.use('/tameel', withBlueprint, tameelRoutes);
   api.use('/litigation', withBlueprint, litigationExtra, litigationRoutes);
   api.use('/state-land', withBlueprint, stateLandRoutes);

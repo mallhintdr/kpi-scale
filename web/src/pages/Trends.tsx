@@ -76,13 +76,13 @@ export default function Trends() {
   return (
     <>
       <PageHeader title="Trends" subtitle="Achievement by week, 15 days, month, quarter, half year and year" actions={<FyPicker />} />
-      <Card className="mb-3 space-y-3 p-3">
+      <Card className="mb-3 space-y-2.5 p-3">
         <div className="grid gap-3 sm:grid-cols-[minmax(0,20rem)_1fr] sm:items-center">
           <UnitField value={unit} onChange={setUnit} accept={[...parentLevels(), ...(meta?.levels.slice(-2, -1).map((l) => l.key) ?? [])]} />
           <div className="overflow-x-auto"><Segmented value={period} onChange={setPeriod} options={PERIODS} /></div>
         </div>
         {series.data?.basis === 'verified' && (
-          <p className="text-[11px] text-slate-500">Week and 15-day figures count what was <b>verified</b> in that period, plus verified progress on assigned targets. Monthly figures use the month they belong to. Targets are spread evenly over the year; seasonal KPIs are compared against their target only for the full year.</p>
+          <p className="text-[12px] text-slate-500">Week and 15-day figures count what was <b>verified</b> in that period, plus verified progress on assigned targets. Monthly figures use the month they belong to. Targets are spread evenly over the year; seasonal KPIs are compared against their target only for the full year.</p>
         )}
       </Card>
 
@@ -116,15 +116,15 @@ export default function Trends() {
           {/* Period × KPI table */}
           <Card className="overflow-hidden">
             <div className="max-h-[60vh] overflow-auto">
-              <table className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
-                <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white">
+              <table className="w-max min-w-full border-separate border-spacing-0 text-[14px]">
+                <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[13.5px] font-semibold text-white">
                   <tr>
                     <th rowSpan={2} className={clsx(th, 'sticky left-0 z-30 bg-brand-700')}>Period</th>
                     <th colSpan={3} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-2 py-2">{T.money} {MILLIONS}</th>
                     {kpis.map((h) => <th key={h.code} colSpan={3} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-2 py-2">{h.name}</th>)}
                     <th rowSpan={2} className={th}>Tasks on Time</th>
                   </tr>
-                  <tr className="bg-brand-600 text-[11.5px] font-medium text-brand-50">
+                  <tr className="bg-brand-600 text-[12.5px] font-medium text-brand-50">
                     {['Target', T.achieved, '%'].map((l, i) => <th key={`m${l}`} className={clsx('border-b border-white/30 px-2.5 py-1.5', i === 2 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25')}>{l}</th>)}
                     {kpis.flatMap((h) => [...subLabels(h.kind), '%'].map((l, i) => <th key={h.code + l} className={clsx('border-b border-white/30 px-2.5 py-1.5', i === 2 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25')}>{l}</th>))}
                   </tr>
@@ -142,7 +142,7 @@ export default function Trends() {
                           const c = r.heads[h.code];
                           return [
                             <td key={h.code + 'o'} className={sub(0)}>{fmtCell(c, h.unit, 'of')}</td>,
-                            <td key={h.code + 'd'} className={clsx(sub(1), 'font-semibold')} title={c?.pend ? `+${fmtValue(c.pend, h.unit)} awaiting verification` : undefined}>{fmtCell(c, h.unit, 'done')}{c?.pend ? <span className="ml-1 text-[10px] text-amber-600">*</span> : null}</td>,
+                            <td key={h.code + 'd'} className={clsx(sub(1), 'font-semibold')} title={c?.pend ? `+${fmtValue(c.pend, h.unit)} awaiting verification` : undefined}>{fmtCell(c, h.unit, 'done')}{c?.pend ? <span className="ml-1 text-[11px] text-amber-600">*</span> : null}</td>,
                             <td key={h.code + 'p'} className={sub(2)}><Pct v={c?.pct} /></td>,
                           ];
                         })}
@@ -153,7 +153,7 @@ export default function Trends() {
                 </tbody>
               </table>
             </div>
-            <div className="border-t border-slate-200 px-3 py-1.5 text-[11px] text-slate-500 dark:border-slate-700">
+            <div className="border-t border-slate-200 px-3 py-1.5 text-[12px] text-slate-500 dark:border-slate-700">
               Tap a period to rank the {children.data?.items[0] ? UNIT_LABEL[children.data.items[0].type].toLowerCase() : 'units'}s below for it · <span className="text-amber-600">*</span> more awaiting verification
               {series.data?.builtAt && <> · updated <span className="font-semibold">{new Date(series.data.builtAt).toLocaleString()}</span></>}
             </div>
@@ -164,8 +164,8 @@ export default function Trends() {
           {children.isLoading ? <Loading /> : !children.data?.items.length ? <Card><Empty title="Nothing below this level" /></Card> : (
             <div className="grid gap-3 lg:grid-cols-[1fr_minmax(0,22rem)]">
               <Card className="overflow-x-auto">
-                <table className="w-full min-w-[480px] border-separate border-spacing-0 text-[13px]">
-                  <thead className="bg-brand-700 text-center text-[12.5px] text-white">
+                <table className="w-full min-w-[480px] border-separate border-spacing-0 text-[14px]">
+                  <thead className="bg-brand-700 text-center text-[13.5px] text-white">
                     <tr><th className={clsx(th, 'w-10')}>#</th><th className={th}>Name</th><th className={th}>Target</th><th className={th}>{T.achieved}</th><th className={th}>%</th><th className="border-b border-white/50 px-2.5 py-2">Tasks</th></tr>
                   </thead>
                   <tbody>

@@ -27,18 +27,21 @@ import { sendWhatsApp } from './providers.js';
 let waQueue: Queue | null = null;
 let waWorker: Worker | null = null;
 
-async function deliver(messageId: string) {
-  const m = await WaMessage.findById(messageId);
-  if (!m || m.status !== 'queued') return;
+/**
+ * Atomically claim the message (queued|retrying -> sending) so a duplicate or stalled job cannot send it twice.
+ * On failure it goes back to `retrying` while BullMQ attempts remain, else `failed`; the error is rethrown.
+ * Statuses are written with update operators (no save) — 'sending' / 'retrying' must be in the WaMessage enum.
+ */
+async function deliver(messageId: string, attempt = 1, attempts = 1) {
+  const m = await WaMessage.findOneAndUpdate({ _id: messageId, status: { $in: ['queued', 'retrying'] } }, { $set: { status: 'sending' } }, { new: true }).lean();
+  if (!m) return;
   try {
     const r = await sendWhatsApp(m.phone, m.text ?? '', { session: m.kind === 'reply' });
-    m.set({ status: 'sent', provider: r.provider, providerId: r.id ?? undefined, sentAt: new Date() });
+    await WaMessage.updateOne({ _id: m._id }, { $set: { status: 'sent', provider: r.provider, providerId: r.id ?? undefined, sentAt: new Date() }, $unset: { error: 1 } });
   } catch (err) {
-    m.set({ status: 'failed', error: (err as Error).message.slice(0, 500) });
-    await m.save();
+    await WaMessage.updateOne({ _id: m._id }, { $set: { status: attempt < attempts ? 'retrying' : 'failed', error: (err as Error).message.slice(0, 500) } });
     throw err;
   }
-  await m.save();
 }
 
 /** Queue one message for delivery (logged first, so every attempt is auditable). */
@@ -56,7 +59,7 @@ export async function queueMessage(tenantId: string, x: { userId?: string; phone
 /** Start the delivery worker: at most WHATSAPP_RATE_PER_SEC messages per second across all instances. */
 export function startWaWorker() {
   if (!env.REDIS_URL || waWorker) return;
-  waWorker = new Worker('wa', async (job) => runAsTenant(job.data.tenantId, () => deliver(job.data.messageId)), {
+  waWorker = new Worker('wa', async (job) => runAsTenant(job.data.tenantId, () => deliver(job.data.messageId, job.attemptsMade + 1, job.opts.attempts ?? 1)), {
     connection: bullConnection(),
     concurrency: 5,
     limiter: { max: env.WHATSAPP_RATE_PER_SEC, duration: 1000 },
@@ -167,28 +170,46 @@ const toMin = (hm: string) => {
   const [h, m] = hm.split(':').map(Number);
   return h * 60 + m;
 };
-const doneLocal = new Set<string>();
+const doneLocal = new Map<string, number>(); // key -> expiry (ms), pruned on every claim
 async function claim(key: string) {
   const r = redis();
   if (r) return !!(await r.set(key, '1', 'EX', 2 * 86_400, 'NX'));
+  const now = Date.now();
+  for (const [k, exp] of doneLocal) if (exp < now) doneLocal.delete(k);
   if (doneLocal.has(key)) return false;
-  doneLocal.add(key);
+  doneLocal.set(key, now + 2 * 86_400_000);
   return true;
+}
+async function release(key: string) {
+  const r = redis();
+  if (r) await r.del(key);
+  else doneLocal.delete(key);
 }
 
 defineJob('wa-tick', async () => {
   const tenants = await runUnscoped(() => Tenant.find({ status: 'active', isPlatform: { $ne: true }, 'whatsapp.enabled': true }).select('whatsapp settings').lean());
   for (const t of tenants) {
     const s = t.whatsapp as unknown as WaSettings;
-    const { day, hm, weekday } = localNow(t.settings?.timezone ?? 'Asia/Karachi');
-    if (!s.workdays?.includes(weekday) || s.holidays?.includes(day)) continue;
-    const now = toMin(hm);
+    const tz = t.settings?.timezone ?? 'Asia/Karachi';
+    const at0 = new Date();
+    const now = toMin(localNow(tz, at0).hm);
     const slots: [Slot, string, string][] = [['morning', s.morningAt, 'morning'], ...(s.followupsAt ?? []).map((f, i) => ['followup', f, `followup${i}`] as [Slot, string, string]), ['evening', s.eveningAt, 'evening']];
     for (const [slot, at, tag] of slots) {
       const due = toMin(at);
-      if (now < due || now > due + SLOT_WINDOW_MIN) continue;
-      if (!(await claim(`wa:slot:${t._id}:${day}:${tag}`))) continue;
-      await enqueue('wa-run', { tenantId: String(t._id), slot, day }, { jobId: `wa-run-${t._id}-${day}-${tag}` });
+      // minutes since the slot was due, wrapping past midnight (a 23:30 slot is still caught up at 00:10)
+      const late = (now - due + 1440) % 1440;
+      if (late > SLOT_WINDOW_MIN) continue;
+      // the slot belongs to the local day on which it fell due (yesterday, after a wrap)
+      const { day, weekday } = localNow(tz, new Date(at0.getTime() - late * 60_000));
+      if (!s.workdays?.includes(weekday) || s.holidays?.includes(day)) continue;
+      const key = `wa:slot:${t._id}:${day}:${tag}`;
+      if (!(await claim(key))) continue;
+      try {
+        await enqueue('wa-run', { tenantId: String(t._id), slot, day }, { jobId: `wa-run-${t._id}-${day}-${tag}` });
+      } catch (err) {
+        await release(key); // try again on the next tick
+        throw err;
+      }
     }
   }
 });

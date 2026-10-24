@@ -36,7 +36,7 @@ export function TargetSummary({ items }: { items: AssignedTarget[] }) {
           <span className={`grid size-9 shrink-0 place-items-center rounded-lg ${t.ic}`}><t.Icon className="size-5" /></span>
           <div className="min-w-0">
             <div className={`text-xl font-bold tabular-nums leading-tight text-slate-900 dark:text-white`}>{t.v}</div>
-            <div className={`text-[11px] font-semibold uppercase tracking-wide ${t.lc}`}>{t.l}</div>
+            <div className={`text-[12px] font-semibold uppercase tracking-wide ${t.lc}`}>{t.l}</div>
           </div>
         </div>
       ))}
@@ -106,7 +106,7 @@ function Drives({ viewer }: { viewer: string }) {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold">{d.headName} · {d.unitId.name.replace(' (test)', '')}</div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="text-[12px] text-slate-500">
                     {d.basis === 'percent' ? `${d.value}% of remaining${d.money && d.includeArrears ? ' (incl. arrears)' : ''}` : 'Fixed total'} · {d.shares} circles{d.vacantCircles ? ` · ${d.vacantCircles} vacant skipped` : ''}
                   </div>
                 </div>
@@ -114,15 +114,15 @@ function Drives({ viewer }: { viewer: string }) {
               </div>
               <div className="mt-2 grid grid-cols-4 divide-x divide-slate-100 rounded-lg bg-slate-50 py-1.5 text-center dark:divide-slate-800 dark:bg-slate-800/50">
                 {[['Remaining', d.remainingTotal], [d.state === 'stopped' ? 'Due at stop' : 'Target', d.state === 'stopped' ? d.dueTotal : d.targetTotal], ['Verified', d.achieved], ['Circles met', null]].map(([l, v]) => (
-                  <div key={l as string}><div className="text-[10px] font-medium uppercase text-slate-500">{l}</div><div className="text-sm font-bold tabular-nums">{v == null ? `${d.met}/${d.shares}` : fmt(v as number)}</div></div>
+                  <div key={l as string}><div className="text-[11px] font-medium uppercase text-slate-500">{l}</div><div className="text-sm font-bold tabular-nums">{v == null ? `${d.met}/${d.shares}` : fmt(v as number)}</div></div>
                 ))}
               </div>
               <div className="mt-2"><Bullet value={d.pct} pace={d.state === 'running' ? d.elapsed : null} height={7} /></div>
-              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-500">
+              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1 text-[12px] text-slate-500">
                 <span className="flex items-center gap-1.5"><StateChip state={d.state} />{PERIOD_LABEL[d.period]}{d.pending > 0 && <span className="text-amber-700">· {fmt(d.pending)} awaiting verification</span>}</span>
                 <span className="tabular-nums"><span className="font-semibold">{fmtDate(d.startDate)}</span> – {d.state === 'stopped' && d.stoppedAt ? <>stopped <span className="font-semibold">{fmtDate(d.stoppedAt)}</span></> : fmtDate(d.endDate)}</span>
               </div>
-              <div className="mt-1 text-center text-[10px] font-medium text-slate-400">{d.money ? MILLIONS : '(Cases)'}</div>
+              <div className="mt-1 text-center text-[11px] font-medium text-slate-400">{d.money ? MILLIONS : '(Cases)'}</div>
             </button>
             {open === d._id && <DriveShares drive={d} viewer={viewer} />}
           </Card>

@@ -9,13 +9,13 @@
  *   - nightly for every organisation (current and previous year)
  *   - on demand when a year has never been built
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { onDataChange } from '../../lib/dataVersion.js';
 import { logger } from '../../lib/logger.js';
 import { defineJob, enqueue, schedule } from '../../lib/queue.js';
 import { redis } from '../../lib/redis.js';
-import { runUnscoped } from '../../lib/tenantContext.js';
+import { runAsTenant, runUnscoped } from '../../lib/tenantContext.js';
 import { AssignedTarget, RevEntry, RevTarget, Rollup, Task, Tenant, Unit } from '../../models/index.js';
 import type { BP } from '../org/blueprint.js';
 import { getBlueprint } from '../org/service.js';
@@ -25,6 +25,17 @@ export const PERIODS: Period[] = ['w', 'f', 'm', 'q', 'h', 'y'];
 
 interface HeadAcc { cur?: number; arr?: number; rec?: number; disp?: number; pend?: number; tp?: number; t?: number; ad?: number; open?: number }
 interface Doc { unitId: string; period: Period; key: string; start: Date; end: Date; heads: Record<string, HeadAcc>; tasks: { due: number; onTime: number }; progress: number }
+
+/** The timezone if the runtime knows it, else undefined. */
+const validTz = (tz?: string | null) => {
+  if (!tz) return undefined;
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return tz;
+  } catch {
+    return undefined;
+  }
+};
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const DAY = 86_400_000;
@@ -73,7 +84,7 @@ export function dayPeriods(day: string) {
 export async function buildRollups(tenantId: string, fy: string, bp: BP) {
   const runStart = new Date();
   const tenant = await runUnscoped(() => Tenant.findById(tenantId).select('settings').lean());
-  const tz = tenant?.settings?.timezone ?? 'Asia/Karachi';
+  const tz = validTz(tenant?.settings?.timezone) ?? 'Asia/Karachi';
   const fyStart = bp.fy.start(fy);
   const fyEnd = bp.fy.end(fy);
   const months = monthPeriods(bp, fy);
@@ -191,21 +202,25 @@ export async function buildRollups(tenantId: string, fy: string, bp: BP) {
     if (prev && prev.sig === sig(d)) continue;
     ops.push({
       updateOne: {
-        filter: { tenantId: tid, unitId: new Types.ObjectId(d.unitId), period: d.period, key: d.key },
-        update: { $set: { fy, start: d.start, end: d.end, heads: d.heads, tasks: d.tasks, progress: d.progress, builtAt: runStart }, $setOnInsert: { tenantId: tid } },
+        filter: { tenantId: tid, unitId: new Types.ObjectId(d.unitId), fy, period: d.period, key: d.key },
+        update: { $set: { start: d.start, end: d.end, heads: d.heads, tasks: d.tasks, progress: d.progress, builtAt: runStart }, $setOnInsert: { tenantId: tid, fy } },
         upsert: true,
       },
     });
   }
   for (let i = 0; i < ops.length; i += 2000) await Rollup.bulkWrite(ops.slice(i, i + 2000), { ordered: false });
   const stale = [...existing.values()].map((e) => e._id);
-  if (stale.length) await Rollup.deleteMany({ _id: { $in: stale } });
+  if (stale.length) await Rollup.deleteMany({ _id: { $in: stale }, fy });
   const ms = Date.now() - runStart.getTime();
   logger.info({ tenantId, fy, docs: docs.size, written: ops.length, removed: stale.length, ms }, 'rollups built');
   return { docs: docs.size, written: ops.length, removed: stale.length, ms };
 }
 
 /* ---------- jobs & triggers ---------- */
+const RELEASE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+const EXTEND = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('expire', KEYS[1], ARGV[2]) else return 0 end";
+const PREV_FY_WINDOW_MS = 62 * DAY;
+
 defineJob('rollup', async (d) => {
   const bp = await getBlueprint(String(d.tenantId));
   if (!bp) return;
@@ -213,14 +228,26 @@ defineJob('rollup', async (d) => {
   // One build per organisation-year at a time (across workers); a busy one is retried shortly
   const r = redis();
   const lock = 'lock:rollup:' + d.tenantId + ':' + fy;
-  if (r && !(await r.set(lock, '1', 'EX', 300, 'NX'))) {
+  const token = randomUUID();
+  if (r && !(await r.set(lock, token, 'EX', 300, 'NX'))) {
     await enqueue('rollup', { tenantId: String(d.tenantId), fy }, { jobId: 'rollup-' + d.tenantId + '-' + fy + '-retry-' + Math.floor(Date.now() / 30_000), delay: 30_000 });
     return { skipped: 'busy' };
   }
+  // Keep the lock while a long build runs; release it only if it is still ours
+  const keepAlive = r ? setInterval(() => { r.eval(EXTEND, 1, lock, token, '300').catch(() => undefined); }, 60_000) : null;
+  keepAlive?.unref?.();
   try {
-    return await buildRollups(String(d.tenantId), fy, bp);
+    const out = await buildRollups(String(d.tenantId), fy, bp);
+    // A change-triggered rebuild (no fy given) early in a year also refreshes the previous year,
+    // whose weeks / late entries may still be changing
+    if (d.fy == null && Date.now() - bp.fy.start(fy).getTime() < PREV_FY_WINDOW_MS) {
+      const prev = bp.fy.prev(fy);
+      await enqueue('rollup', { tenantId: String(d.tenantId), fy: prev }, { jobId: `rollup-${d.tenantId}-${prev}-${Math.floor(Date.now() / 60_000)}` });
+    }
+    return out;
   } finally {
-    if (r) await r.del(lock);
+    if (keepAlive) clearInterval(keepAlive);
+    if (r) await r.eval(RELEASE, 1, lock, token).catch(() => undefined);
   }
 });
 
@@ -228,10 +255,13 @@ defineJob('rollup', async (d) => {
 defineJob('rollup-all', async () => {
   const tenants = await runUnscoped(() => Tenant.find({ status: 'active', isPlatform: { $ne: true } }).select('_id').lean());
   for (const t of tenants) {
-    const bp = await getBlueprint(String(t._id));
-    if (!bp) continue;
-    const fy = bp.fy.of(new Date());
-    for (const y of [fy, bp.fy.prev(fy)]) await enqueue('rollup', { tenantId: String(t._id), fy: y }, { jobId: `rollup-${t._id}-${y}-nightly-${new Date().toISOString().slice(0, 10)}` });
+    // Platform-wide job: the blueprint read must run inside the organisation's scope
+    await runAsTenant(t._id, async () => {
+      const bp = await getBlueprint(String(t._id));
+      if (!bp) return;
+      const fy = bp.fy.of(new Date());
+      for (const y of [fy, bp.fy.prev(fy)]) await enqueue('rollup', { tenantId: String(t._id), fy: y }, { jobId: `rollup-${t._id}-${y}-nightly-${new Date().toISOString().slice(0, 10)}` });
+    }).catch((err) => logger.warn({ err, tenantId: String(t._id) }, 'nightly rollup enqueue failed'));
   }
 });
 schedule('rollup-all', '0 2 * * *');

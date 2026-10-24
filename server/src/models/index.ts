@@ -111,6 +111,12 @@ const sessionSchema = new Schema(
     ip: String,
     remember: { type: Boolean, default: true },
     expiresAt: { type: Date, required: true },
+    /** All sessions rotated from one sign-in share a family; reuse of a rotated token revokes the family. */
+    familyId: { type: String, index: true },
+    /** Set when this token has been exchanged; the row stays as a tombstone to detect reuse. */
+    rotatedAt: Date,
+    /** Guest demo session: every write is refused. */
+    readOnly: { type: Boolean, default: false },
   },
   opts,
 );
@@ -159,6 +165,8 @@ const importRunSchema = new Schema(
     created: { type: Number, default: 0 },
     updated: { type: Number, default: 0 },
     errors: [{ row: Number, message: String, _id: false }],
+    /** The uploaded CSV and options, kept here (not in the job queue) and cleared once the run ends. */
+    payload: { type: { csv: String, defaultPasswordHash: String, actorRole: String }, select: false, default: undefined, _id: false },
     createdBy: ref('User'),
     finishedAt: Date,
   },
@@ -356,6 +364,7 @@ const assignedTargetSchema = new Schema(
   opts,
 );
 assignedTargetSchema.plugin(tenantPlugin);
+assignedTargetSchema.plugin(dataVersionPlugin);
 assignedTargetSchema.index({ tenantId: 1, assigneeId: 1, endDate: -1 });
 assignedTargetSchema.index({ tenantId: 1, assignedBy: 1, createdAt: -1 });
 assignedTargetSchema.index({ tenantId: 1, anc: 1, startDate: 1 });
@@ -387,8 +396,11 @@ const targetDriveSchema = new Schema(
   opts,
 );
 targetDriveSchema.plugin(tenantPlugin);
+targetDriveSchema.plugin(dataVersionPlugin);
 targetDriveSchema.index({ tenantId: 1, assignedBy: 1, createdAt: -1 });
 targetDriveSchema.index({ tenantId: 1, anc: 1, startDate: -1 });
+// DB guard: at most one active drive per KPI and area
+targetDriveSchema.index({ tenantId: 1, head: 1, unitId: 1 }, { unique: true, partialFilterExpression: { status: 'active' } });
 export const TargetDrive = mongoose.model('TargetDrive', targetDriveSchema);
 
 /* ---------------- Scoring overrides (organisation default, or per area) — weights per profile and block ---------------- */
@@ -435,7 +447,7 @@ const waMessageSchema = new Schema(
     direction: { type: String, enum: ['out', 'in'], required: true },
     kind: { type: String, required: true }, // morning | followup | evening | warning | supervisor | reply | test | inbound
     text: { type: String, maxlength: 4096 },
-    status: { type: String, enum: ['queued', 'sent', 'failed', 'received', 'skipped'], default: 'queued' },
+    status: { type: String, enum: ['queued', 'sending', 'retrying', 'sent', 'failed', 'received', 'skipped'], default: 'queued' },
     provider: String,
     providerId: String,
     error: String,
@@ -494,6 +506,7 @@ const accessGrantSchema = new Schema(
   opts,
 );
 accessGrantSchema.plugin(tenantPlugin);
+accessGrantSchema.plugin(dataVersionPlugin);
 accessGrantSchema.index({ tenantId: 1, userId: 1 });
 accessGrantSchema.index({ tenantId: 1, unitId: 1 });
 export const AccessGrant = mongoose.model('AccessGrant', accessGrantSchema);
@@ -524,7 +537,8 @@ const rollupSchema = new Schema(
   { minimize: false },
 );
 rollupSchema.plugin(tenantPlugin);
-rollupSchema.index({ tenantId: 1, unitId: 1, period: 1, key: 1 }, { unique: true });
+// fy is part of the key: an ISO week spanning the year start exists once in each year
+rollupSchema.index({ tenantId: 1, unitId: 1, fy: 1, period: 1, key: 1 }, { unique: true });
 rollupSchema.index({ tenantId: 1, fy: 1, period: 1, key: 1 });
 export const Rollup = mongoose.model('Rollup', rollupSchema);
 

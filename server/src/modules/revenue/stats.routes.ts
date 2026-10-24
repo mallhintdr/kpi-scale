@@ -131,11 +131,12 @@ router.get('/stats/children', validate({ query: periodQ.extend({ key: z.string()
   const bp = bpOf(req);
   const { unitId, period, key } = q<{ unitId: string; period: Period; key: string }>(req);
   const fy = q<{ fy?: string }>(req).fy ?? bp.fy.of(new Date());
+  if (!bp.fy.valid(fy)) throw badRequest('Invalid financial year');
   const unit = await assertCanRead(req.user!, unitId);
   const children = await Unit.find({ parentId: unit._id }).select('name type').lean();
   const ids = children.map((c) => c._id);
   const [docs, years] = await Promise.all([
-    Rollup.find({ unitId: { $in: ids }, period, key }).lean(),
+    Rollup.find({ unitId: { $in: ids }, fy, period, key }).lean(),
     Rollup.find({ unitId: { $in: ids }, period: 'y', fy }).select('unitId heads').lean(),
   ]);
   const p = periodList(bp, fy, period).find((x) => x.key === key);

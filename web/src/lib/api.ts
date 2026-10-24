@@ -48,6 +48,7 @@ export async function api<T = any>(path: string, init: RequestInit & { json?: un
   if (res.status === 401 && retry && !path.startsWith('/auth/')) {
     if (await tryRefresh()) return api<T>(path, init, false);
     onUnauthorized();
+    throw new ApiError(401, 'Session expired', 'UNAUTHORIZED');
   }
   if (res.status === 204) return undefined as T;
   const isJson = res.headers.get('content-type')?.includes('application/json');
@@ -73,11 +74,19 @@ export const qs = (params: Record<string, unknown>) => {
 };
 
 /** Download an authenticated file (e.g. CSV export). */
-export async function download(path: string, filename: string) {
+export async function download(path: string, filename: string, retry = true): Promise<void> {
   const res = await fetch(`/api${path}`, { headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}, credentials: 'include' });
+  if (res.status === 401 && retry) {
+    if (await tryRefresh()) return download(path, filename, false);
+    onUnauthorized();
+    throw new ApiError(401, 'Session expired', 'UNAUTHORIZED');
+  }
   if (!res.ok) throw new ApiError(res.status, 'Download failed');
   const url = URL.createObjectURL(await res.blob());
   const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  a.style.display = 'none';
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }

@@ -58,9 +58,14 @@ export function schedule(name: string, pattern: string) {
 }
 
 function startInlineSchedules() {
-  let lastRun = '';
+  const ran = new Set<string>(); // "name|day", pruned to today's entries
+  let today = '';
   setInterval(() => {
     const now = new Date();
+    if (now.toDateString() !== today) {
+      today = now.toDateString();
+      for (const k of ran) if (!k.endsWith(`|${today}`)) ran.delete(k);
+    }
     for (const s of schedules) {
       const hdl = handlers.get(s.name);
       // "*/N * * * *": every N minutes
@@ -70,9 +75,9 @@ function startInlineSchedules() {
         continue;
       }
       const [m, h] = s.pattern.split(' ').map(Number);
-      const tag = `${s.name}${now.toDateString()}`;
-      if (now.getHours() === h && now.getMinutes() >= m && !lastRun.includes(tag)) {
-        lastRun += tag;
+      const tag = `${s.name}|${today}`;
+      if (now.getHours() === h && now.getMinutes() >= m && !ran.has(tag)) {
+        ran.add(tag);
         hdl?.({ tenantId: '' }).catch((err) => logger.error({ err, job: s.name }, 'scheduled job failed'));
       }
     }

@@ -33,7 +33,7 @@ export default function Targets() {
       <PageHeader title="Targets & demand" subtitle="Annual targets and opening balances for the units under you" actions={<FyPicker />} />
       {!tehsils.length ? <Card><Empty title="Your posting does not set targets" body="Annual targets are set by the posts your organisation allows to set them." /></Card> : (
         <>
-          <Card className="mb-4 grid gap-3 p-4 sm:grid-cols-2">
+          <Card className="mb-3 grid gap-3 p-4 sm:grid-cols-2">
             {tehsils.length > 1 && (
               <Field label="Area">{(id) => <Select id={id} value={tehsilId} onChange={(e) => setTehsilId(e.target.value)}>{tehsils.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}</Select>}</Field>
             )}
@@ -85,18 +85,18 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
       {/* Phones: one card per circle, inputs side by side */}
       <Card className="divide-y divide-slate-100 sm:hidden dark:divide-slate-800">
         {rows.map((r, i) => (
-          <div key={`${r.unitId}${r.roUserId ?? ''}`} className="px-3 py-2.5">
-            <div className="text-sm font-medium">{r.label}{r.sub && <span className="ml-1.5 text-[11px] font-normal text-slate-500">{r.sub}</span>}</div>
+          <div key={`${r.unitId}${r.roUserId ?? ''}`} className="px-3 py-2">
+            <div className="text-sm font-medium">{r.label}{r.sub && <span className="ml-1.5 text-[12px] font-normal text-slate-500">{r.sub}</span>}</div>
             {isCase ? (
-              <label className="mt-1.5 block text-[11px] text-slate-500">Opening pending
+              <label className="mt-1.5 block text-[12px] text-slate-500">Opening pending
                 <input type="number" inputMode="numeric" min={0} disabled={!data.canEdit} className={`${cell} mt-0.5`} value={r.opening || ''} onChange={set(i, 'opening')} />
               </label>
             ) : (
               <div className="mt-1.5 grid grid-cols-2 gap-2">
-                <label className="block text-[11px] text-slate-500">Current target {symCaption()}
+                <label className="block text-[12px] text-slate-500">Current target {symCaption()}
                   <input type="number" inputMode="decimal" min={0} disabled={!data.canEdit} className={`${cell} mt-0.5`} value={r.target || ''} onChange={set(i, 'target')} />
                 </label>
-                <label className="block text-[11px] text-slate-500">Arrears {symCaption()}
+                <label className="block text-[12px] text-slate-500">Arrears {symCaption()}
                   <input type="number" inputMode="decimal" min={0} disabled={!data.canEdit} className={`${cell} mt-0.5`} value={r.arrearDemand || ''} onChange={set(i, 'arrearDemand')} />
                 </label>
               </div>
@@ -105,19 +105,19 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
         ))}
         <div className="flex justify-between bg-slate-50 px-3 py-2 text-sm font-semibold dark:bg-slate-800">
           <span>Total · {rows.length}</span>
-          <span className="tabular-nums">{isCase ? total('opening') : <>{fmtPKR(total('target'))} · {fmtPKR(total('arrearDemand'))} <span className="text-[10px] font-medium text-slate-400">{MILLIONS}</span></>}</span>
+          <span className="tabular-nums">{isCase ? total('opening') : <>{fmtPKR(total('target'))} · {fmtPKR(total('arrearDemand'))} <span className="text-[11px] font-medium text-slate-400">{MILLIONS}</span></>}</span>
         </div>
       </Card>
       <Card className="hidden overflow-x-auto sm:block">
         <table className="w-full min-w-[420px] text-sm">
           <thead className="sticky top-0 bg-brand-700 text-center text-[14px] text-white">
             <tr className="border-b border-slate-100 dark:border-slate-800">
-              <th className="w-12 border-r border-white/20 px-2 py-2.5 text-center font-medium">#</th>
-              <th className="border-r border-white/20 px-3 py-2.5 font-medium">{data.head.perHolder ? 'Officer' : UNIT_LABEL[data.head.level]}</th>
-              {isCase ? <th className="px-3 py-2.5 text-center font-medium">Opening Pending</th> : (
+              <th className="w-12 border-r border-white/20 px-2 py-2 text-center font-medium">#</th>
+              <th className="border-r border-white/20 px-3 py-2 font-medium">{data.head.perHolder ? 'Officer' : UNIT_LABEL[data.head.level]}</th>
+              {isCase ? <th className="px-3 py-2 text-center font-medium">Opening Pending</th> : (
                 <>
-                  <th className="border-r border-white/20 px-3 py-2.5 text-center font-medium">Current target {symCaption()}</th>
-                  <th className="px-3 py-2.5 text-center font-medium">Arrears {symCaption()}</th>
+                  <th className="border-r border-white/20 px-3 py-2 text-center font-medium">Current target {symCaption()}</th>
+                  <th className="px-3 py-2 text-center font-medium">Arrears {symCaption()}</th>
                 </>
               )}
             </tr>
@@ -126,7 +126,7 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
             {rows.map((r, i) => (
               <tr key={`${r.unitId}${r.roUserId ?? ''}`}>
                 <td className="border-r border-slate-200 px-2 py-1.5 text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700">{i + 1}</td>
-                <td className="px-3 py-1.5"><div className="font-medium">{r.label}</div>{r.sub && <div className="text-[11px] text-slate-500">{r.sub}</div>}</td>
+                <td className="px-3 py-1.5"><div className="font-medium">{r.label}</div>{r.sub && <div className="text-[12px] text-slate-500">{r.sub}</div>}</td>
                 {isCase ? (
                   <td className="px-3 py-1.5"><input type="number" inputMode="numeric" min={0} disabled={!data.canEdit} className={cell} value={r.opening || ''} onChange={set(i, 'opening')} /></td>
                 ) : (
@@ -141,11 +141,11 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
           <tfoot className="border-t-2 border-slate-200 font-semibold dark:border-slate-700">
             <tr>
               <td />
-              <td className="px-3 py-2.5">Total · {rows.length} <span className="text-[10px] font-medium text-slate-400">{isCase ? '' : MILLIONS}</span></td>
-              {isCase ? <td className="px-3 py-2.5 text-center tabular-nums">{total('opening')}</td> : (
+              <td className="px-3 py-2">Total · {rows.length} <span className="text-[11px] font-medium text-slate-400">{isCase ? '' : MILLIONS}</span></td>
+              {isCase ? <td className="px-3 py-2 text-center tabular-nums">{total('opening')}</td> : (
                 <>
-                  <td className="px-3 py-2.5 text-center tabular-nums">{fmtPKR(total('target'))}</td>
-                  <td className="px-3 py-2.5 text-center tabular-nums">{fmtPKR(total('arrearDemand'))}</td>
+                  <td className="px-3 py-2 text-center tabular-nums">{fmtPKR(total('target'))}</td>
+                  <td className="px-3 py-2 text-center tabular-nums">{fmtPKR(total('arrearDemand'))}</td>
                 </>
               )}
             </tr>
@@ -153,7 +153,7 @@ function TargetGrid({ tehsilId, fy, head }: { tehsilId: string; fy: string; head
         </table>
       </Card>
       {data.canEdit && (
-        <div className="pb-safe fixed inset-x-0 bottom-16 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:static lg:mt-4 lg:border-0 lg:bg-transparent lg:p-0 dark:border-slate-800 dark:bg-slate-900/95">
+        <div className="pb-safe fixed inset-x-0 bottom-16 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:static lg:mt-3 lg:border-0 lg:bg-transparent lg:p-0 dark:border-slate-800 dark:bg-slate-900/95">
           <Button block loading={save.isPending} onClick={() => save.mutate()}><Save className="size-4" />Save {data.head.name}</Button>
         </div>
       )}

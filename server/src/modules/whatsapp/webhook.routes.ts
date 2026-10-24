@@ -49,6 +49,13 @@ function parseCloud(body: any): Inbound[] {
 }
 
 /* ---------- authentication ---------- */
+/** Constant-time string comparison that is safe for different lengths. */
+function safeEqual(given: string, expected: string) {
+  const a = createHmac('sha256', 'cmp').update(given).digest();
+  const b = createHmac('sha256', 'cmp').update(expected).digest();
+  return timingSafeEqual(a, b) && given.length === expected.length;
+}
+
 function verified(req: Request) {
   if (env.NODE_ENV === 'development' && env.WHATSAPP_MODE === 'mock') return true;
   if (env.WHATSAPP_MODE === 'cloud') {
@@ -58,15 +65,15 @@ function verified(req: Request) {
     const expected = `sha256=${createHmac('sha256', env.WHATSAPP_APP_SECRET).update(raw).digest('hex')}`;
     return sig.length === expected.length && timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
   }
-  // WASender: shared secret in the URL (?secret=) or the X-Webhook-Signature header
+  // WASender: shared secret in the X-Webhook-Signature / X-Webhook-Secret header (preferred) or the URL (?secret=)
   const secret = env.WHATSAPP_WEBHOOK_SECRET;
   if (!secret) return false;
-  const given = String(req.query.secret ?? req.headers['x-webhook-signature'] ?? '');
-  return given.length === secret.length && timingSafeEqual(Buffer.from(given), Buffer.from(secret));
+  const given = String(req.headers['x-webhook-signature'] ?? req.headers['x-webhook-secret'] ?? req.query.secret ?? '');
+  return !!given && safeEqual(given, secret);
 }
 
 router.get('/webhook', (req, res) => {
-  if (req.query['hub.mode'] === 'subscribe' && env.WHATSAPP_VERIFY_TOKEN && req.query['hub.verify_token'] === env.WHATSAPP_VERIFY_TOKEN) return res.status(200).send(String(req.query['hub.challenge'] ?? ''));
+  if (req.query['hub.mode'] === 'subscribe' && env.WHATSAPP_VERIFY_TOKEN && safeEqual(String(req.query['hub.verify_token'] ?? ''), env.WHATSAPP_VERIFY_TOKEN)) return res.status(200).send(String(req.query['hub.challenge'] ?? ''));
   res.sendStatus(403);
 });
 
@@ -77,8 +84,14 @@ router.post('/webhook', async (req, res) => {
     const msgs = env.WHATSAPP_MODE === 'cloud' ? parseCloud(req.body) : parseWasender(req.body);
     for (const m of msgs) {
       const r = redis();
-      if (r && !(await r.set(`wa:msg:${m.waMessageId}`, '1', 'EX', 86_400, 'NX'))) continue; // provider retry
-      await handleInbound(m);
+      const key = `wa:msg:${m.waMessageId}`;
+      if (r && !(await r.set(key, '1', 'EX', 86_400, 'NX'))) continue; // provider retry
+      try {
+        await handleInbound(m);
+      } catch (err) {
+        if (r) await r.del(key).catch(() => undefined); // not processed: let the provider's retry through
+        logger.error({ err, id: m.waMessageId }, 'whatsapp inbound failed');
+      }
     }
   } catch (err) {
     logger.error({ err }, 'whatsapp webhook failed');
@@ -88,10 +101,19 @@ router.post('/webhook', async (req, res) => {
 /** Find who wrote (by phone) and hand the message to a job in their organisation. */
 export async function handleInbound(m: Inbound) {
   const users = await runUnscoped(() => User.find({ phoneE164: m.phone, status: 'active' }).select('_id tenantId').lean());
+  const candidates: { tenantId: string; userId: string }[] = [];
   for (const u of users) {
     const t = await runUnscoped(() => Tenant.findOne({ _id: u.tenantId, status: 'active', 'whatsapp.enabled': true }).select('_id').lean());
-    if (!t) continue;
-    await enqueue('wa-inbound', { tenantId: String(t._id), userId: String(u._id), phone: m.phone, text: m.text ?? '' });
+    if (t) candidates.push({ tenantId: String(t._id), userId: String(u._id) });
+  }
+  if (candidates.length) {
+    // Same phone in several organisations: reply to the one that most recently messaged this number
+    let pick = candidates[0];
+    if (candidates.length > 1) {
+      const last = await runUnscoped(() => WaMessage.findOne({ phone: m.phone, direction: 'out', tenantId: { $in: candidates.map((c) => c.tenantId) } }).sort({ createdAt: -1 }).select('tenantId').lean());
+      pick = candidates.find((c) => c.tenantId === String((last as any)?.tenantId)) ?? pick;
+    }
+    await enqueue('wa-inbound', { tenantId: pick.tenantId, userId: pick.userId, phone: m.phone, text: m.text ?? '' });
     return true;
   }
   logger.info({ phone: m.phone }, 'whatsapp message from an unknown number');

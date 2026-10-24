@@ -59,15 +59,15 @@ export default function Home() {
 
 /** The official's own position, one row per post held: target, achieved, balance, pace and (KPI mode) score. */
 function MyPerformanceTable({ items, perf, elapsed }: { items: MyScore[]; perf: boolean; elapsed: number }) {
-  const th = 'border-b border-r border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3 sm:py-2.5';
+  const th = 'border-b border-r border-white/50 px-1 py-2 text-center text-[11.5px] font-semibold tracking-normal sm:px-3 sm:py-2 sm:text-[13px] sm:tracking-wide';
   const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 text-center tabular-nums sm:px-3 dark:border-slate-700';
   const wide = 'hidden md:table-cell';
   const blocks = getOrg()?.blocks ?? [];
   return (
     <Card className="overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full border-separate border-spacing-0 text-[12px] sm:text-[13px]">
-          <thead className="bg-brand-700 text-center text-[11px] uppercase tracking-wide text-white sm:text-[12.5px]">
+        <table className="w-full border-separate border-spacing-0 text-[13px] sm:text-[14px]">
+          <thead className="bg-brand-700 text-center text-[12px] uppercase tracking-wide text-white sm:text-[13.5px]">
             <tr>
               <th className={th}>Post</th>
               <th className={th}>Target</th>
@@ -89,7 +89,7 @@ function MyPerformanceTable({ items, perf, elapsed }: { items: MyScore[]; perf: 
                 <tr key={s.post}>
                   <td className="border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 sm:px-3 dark:border-slate-700">
                     <div className="font-medium text-slate-900 dark:text-white">{s.postLabel}</div>
-                    <div className="text-[11px] text-slate-500">{s.units} unit{s.units === 1 ? '' : 's'} in charge</div>
+                    <div className="text-[12px] text-slate-500">{s.units} unit{s.units === 1 ? '' : 's'} in charge</div>
                   </td>
                   <td className={td}>{fmtPKR(s.target)}</td>
                   <td className={`${td} font-semibold text-slate-900 dark:text-white`}>{fmtPKR(s.collected)}</td>
@@ -108,8 +108,8 @@ function MyPerformanceTable({ items, perf, elapsed }: { items: MyScore[]; perf: 
       {/* KPI evaluation: the score broken down by block, as a table too */}
       {!perf && (
         <div className="overflow-x-auto border-t border-slate-200 dark:border-slate-700">
-          <table className="w-full border-separate border-spacing-0 text-[12px] sm:text-[13px]">
-            <thead className="bg-brand-600 text-center text-[11px] text-brand-50">
+          <table className="w-full border-separate border-spacing-0 text-[13px] sm:text-[14px]">
+            <thead className="bg-brand-600 text-center text-[12px] text-brand-50">
               <tr>
                 <th className="border-b border-r border-white/30 px-2 py-1.5">Block</th>
                 {items.map((s) => <th key={s.post} className="border-b border-r border-white/30 px-2 py-1.5">{s.postLabel}</th>)}
@@ -121,7 +121,7 @@ function MyPerformanceTable({ items, perf, elapsed }: { items: MyScore[]; perf: 
                   <td className="border-b border-r border-b-slate-200 border-r-slate-300 px-2 py-1.5 dark:border-slate-700">{BLOCK_LABEL[b.key]}</td>
                   {items.map((s) => (
                     <td key={s.post} className="border-b border-r border-b-slate-200 border-r-slate-300 px-2 py-1.5 text-center tabular-nums dark:border-slate-700">
-                      {s.blocks[b.key] == null ? <span className="text-slate-400">Not applicable</span> : <><b>{Math.round(s.blocks[b.key] as number)}</b>{s.weights?.[b.key] != null && <span className="ml-1 text-[11px] text-slate-500">(weight {s.weights[b.key]}%)</span>}</>}
+                      {s.blocks[b.key] == null ? <span className="text-slate-400">Not applicable</span> : <><b>{Math.round(s.blocks[b.key] as number)}</b>{s.weights?.[b.key] != null && <span className="ml-1 text-[12px] text-slate-500">(weight {s.weights[b.key]}%)</span>}</>}
                     </td>
                   ))}
                 </tr>
@@ -130,7 +130,7 @@ function MyPerformanceTable({ items, perf, elapsed }: { items: MyScore[]; perf: 
           </table>
         </div>
       )}
-      <div className="border-t border-slate-200 px-3 py-1.5 text-center text-[10px] font-medium text-slate-400 dark:border-slate-700">{MILLIONS} · {Math.round(elapsed)}% of the year gone</div>
+      <div className="border-t border-slate-200 px-3 py-1.5 text-center text-[11px] font-medium text-slate-400 dark:border-slate-700">{MILLIONS} · {Math.round(elapsed)}% of the year gone</div>
     </Card>
   );
 }
@@ -144,7 +144,7 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
     cards.push({
       code: r.code, eyebrow: 'Revenue', title: r.name, achieved: r.collected, total: r.target, fmt: r.unit === 'money' ? fmtPKR : (v: number) => v.toLocaleString(), unit: r.unit === 'money' ? MILLIONS : '(count)', labels: { achieved: T.achieved },
       pace: r.crop ? null : data.elapsed,
-      extras: r.pendingVerification > 0 ? [{ label: 'Unverified', value: fmtPKR(r.pendingVerification), tone: 'warn' }] : [],
+      extras: [],
     });
   }
   const ad = data.arrears.total;
@@ -171,9 +171,9 @@ function KpiHeads({ data, canDrill }: { data: UnitData; canDrill: boolean }) {
 
   return (
     <>
-      <SectionTitle action={<Link to={`/units/${data.unit._id}`} className="text-[13px] font-medium text-brand-600 hover:underline">Full Performance →</Link>}>KPIs · {data.unit.name} · {UNIT_LABEL[data.unit.type]}</SectionTitle>
+      <SectionTitle action={<Link to={`/units/${data.unit._id}`} className="text-[14px] font-medium text-brand-600 hover:underline">Full Performance →</Link>}>KPIs · {data.unit.name} · {UNIT_LABEL[data.unit.type]}</SectionTitle>
       <KpiTable cards={cards} canDrill={canDrill} />
-      {canDrill && <p className="mt-1.5 px-1 text-[11px] text-slate-400">Tap a KPI to see every subordinate ranked on it.</p>}
+      {canDrill && <p className="mt-1.5 px-1 text-[12px] text-slate-400">Tap a KPI to see every subordinate ranked on it.</p>}
     </>
   );
 }
@@ -188,7 +188,7 @@ const GROUPS: { key: string; label: string }[] = [
 /** Desktop / tablet KPI view: one aligned table, grouped by category, one KPI per row. */
 function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean }) {
   const navigate = useNavigate();
-  const th = 'border-b border-r border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3 sm:py-2.5';
+  const th = 'border-b border-r border-white/50 px-1 py-2 text-center text-[11.5px] font-semibold tracking-normal sm:px-3 sm:py-2 sm:text-[13px] sm:tracking-wide';
   const td = 'border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 text-center tabular-nums sm:px-3 dark:border-slate-700';
   // Shown from tablets up; phones keep KPI · Target · Achieved · Balance · %
   const wide = 'hidden md:table-cell';
@@ -196,17 +196,17 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
   return (
     <Card className="overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full border-separate border-spacing-0 text-[12px] sm:text-[13px]">
-          <thead className="bg-brand-700 text-center text-[11px] uppercase tracking-wide text-white sm:text-[12.5px]">
+        <table className="w-full border-separate border-spacing-0 text-[13px] sm:text-[14px]">
+          <thead className="bg-brand-700 text-center text-[12px] uppercase tracking-wide text-white sm:text-[13.5px]">
             <tr>
-              <th className="hidden w-10 border-b border-r border-white/50 px-1 py-2.5 text-center font-semibold sm:table-cell">#</th>
-              <th className="border-b border-r border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3 sm:py-2.5">KPI</th>
+              <th className="hidden w-10 border-b border-r border-white/50 px-1 py-2 text-center font-semibold sm:table-cell">#</th>
+              <th className="border-b border-r border-white/50 px-1.5 py-2 text-center font-semibold sm:px-3 sm:py-2">KPI</th>
               <th className={th}>Target</th>
               <th className={th}>Achieved</th>
               <th className={th}>Balance</th>
               <th className={`${th} ${wide}`}>Expected by Now</th>
               <th className={`${th} ${wide}`}>Ahead / Short</th>
-              <th className="w-12 border-b border-white/50 px-1.5 py-2 text-center font-semibold sm:w-16 sm:px-3 sm:py-2.5">%</th>
+              <th className="w-12 border-b border-white/50 px-1.5 py-2 text-center font-semibold sm:w-16 sm:px-3 sm:py-2">%</th>
             </tr>
           </thead>
           <tbody>
@@ -215,7 +215,7 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
               if (!rows.length) return null;
               return [
                 <tr key={g.key}>
-                  <td colSpan={8} className="border-b border-slate-300 bg-brand-50 px-2 py-1.5 sm:px-3 text-[11px] font-semibold uppercase tracking-wide text-brand-800 dark:border-slate-600 dark:bg-brand-500/10 dark:text-brand-200">{g.label}</td>
+                  <td colSpan={8} className="border-b border-slate-300 bg-brand-50 px-2 py-1.5 sm:px-3 text-[12px] font-semibold uppercase tracking-wide text-brand-800 dark:border-slate-600 dark:bg-brand-500/10 dark:text-brand-200">{g.label}</td>
                 </tr>,
                 ...rows.map((c) => {
                   n += 1;
@@ -229,7 +229,6 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
                       <td className="hidden border-b border-r border-b-slate-200 border-r-slate-300 text-center text-xs font-semibold text-slate-500 tabular-nums sm:table-cell dark:border-slate-700">{n}</td>
                       <td className="border-b border-r border-b-slate-200 border-r-slate-300 px-1.5 py-2 sm:px-3 dark:border-slate-700">
                         <span className="font-medium leading-tight text-slate-900 decoration-2 underline-offset-2 group-hover:underline dark:text-white">{c.title}</span>
-                        {c.extras?.filter((e) => e.label === 'Unverified').map((e) => <span key={e.label} className="block text-[10.5px] font-medium text-amber-700 sm:ml-2 sm:inline sm:text-[11px]">+{e.value} unverified</span>)}
                       </td>
                       <td className={td}>{c.fmt(c.total)}</td>
                       <td className={`${td} font-semibold text-slate-900 dark:text-white`}>{c.fmt(c.achieved)}</td>
@@ -247,7 +246,7 @@ function KpiTable({ cards, canDrill }: { cards: KpiRowData[]; canDrill: boolean 
           </tbody>
         </table>
       </div>
-      <div className="border-t border-slate-200 px-3 py-1.5 text-center text-[10px] font-medium text-slate-400 dark:border-slate-700">
+      <div className="border-t border-slate-200 px-3 py-1.5 text-center text-[11px] font-medium text-slate-400 dark:border-slate-700">
         {MILLIONS} for money KPIs · "Expected by now" assumes an even pace through the year; seasonal KPIs show "—"
       </div>
     </Card>
@@ -263,7 +262,7 @@ function MyTargets() {
   const open = (mine.data ?? []).filter((t) => t.state === 'running' || t.state === 'upcoming');
   return (
     <>
-      <SectionTitle action={<Link to="/assigned" className="text-[13px] font-medium text-brand-600 hover:underline">All targets →</Link>}>My assigned targets</SectionTitle>
+      <SectionTitle action={<Link to="/assigned" className="text-[14px] font-medium text-brand-600 hover:underline">All targets →</Link>}>My assigned targets</SectionTitle>
       {mine.isLoading ? <Loading /> : !mine.data?.length ? (
         <Card><Empty title="No targets assigned to you yet" /></Card>
       ) : (
@@ -276,7 +275,7 @@ function MyTargets() {
       )}
       {caps.isOfficer && !!byMe.data?.length && (
         <>
-          <SectionTitle action={<Link to="/assigned?box=assigned" className="text-[13px] font-medium text-brand-600 hover:underline">Manage →</Link>}>Targets I assigned</SectionTitle>
+          <SectionTitle action={<Link to="/assigned?box=assigned" className="text-[14px] font-medium text-brand-600 hover:underline">Manage →</Link>}>Targets I assigned</SectionTitle>
           <TargetSummary items={byMe.data} />
         </>
       )}

@@ -26,9 +26,10 @@ export default function Compare() {
   }, [caps.browseRoots, area]);
   const levels = area ? compareLevelsUnder(area.type).map((l) => ({ value: l.key, label: l.plural ?? `${l.label}s` })) : [];
   const [level, setLevel] = useState<string>('');
+  const levelKey = levels.map((l) => l.value).join();
   useEffect(() => {
     if (levels.length && !levels.some((l) => l.value === level)) setLevel(levels[0].value);
-  }, [area]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [levelKey, level]); // eslint-disable-line react-hooks/exhaustive-deps -- levels is rebuilt each render; levelKey tracks it
 
   const params = useMemo(() => [
     { code: 'REVENUE', name: `Overall ${T.money.toLowerCase()}`, money: true },
@@ -80,7 +81,7 @@ export default function Compare() {
               const idx = picked.indexOf(p.code);
               const disabled = !on && picked.length >= MAX;
               return (
-                <label key={p.code} className={clsx('flex min-h-8 cursor-pointer items-center gap-2 rounded-md px-1 text-[13px] hover:bg-slate-50 dark:hover:bg-slate-800', disabled && 'cursor-not-allowed opacity-40')}>
+                <label key={p.code} className={clsx('flex min-h-8 cursor-pointer items-center gap-2 rounded-md px-1 text-[14px] hover:bg-slate-50 dark:hover:bg-slate-800', disabled && 'cursor-not-allowed opacity-40')}>
                   <input type="checkbox" className="size-4 shrink-0 accent-brand-600" checked={on} disabled={disabled} onChange={() => toggle(p.code)} />
                   {on && <span className="size-2.5 shrink-0 rounded-sm" style={{ background: COLORS[idx] }} />}
                   <span className="leading-tight">{p.name}</span>
@@ -121,9 +122,9 @@ export default function Compare() {
                       if (!active || !payload?.length) return null;
                       const row = items.find((u) => u._id === (payload[0].payload as { _id: string })._id)!;
                       return (
-                        <div className="min-w-52 rounded-xl border border-slate-200 bg-white/95 px-3 py-2.5 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900/95">
+                        <div className="min-w-52 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900/95">
                           <div className="font-semibold text-slate-900 dark:text-white">{row.name}</div>
-                          {row.parent && <div className="mb-1.5 text-[11px] text-slate-500">{row.parent}</div>}
+                          {row.parent && <div className="mb-1.5 text-[12px] text-slate-500">{row.parent}</div>}
                           {chosen.map((p, i) => {
                             const c = row.heads[p.code];
                             return (
@@ -145,24 +146,24 @@ export default function Compare() {
                   ))}
                 </BarChart>
               </ResponsiveContainer>
-              <div className="text-center text-[10px] font-medium text-slate-400">% achieved against target · KPI score out of 100 · hover a row for figures {MILLIONS}</div>
+              <div className="text-center text-[11px] font-medium text-slate-400">% achieved against target · KPI score out of 100 · hover a row for figures {MILLIONS}</div>
             </Card>
 
             {/* Same data as a table */}
             <Card className="mt-3 overflow-hidden">
               <div className="max-h-[60vh] overflow-auto">
-                <table className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
-                  <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[12.5px] font-semibold text-white">
+                <table className="w-max min-w-full border-separate border-spacing-0 text-[14px]">
+                  <thead className="sticky top-0 z-20 bg-brand-700 text-center text-[13.5px] font-semibold text-white">
                     <tr>
-                      <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2.5">#</th>
-                      <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2.5">{levels.find((l) => l.value === level)?.label.slice(0, -1)}</th>
+                      <th rowSpan={2} className="sticky left-0 z-30 w-10 min-w-10 border-b border-r border-white/60 bg-brand-700 px-1 py-2">#</th>
+                      <th rowSpan={2} className="sticky left-10 z-30 border-b border-r border-white/60 bg-brand-700 px-3 py-2">{levels.find((l) => l.value === level)?.label.slice(0, -1)}</th>
                       {chosen.map((p, i) => (
                         <th key={p.code} colSpan={p.code === 'SCORE' ? 1 : 4} rowSpan={p.code === 'SCORE' ? 2 : 1} className="border-b border-r-2 border-b-white/30 border-r-white/80 px-3 py-2">
                           <span className="mr-1 inline-block size-2 rounded-sm align-middle" style={{ background: COLORS[i] }} />{p.name}
                         </th>
                       ))}
                     </tr>
-                    <tr className="bg-brand-600 text-[11.5px] font-medium text-brand-50">
+                    <tr className="bg-brand-600 text-[12.5px] font-medium text-brand-50">
                       {chosen.filter((p) => p.code !== 'SCORE').flatMap((p) => (p.money ? ['Target', T.achieved, 'Balance', '%'] : ['Total', 'Achieved', 'Balance', '%']).map((l, i) => (
                         <th key={p.code + l} className={clsx('border-b border-white/30 px-2.5 py-1.5', i === 3 ? 'border-r-2 border-r-white/80' : 'border-r border-r-white/25')}>{l}</th>
                       )))}
@@ -177,7 +178,7 @@ export default function Compare() {
                         <td className={clsx('sticky left-0 z-10 w-10 min-w-10 border-b border-r border-b-slate-200 border-r-slate-400 text-center text-xs font-semibold text-slate-500 tabular-nums dark:border-slate-700', bg)}>{idx + 1}</td>
                         <td className={clsx('sticky left-10 z-10 border-b border-r border-b-slate-200 border-r-slate-400 px-3 py-1.5 dark:border-slate-700', bg)}>
                           <Link to={`/units/${u._id}`} onClick={(e) => e.stopPropagation()} title={`Open ${u.name}`} className={clsx('font-medium text-slate-900 dark:text-white decoration-2 underline-offset-2 hover:text-brand-700 hover:underline focus-visible:underline', on && 'underline')}>{u.name}</Link>
-                          {u.parent && <div className="text-[11px] text-slate-500">{u.parent}</div>}
+                          {u.parent && <div className="text-[12px] text-slate-500">{u.parent}</div>}
                         </td>
                         {chosen.map((p) => {
                           const c = u.heads[p.code];

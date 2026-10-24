@@ -29,7 +29,7 @@ export default function Scoring() {
   return (
     <>
       <PageHeader title="Scoring weights" subtitle="Organisation default, or an override for any area" />
-      <Card className="mb-4 space-y-3 p-4">
+      <Card className="mb-3 space-y-2.5 p-4">
         <Field label="Applies to">
           {() => (
             <div className="flex gap-2">
@@ -52,9 +52,9 @@ export default function Scoring() {
             <table className="w-full min-w-[640px] text-sm">
               <thead className="text-left text-xs text-slate-500">
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  <th className="px-4 py-2.5 font-medium">Profile</th>
-                  {data!.blocks.map((b) => <th key={b.key} className="px-2 py-2.5 text-center font-medium">{b.label}</th>)}
-                  <th className="px-4 py-2.5 text-center font-medium">Total</th>
+                  <th className="px-4 py-2 font-medium">Profile</th>
+                  {data!.blocks.map((b) => <th key={b.key} className="px-2 py-2 text-center font-medium">{b.label}</th>)}
+                  <th className="px-4 py-2 text-center font-medium">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -78,13 +78,13 @@ export default function Scoring() {
           <Card className="grid gap-x-6 gap-y-1 p-4 sm:grid-cols-2">
             {meta?.heads.map((h) => (
               <div key={h.code} className="flex items-center justify-between gap-3 py-1">
-                <span className="text-sm">{h.name} <span className="text-[11px] text-slate-400">{BLOCK_LABEL[h.block]}</span></span>
+                <span className="text-sm">{h.name} <span className="text-[12px] text-slate-400">{BLOCK_LABEL[h.block]}</span></span>
                 <input type="number" inputMode="numeric" min={0} max={1000} className={cell} value={cfg.heads[h.code] ?? 0} onChange={(e) => setHead(h.code, e.target.value)} />
               </div>
             ))}
           </Card>
 
-          <div className="mt-4 space-y-3">
+          <div className="mt-3 space-y-2.5">
             <FormError error={save.error} />
             <div className="flex gap-2">
               {scope && data!.hasOverride && <Button variant="secondary" loading={reset.isPending} onClick={() => confirm('Remove this override and inherit weights from above?') && reset.mutate(undefined)}><RotateCcw className="size-4" />Remove override</Button>}

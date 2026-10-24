@@ -12,10 +12,11 @@ import { AppError, badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { audit, notify } from '../../lib/notify.js';
 import { objectId, q, validate } from '../../middleware/validate.js';
 import { AssignedTarget, Charge, RevEntry, TargetDrive, Unit, User } from '../../models/index.js';
-import type { AuthUser } from '../../middleware/auth.js';
+import { atLeast, type AuthUser } from '../../middleware/auth.js';
 import type { BP } from '../org/blueprint.js';
 import { bpOf } from '../org/service.js';
-import { activeFilter, assertCanRead, autoVerifies, canVerify, hasCap, scopeRoots } from './access.js';
+import { redis } from '../../lib/redis.js';
+import { activeFilter, assertCanRead, autoVerifies, canVerify, capOver, grantsOf, readLevel, scopeRoots } from './access.js';
 import { loadFacts } from './scoring.js';
 
 const router = Router();
@@ -53,12 +54,22 @@ const withState = <T extends { targetValue: number; achieved: number; startDate:
 });
 const isMoney = (bp: BP, code: string) => bp.metric.get(code)?.unit === 'money';
 
-/** The unit must lie inside the assigning officer's own jurisdiction. */
+/**
+ * The unit must lie inside the officer's own jurisdiction AND they must hold the assign_targets capability
+ * over it (a posting with it whose area covers the unit, or a grant carrying that right). A view-only grant
+ * widens what someone sees, never what they may assign or stop.
+ */
 async function inMyJurisdiction(me: AuthUser, bp: BP, unitId: Types.ObjectId | string) {
   const unit = await Unit.findById(unitId).select('anc').lean();
   if (!unit) return false;
-  const roots = (await scopeRoots(me, bp)).map(String);
-  return unit.anc.some((a) => roots.includes(String(a)));
+  return capOver(me, bp, 'assign_targets', unit);
+}
+const isAdminUser = (me: AuthUser) => atLeast(me.role, 'admin');
+
+/** May stop / withdraw a drive: its creator, an admin, or an officer with assign_targets over its area. */
+async function canManageDrive(me: AuthUser, bp: BP, d: { assignedBy: unknown; unitId: unknown }) {
+  if (String((d.assignedBy as any)?._id ?? d.assignedBy) === me.id || isAdminUser(me)) return true;
+  return inMyJurisdiction(me, bp, (d.unitId as any)?._id ?? (d.unitId as any));
 }
 
 /** Recompute verified / pending totals from the progress log. */
@@ -76,7 +87,16 @@ router.get(
   async (req, res) => {
     const { box, unitId, state, driveId } = q<any>(req);
     const filter: Record<string, unknown> = { status: { $ne: 'cancelled' } };
-    if (driveId) filter.driveId = driveId;
+    if (driveId) {
+      filter.driveId = driveId;
+      const d = await TargetDrive.findById(driveId).select('unitId anc assignedBy').lean();
+      if (!d) throw notFound('Drive');
+      // Same visibility as the unit listing: the whole drive when its area is fully visible (or I set it),
+      // otherwise only shares in areas I can see, or my own share.
+      if (String(d.assignedBy) !== req.user!.id && (await readLevel(req.user!, { _id: d.unitId as any, anc: d.anc as any })) !== 'full') {
+        filter.$or = [{ assigneeId: req.user!.id }, { anc: { $in: await scopeRoots(req.user!, bpOf(req)) } }];
+      }
+    }
     else if (box === 'mine') filter.assigneeId = req.user!.id;
     else if (box === 'assigned') { filter.assignedBy = req.user!.id; filter.driveId = null; }
     else {
@@ -116,7 +136,7 @@ router.post(
     const { head, assigneeId, unitId, period, startDate, targetValue, note } = req.body as any;
     const h = bp.metric.get(head);
     if (!h || !h.active) throw badRequest('Unknown KPI');
-    if (!(await hasCap(req.user!, bp, 'assign_targets'))) throw forbidden('Your post cannot assign targets');
+    if (!(await inMyJurisdiction(req.user!, bp, unitId))) throw forbidden('Your post cannot assign targets in this area');
     if (assigneeId === req.user!.id) throw badRequest('You cannot assign a target to yourself');
     const holds = await Charge.findOne({ userId: assigneeId, unitId, ...activeFilter() }).lean();
     if (!holds || bp.dataPosts.has(holds.post)) throw badRequest('That officer does not hold a scored charge of this unit');
@@ -166,7 +186,6 @@ async function planDrive(me: AuthUser, bp: BP, b: z.infer<typeof driveBody>) {
   const head = bp.metric.get(b.head);
   if (!head || !head.active) throw badRequest('Unknown KPI');
   if (head.perHolder) throw badRequest(`${head.name} is recorded per person and cannot be distributed`);
-  if (!(await hasCap(me, bp, 'assign_targets'))) throw forbidden('Your post cannot set drives');
   if (b.basis === 'percent' && b.value > 100) throw badRequest('Percentage cannot exceed 100');
   const unit = await Unit.findById(b.unitId).lean();
   if (!unit) throw notFound('Unit');
@@ -208,8 +227,10 @@ async function planDrive(me: AuthUser, bp: BP, b: z.infer<typeof driveBody>) {
   const patwaris = await Charge.find({ post: { $in: sharePostsFor(bp, head.level, head.enterPosts) }, unitId: { $in: circles.map((c) => c._id) }, ...activeFilter() }).populate('userId', 'name').lean();
   const holder = new Map(patwaris.map((p) => [String(p.unitId), p.userId as any]));
 
+  const factsBy = new Map<string, (typeof facts.rows)[number]['f']>();
+  for (const r of facts.rows) if (!r.roUserId && !factsBy.has(r.unitId)) factsBy.set(r.unitId, r.f);
   const rows = circles.map((c) => {
-    const f = facts.rows.find((r) => r.unitId === String(c._id) && !r.roUserId)?.f;
+    const f = factsBy.get(String(c._id));
     let remaining = 0;
     if (isTarget) {
       const v = f?.rev[b.head];
@@ -253,14 +274,36 @@ router.post('/assigned/drive/preview', validate({ body: driveBody }), async (req
 
 router.post('/assigned/drive', validate({ body: driveBody }), async (req, res) => {
   const b = req.body as z.infer<typeof driveBody>;
-  const plan = await planDrive(req.user!, bpOf(req), b);
-  const start = startOfDay(b.startDate);
-  const end = endOf(start, b.period);
-  const drive = await TargetDrive.create({
-    head: b.head, unitId: plan.unit._id, anc: plan.unit.anc, assignedBy: req.user!.id, period: b.period, startDate: start, endDate: end,
-    basis: b.basis, value: b.value, includeArrears: b.includeArrears, remainingTotal: plan.remainingTotal, targetTotal: plan.targetTotal,
-    shares: plan.rows.length, vacantCircles: plan.vacant.length, note: b.note,
-  });
+  // Only one drive per head may run in overlapping areas: serialise creation per tenant+head (Redis lock),
+  // then re-check after insert so a race without Redis still cannot leave two running drives.
+  const lockKey = `lock:drive:${req.user!.tenantId}:${b.head}`;
+  const rc = redis();
+  if (rc && (await rc.set(lockKey, '1', 'PX', 15_000, 'NX').catch(() => 'OK')) !== 'OK') {
+    throw new AppError(409, 'Another drive for this KPI is being set right now; try again in a moment', 'DRIVE_RUNNING');
+  }
+  let plan: Awaited<ReturnType<typeof planDrive>>;
+  let drive: InstanceType<typeof TargetDrive>;
+  try {
+    plan = await planDrive(req.user!, bpOf(req), b);
+    const s0 = startOfDay(b.startDate);
+    drive = await TargetDrive.create({
+      head: b.head, unitId: plan.unit._id, anc: plan.unit.anc, assignedBy: req.user!.id, period: b.period, startDate: s0, endDate: endOf(s0, b.period),
+      basis: b.basis, value: b.value, includeArrears: b.includeArrears, remainingTotal: plan.remainingTotal, targetTotal: plan.targetTotal,
+      shares: plan.rows.length, vacantCircles: plan.vacant.length, note: b.note,
+    });
+    const clash = await TargetDrive.exists({
+      _id: { $lt: drive._id }, head: b.head, status: 'active', endDate: { $gte: new Date() },
+      $or: [{ unitId: { $in: plan.unit.anc } }, { anc: plan.unit._id }],
+    });
+    if (clash) {
+      await TargetDrive.deleteOne({ _id: drive._id });
+      throw new AppError(409, 'A drive for this KPI was just set in an overlapping area', 'DRIVE_RUNNING', { driveId: clash._id });
+    }
+  } finally {
+    if (rc) await rc.del(lockKey).catch(() => undefined);
+  }
+  const start = drive.startDate;
+  const end = drive.endDate;
   await AssignedTarget.insertMany(plan.rows.map((r) => ({
     tenantId: drive.tenantId, head: b.head, assigneeId: r.patwariId, unitId: r.unitId, anc: r.anc, assignedBy: req.user!.id,
     period: b.period, startDate: start, endDate: end, targetValue: r.share, note: b.note, driveId: drive._id, remainingAtAssign: r.remaining,
@@ -301,7 +344,7 @@ router.get('/assigned/drives', validate({ query: z.object({ box: z.enum(['assign
     return {
       ...d, ...st, headName: bpOf(req).metric.get(d.head)?.name, money: isMoney(bpOf(req), d.head),
       dueTotal: a?.due ?? d.targetTotal, achieved: a?.capped ?? 0, pending: a?.pending ?? 0, met: a?.met ?? 0,
-      canStop: d.status === 'active' && d.endDate >= new Date() && (await inMyJurisdiction(req.user!, bpOf(req), (d.unitId as any)._id)),
+      canStop: d.status === 'active' && d.endDate >= new Date() && (await canManageDrive(req.user!, bpOf(req), d)),
     };
   })));
 });
@@ -310,7 +353,7 @@ router.post('/assigned/drives/:id/stop', validate({ params: z.object({ id: objec
   const d = await TargetDrive.findById(req.params.id);
   if (!d) throw notFound('Drive');
   if (d.status !== 'active' || d.endDate < new Date()) throw badRequest('This drive is not running');
-  if (!(await inMyJurisdiction(req.user!, bpOf(req), d.unitId as any))) throw forbidden('Only the officer who set the drive, or a senior officer over this area, can stop it');
+  if (!(await canManageDrive(req.user!, bpOf(req), d))) throw forbidden('Only the officer who set the drive, or a senior officer over this area, can stop it');
   const now = new Date();
   d.status = 'stopped';
   d.stoppedAt = now;
@@ -326,10 +369,16 @@ router.post('/assigned/drives/:id/stop', validate({ params: z.object({ id: objec
 router.post('/assigned/drives/:id/cancel', validate({ params: z.object({ id: objectId }) }), async (req, res) => {
   const d = await TargetDrive.findById(req.params.id);
   if (!d) throw notFound('Drive');
-  if (String(d.assignedBy) !== req.user!.id) throw forbidden('Only the officer who set the drive can withdraw it');
+  const admin = isAdminUser(req.user!);
+  if (String(d.assignedBy) !== req.user!.id && !admin) throw forbidden('Only the officer who set the drive can withdraw it');
+  if (d.status === 'cancelled') throw badRequest('This drive is already withdrawn');
+  if (!admin && (d.status !== 'active' || d.endDate < new Date())) throw badRequest('Only a running drive can be withdrawn, before its due date');
   d.status = 'cancelled';
   await d.save();
+  const assignees = await AssignedTarget.find({ driveId: d._id, status: { $ne: 'cancelled' } }).distinct('assigneeId');
   await AssignedTarget.updateMany({ driveId: d._id }, { status: 'cancelled' });
+  await notify(assignees, { type: 'target.cancelled', title: `Drive withdrawn: ${bpOf(req).metric.get(d.head)?.name}`, link: '/assigned' });
+  await audit('drive.cancel', 'TargetDrive', d._id, { head: d.head, shares: assignees.length });
   res.json(d);
 });
 
@@ -389,14 +438,22 @@ router.get('/assigned/verify', async (req, res) => {
   const bp = bpOf(req);
   const verifyPosts = [...new Set(bp.metrics.flatMap((m) => m.verifyPosts))];
   const charges = await Charge.find({ userId: me.id, post: { $in: verifyPosts }, ...activeFilter() }).lean();
-  if (!charges.length) return res.json([]);
+  // Areas + KPIs this person verifies: from postings, and from grants carrying the verify right
+  const scopes: { unitId: unknown; heads: string[] }[] = charges.map((c) => ({ unitId: c.unitId, heads: bp.metrics.filter((m) => m.verifyPosts.includes(c.post)).map((m) => m.code) }));
+  for (const g of await grantsOf(me)) {
+    if (g.rights.includes('verify')) scopes.push({ unitId: new Types.ObjectId(g.unitId), heads: g.metrics.length ? g.metrics : bp.metrics.map((m) => m.code) });
+  }
+  if (!scopes.length) return res.json([]);
   const out: unknown[] = [];
-  for (const c of charges) {
-    const heads = bp.metrics.filter((m) => m.verifyPosts.includes(c.post)).map((m) => m.code);
-    const rows = await AssignedTarget.find({ anc: c.unitId, head: { $in: heads }, 'progress.status': 'submitted', status: 'active' })
+  const seen = new Set<string>();
+  for (const c of scopes) {
+    if (!c.heads.length) continue;
+    const rows = await AssignedTarget.find({ anc: c.unitId, head: { $in: c.heads }, 'progress.status': 'submitted', status: 'active' })
       .populate('assigneeId', 'name').populate('unitId', 'name').lean();
     for (const t of rows) {
       for (const p of (t.progress as any[]).filter((x) => x.status === 'submitted')) {
+        if (seen.has(String(p._id))) continue;
+        seen.add(String(p._id));
         out.push({ targetId: t._id, progressId: p._id, head: t.head, headName: bp.metric.get(t.head)?.name, money: isMoney(bp, t.head),
           assignee: t.assigneeId, unit: t.unitId, date: p.date, value: p.value, note: p.note, targetValue: t.targetValue });
       }
@@ -418,6 +475,8 @@ router.post(
       const head = bp.metric.get(t.head);
       const allowed = await canVerify(req.user!, bp, t.head, { anc: t.anc as Types.ObjectId[] });
       if (!allowed) throw forbidden(`You cannot verify ${head?.name} in this area`);
+      if (t.status === 'cancelled' || t.status === 'stopped') throw badRequest(`This ${head?.name} target was ${t.status === 'cancelled' ? 'withdrawn' : 'stopped'}; its progress can no longer be verified`);
+      const wasAchieved = describe(t).state === 'achieved';
       const p: any = t.progress.find((x: any) => String(x._id) === it.progressId);
       if (!p || p.status !== 'submitted') continue;
       p.status = req.body.action === 'verify' ? 'verified' : 'rejected';
@@ -426,7 +485,7 @@ router.post(
       recompute(t);
       await t.save();
       updated++;
-      if (describe(t).state === 'achieved') {
+      if (!wasAchieved && describe(t).state === 'achieved') {
         await notify(t.assignedBy, { type: 'target.achieved', title: `Target achieved: ${head?.name}`, link: '/assigned?box=assigned' });
       }
     }
@@ -438,9 +497,13 @@ router.post(
 router.post('/assigned/:id/cancel', validate({ params: z.object({ id: objectId }) }), async (req, res) => {
   const t = await AssignedTarget.findById(req.params.id);
   if (!t) throw notFound('Target');
-  if (String(t.assignedBy) !== req.user!.id) throw forbidden('Only the assigning officer can withdraw a target');
+  const admin = isAdminUser(req.user!);
+  if (String(t.assignedBy) !== req.user!.id && !admin) throw forbidden('Only the assigning officer can withdraw a target');
+  if (t.status === 'cancelled') throw badRequest('This target is already withdrawn');
+  if (!admin && (t.status !== 'active' || t.endDate < new Date())) throw badRequest('Only a running target can be withdrawn, before its due date');
   t.status = 'cancelled';
   await t.save();
+  await audit('assignedTarget.cancel', 'AssignedTarget', t._id, { head: t.head, assigneeId: t.assigneeId });
   await notify(t.assigneeId, { type: 'target.cancelled', title: `Target withdrawn: ${bpOf(req).metric.get(t.head)?.name}`, link: '/assigned' });
   res.json(withState(bpOf(req), t.toObject() as any));
 });

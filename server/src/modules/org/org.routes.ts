@@ -7,7 +7,7 @@
  */
 import express, { Router } from 'express';
 import { env } from '../../config/env.js';
-import { Types } from 'mongoose';
+import mongoose, { Types, type ClientSession } from 'mongoose';
 import { z } from 'zod';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/notify.js';
@@ -15,12 +15,46 @@ import { enqueue } from '../../lib/queue.js';
 import { requireRole } from '../../middleware/auth.js';
 import { idParam, objectId, q, validate } from '../../middleware/validate.js';
 import {
-  AssignedTarget, AuditPara, Blueprint, BlueprintHistory, Charge, ImportRun, RevEntry, RevTarget, TargetDrive, Task, Tenant, Unit, User,
+  AccessGrant, AssignedTarget, AuditPara, Blueprint, BlueprintHistory, Charge, ImportRun, RevEntry, RevTarget, ScoreConfig, TargetDrive, Task, Tenant, Unit, User,
 } from '../../models/index.js';
+import { hashPassword } from '../auth/auth.routes.js';
 import { publicBlueprint } from './blueprint.js';
 import { parseCsv } from './imports.js';
 import { getBlueprint, saveBlueprint } from './service.js';
 import { TEMPLATES } from './templates.js';
+
+const validTimezone = (tz: string) => {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** http(s) URLs or same-site paths only (no javascript:, data: or protocol-relative //host). */
+const safeLogoUrl = (u: string) => {
+  if (u.startsWith('/')) return !u.startsWith('//') && !u.includes('\\');
+  try {
+    return ['http:', 'https:'].includes(new URL(u).protocol);
+  } catch {
+    return false;
+  }
+};
+
+/** Run in a transaction where the database supports one (replica set), otherwise in order. */
+async function inTransaction(fn: (session?: ClientSession) => Promise<void>) {
+  let session: ClientSession | undefined;
+  try {
+    session = await mongoose.startSession();
+    await session.withTransaction(() => fn(session));
+  } catch (err) {
+    const msg = String((err as Error)?.message ?? '');
+    if (!/replica set|Transaction numbers|transactions are not supported/i.test(msg)) throw err;
+    await fn();
+  } finally {
+    await session?.endSession();
+  }
+}
 
 const router = Router();
 router.use(requireRole('admin'));
@@ -72,8 +106,8 @@ router.patch(
   validate({
     body: z.object({
       name: z.string().trim().min(2).max(120).optional(),
-      branding: z.object({ shortName: z.string().max(40).optional(), tagline: z.string().max(120).optional(), logoUrl: z.string().url().max(500).optional().or(z.literal('')) }).optional(),
-      settings: z.object({ timezone: z.string().max(60).optional() }).optional(),
+      branding: z.object({ shortName: z.string().max(40).optional(), tagline: z.string().max(120).optional(), logoUrl: z.string().max(500).refine(safeLogoUrl, 'Use an http(s) address or a path starting with /').optional().or(z.literal('')) }).optional(),
+      settings: z.object({ timezone: z.string().max(60).refine(validTimezone, 'Unknown timezone').optional() }).optional(),
     }),
   }),
   async (req, res) => {
@@ -145,20 +179,30 @@ router.post('/units/:id/move', validate({ params: idParam, body: z.object({ pare
   // Rewrite the ancestor chain of the subtree and of every record that rolls up through it
   const rewrite = [{ $set: { anc: { $concatArrays: [prefix, { $slice: ['$anc', oldLen, { $size: '$anc' }] }] } } }];
   const match = { anc: unit._id };
-  await Unit.updateOne({ _id: unit._id }, { parentId: parent._id });
-  await Promise.all([Unit, RevTarget, RevEntry, AuditPara, Task, AssignedTarget, TargetDrive].map((M: any) => M.updateMany(match, rewrite)));
+  // Every model that stores an ancestor chain; the unit's own parent link is changed last
+  const apply = async (session?: ClientSession) => {
+    for (const M of [Unit, RevTarget, RevEntry, AuditPara, Task, AssignedTarget, TargetDrive, AccessGrant] as any[]) await M.updateMany(match, rewrite, { session });
+    await Unit.updateOne({ _id: unit._id }, { parentId: parent._id }, { session });
+  };
+  await inTransaction(apply);
   await audit('unit.move', 'Unit', unit._id, { from: unit.parentId, to: parent._id });
   res.json({ moved: true });
 });
 
 router.delete('/units/:id', validate({ params: idParam }), async (req, res) => {
   const id = new Types.ObjectId(req.params.id as string);
-  const [kids, charges, targets, entries, items] = await Promise.all([
+  const [kids, charges, targets, entries, items, tasks, assigned, drives] = await Promise.all([
     Unit.exists({ parentId: id }), Charge.exists({ unitId: id }), RevTarget.exists({ anc: id }), RevEntry.exists({ anc: id }), AuditPara.exists({ anc: id }),
+    Task.exists({ anc: id }), AssignedTarget.exists({ anc: id }), TargetDrive.exists({ anc: id }),
   ]);
   if (kids) throw badRequest('Remove or move its sub-units first');
-  if (charges || targets || entries || items) throw badRequest('This unit has postings or recorded data; mark it inactive instead');
-  await Unit.deleteOne({ _id: id });
+  if (charges || targets || entries || items || tasks || assigned || drives) throw badRequest('This unit has postings, tasks, targets or recorded data; mark it inactive instead');
+  // Access grants and scoring overrides for the unit have no meaning without it
+  await inTransaction(async (session) => {
+    await AccessGrant.deleteMany({ unitId: id }, { session });
+    await ScoreConfig.deleteMany({ scopeUnitId: id }, { session });
+    await Unit.deleteOne({ _id: id }, { session });
+  });
   await audit('unit.delete', 'Unit', id);
   res.status(204).end();
 });
@@ -178,9 +222,12 @@ router.post(
     }
     if (!total) throw badRequest('The file has no data rows');
     if (total > 50_000) throw badRequest('Split the file: at most 50,000 rows per import');
-    const run = await ImportRun.create({ kind, dryRun, total, createdBy: req.user!.id });
-    await enqueue('import', { tenantId: req.user!.tenantId, runId: String(run._id), csv, defaultPassword, actorRole: req.user!.role });
-    res.status(202).json(run);
+    // The file and a hash of the default password stay in the database; the job only carries the run id
+    const payload = { csv, defaultPasswordHash: defaultPassword ? await hashPassword(defaultPassword) : undefined, actorRole: req.user!.role };
+    const run = await ImportRun.create({ kind, dryRun, total, createdBy: req.user!.id, payload });
+    await enqueue('import', { tenantId: req.user!.tenantId, runId: String(run._id) });
+    const { payload: _omit, ...out } = run.toObject() as any;
+    res.status(202).json(out);
   },
 );
 

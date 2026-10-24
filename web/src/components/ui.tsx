@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { useAuth } from '../lib/auth';
 import { titleCase, titleNode } from '../lib/text';
+import { Children as RChildren, isValidElement as isEl, cloneElement as cloneEl, type ReactElement as REl } from 'react';
 import { X, Loader2, Inbox, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import {
   createContext, forwardRef, useCallback, useContext, useEffect, useId, useState,
@@ -25,7 +26,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
       disabled={disabled || loading}
       className={clsx(
         'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 disabled:opacity-50 disabled:pointer-events-none select-none',
-        size === 'md' ? 'h-11 px-4 text-[15px]' : 'h-9 px-3 text-sm',
+        size === 'md' ? 'h-10 px-4 text-[15px]' : 'h-9 px-3 text-sm',
         block && 'w-full',
         VARIANTS[variant],
         className,
@@ -60,7 +61,7 @@ export const Card = ({ className, children, onClick }: { className?: string; chi
 
 export const SectionTitle = ({ children, action }: { children: ReactNode; action?: ReactNode }) => (
   // Section header: gold accent bar, bold green caps, light green rule underneath
-  <div className="mb-2 mt-5 flex items-center justify-between gap-2 border-b-2 border-brand-100 pb-1.5 first:mt-0 dark:border-brand-900">
+  <div className="mb-2 mt-4 flex items-center justify-between gap-2 border-b-2 border-brand-100 pb-1.5 first:mt-0 dark:border-brand-900">
     <h2 className="flex items-center gap-2 text-[14.5px] font-bold uppercase tracking-wide text-brand-800 dark:text-brand-200">
       <span aria-hidden className="h-5 w-1.5 shrink-0 rounded-full bg-gold-500" />
       {titleNode(children)}
@@ -71,12 +72,12 @@ export const SectionTitle = ({ children, action }: { children: ReactNode; action
 
 /* ---------- Forms ---------- */
 const inputCls =
-  'w-full rounded-xl border-0 bg-white px-3.5 h-11 ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 outline-none dark:bg-slate-900 dark:ring-slate-700 disabled:opacity-60';
+  'w-full rounded-xl border-0 bg-white px-3 h-10 text-[15px] ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 outline-none dark:bg-slate-900 dark:ring-slate-700 disabled:opacity-60';
 
-export const Field = ({ label, hint, error, children }: { label: string; hint?: string; error?: string; children: (id: string) => ReactNode }) => {
+export const Field = ({ label, hint, error, children, className }: { label: string; hint?: string; error?: string; children: (id: string) => ReactNode; className?: string }) => {
   const id = useId();
   return (
-    <div className="space-y-1.5">
+    <div className={clsx('min-w-0 space-y-1', className)}>
       <label htmlFor={id} className="block text-sm font-medium text-slate-700 dark:text-slate-300">{titleCase(label)}</label>
       {children(id)}
       {error ? <p className="text-xs text-rose-600">{error}</p> : hint && <p className="text-xs text-slate-500">{hint}</p>}
@@ -108,11 +109,14 @@ export const PasswordInput = forwardRef<HTMLInputElement, Omit<InputHTMLAttribut
 
 export const Select = ({ className, children, ...p }: SelectHTMLAttributes<HTMLSelectElement>) => (
   <select className={clsx(inputCls, 'appearance-none bg-[url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 20 20%27 fill=%27%2394a3b8%27%3E%3Cpath d=%27M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z%27/%3E%3C/svg%3E")] bg-[length:20px] bg-[right_10px_center] bg-no-repeat pr-9', className)} {...p}>
-    {children}
+    {/* Option labels in Title Case (values are untouched) */}
+    {RChildren.map(children, (c) => (isEl(c) && c.type === 'option' && typeof (c as REl<{ children?: ReactNode }>).props.children === 'string'
+      ? cloneEl(c as REl<{ children?: ReactNode }>, undefined, titleCase((c as REl<{ children: string }>).props.children))
+      : c))}
   </select>
 );
 export const Textarea = ({ className, ...p }: TextareaHTMLAttributes<HTMLTextAreaElement>) => (
-  <textarea className={clsx(inputCls, 'h-auto min-h-24 py-2.5', className)} {...p} />
+  <textarea className={clsx(inputCls, 'h-auto min-h-24 py-2', className)} {...p} />
 );
 export const FormError = ({ error }: { error?: unknown }) =>
   error ? (
@@ -140,12 +144,12 @@ export const GovLogo = ({ className }: { className?: string }) => <OrgLogo src={
 
 /** Single unit caption, bottom-centre of a card or chart, e.g. "(Rs in Millions)". */
 export const UnitCaption = ({ children, className }: { children: ReactNode; className?: string }) => (
-  <div className={clsx('mt-2 text-center text-[10px] font-medium tracking-wide text-slate-400', className)}>{children}</div>
+  <div className={clsx('mt-2 text-center text-[11px] font-medium tracking-wide text-slate-400', className)}>{children}</div>
 );
 
 /* ---------- Bits ---------- */
 export const Badge = ({ children, tone = 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300', className }: { children: ReactNode; tone?: string; className?: string }) => (
-  <span className={clsx('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap', tone, className)}>{children}</span>
+  <span className={clsx('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap', tone, className)}>{titleNode(children)}</span>
 );
 export const BandBadge = ({ band }: { band: Band }) => <Badge tone={BAND[band].tone}>{BAND[band].label}</Badge>;
 
@@ -177,7 +181,7 @@ export const ScoreRing = ({ value, size = 112, stroke = 10, label }: { value: nu
       </svg>
       <div className="absolute text-center">
         <div className="text-2xl font-bold tabular-nums" style={{ fontSize: size * 0.22 }}>{value == null ? '—' : Math.round(value)}</div>
-        {label && <div className="text-[11px] text-slate-500">{label}</div>}
+        {label && <div className="text-[12px] text-slate-500">{label}</div>}
       </div>
     </div>
   );
@@ -186,17 +190,17 @@ export const ScoreRing = ({ value, size = 112, stroke = 10, label }: { value: nu
 export const Spinner = ({ className }: { className?: string }) => <Loader2 className={clsx('size-6 animate-spin text-brand-600', className)} />;
 
 export const Loading = () => (
-  <div className="space-y-3">
+  <div className="space-y-2.5">
     {[0, 1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-2xl bg-slate-200/60 dark:bg-slate-800/60" />)}
   </div>
 );
 
 export const Empty = ({ title, body, action, icon: Icon = Inbox }: { title: string; body?: string; action?: ReactNode; icon?: typeof Inbox }) => (
-  <div className="flex flex-col items-center px-6 py-12 text-center">
+  <div className="flex flex-col items-center px-6 py-8 text-center">
     <div className="mb-3 grid size-14 place-items-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800"><Icon className="size-7" /></div>
     <p className="font-semibold">{titleCase(title)}</p>
     {body && <p className="mt-1 max-w-xs text-sm text-slate-500">{body}</p>}
-    {action && <div className="mt-4">{action}</div>}
+    {action && <div className="mt-3">{action}</div>}
   </div>
 );
 
@@ -206,14 +210,14 @@ export const ErrorState = ({ error, retry }: { error: unknown; retry?: () => voi
 
 export function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[] }) {
   return (
-    <div className="flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800/80" role="tablist">
+    <div className="flex max-w-full overflow-x-auto rounded-xl bg-slate-100 p-1 [scrollbar-width:none] dark:bg-slate-800/80" role="tablist">
       {options.map((o) => (
         <button
           key={o.value}
           role="tab"
           aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
-          className={clsx('flex-1 rounded-lg px-3 py-2 text-sm font-medium transition', value === o.value ? 'bg-white shadow-sm dark:bg-slate-900' : 'text-slate-500')}
+          className={clsx('flex-1 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm font-medium transition sm:px-3 sm:py-2', value === o.value ? 'bg-white shadow-sm dark:bg-slate-900' : 'text-slate-500')}
         >
           {titleNode(o.label)}
         </button>
@@ -249,7 +253,7 @@ export function Sheet({ open, onClose, title, children, footer, tone, wide }: { 
           <h2 className={clsx('font-semibold', form ? 'text-base' : 'text-lg')}>{title}</h2>
           <IconButton label="Close" onClick={onClose} className={clsx('-mr-2', form && 'text-white hover:bg-white/15 hover:text-white')}><X className="size-5" /></IconButton>
         </div>
-        <div className={clsx('flex-1 overflow-y-auto pb-4', form ? clsx('px-4', formBody) : 'space-y-4 px-5')}>{children}</div>
+        <div className={clsx('flex-1 overflow-y-auto pb-4', form ? clsx('px-4', formBody) : 'space-y-2.5 px-5')}>{children}</div>
         {footer && <div className="pb-safe border-t border-slate-100 px-5 pt-3 dark:border-slate-800"><div className="pb-3">{footer}</div></div>}
       </div>
     </div>,

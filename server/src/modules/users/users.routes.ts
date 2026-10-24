@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { audit, notify } from '../../lib/notify.js';
-import { requireRole } from '../../middleware/auth.js';
+import { atLeast, requireRole } from '../../middleware/auth.js';
 import { idParam, pagination, q, validate } from '../../middleware/validate.js';
 import { Charge, ROLES, Session, User } from '../../models/index.js';
 import { getBlueprint } from '../org/service.js';
@@ -13,6 +13,8 @@ const router = Router();
 /** Roles an organisation admin may give; 'superadmin' exists only in the platform tenant. */
 const ORG_ROLES = ROLES.filter((r) => r !== 'superadmin') as unknown as ['owner', 'admin', 'manager', 'employee'];
 const SAFE = 'name email role status designation employeeCode bps phone lastLoginAt createdAt';
+/** Non-owners may only grant roles below their own; owners may grant any org role. */
+const canGrant = (me: { role: any }, role: any) => me.role === 'owner' || !atLeast(role, me.role);
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /* Paged list with current postings (admins) */
@@ -63,7 +65,7 @@ const userBody = z.object({
 
 router.post('/', requireRole('admin'), validate({ body: userBody.extend({ password }) }), async (req, res) => {
   const { password: pw, ...data } = req.body;
-  if (data.role === 'owner' && req.user!.role !== 'owner') throw forbidden('Only an owner can create owners');
+  if (!canGrant(req.user!, data.role)) throw forbidden('You cannot create a user with a role at or above your own');
   const user = await User.create({ ...data, passwordHash: await hashPassword(pw) });
   await audit('user.create', 'User', user._id, { email: user.email, role: user.role });
   await notify(user._id, { type: 'welcome', title: 'Welcome', body: 'Your account is ready.', link: '/' });
@@ -79,12 +81,16 @@ router.patch(
     const target = await User.findById(req.params.id);
     if (!target) throw notFound('User');
     const me = req.user!;
-    if ((target.role === 'owner' || req.body.role === 'owner') && me.role !== 'owner') throw forbidden('Only an owner can change owners');
-    if (target.id === me.id && (req.body.role || req.body.status === 'disabled')) throw badRequest('You cannot change your own role or disable yourself');
+    const self = target.id === me.id;
+    if (self && (req.body.role || req.body.status === 'disabled')) throw badRequest('You cannot change your own role or disable yourself');
+    // Admin and owner accounts can be edited only by an owner (or by themselves for non-role fields).
+    if (!self && me.role !== 'owner' && atLeast(target.role as any, 'admin')) throw forbidden('Only an owner can change admins or owners');
+    if (req.body.role && !canGrant(me, req.body.role)) throw forbidden('You cannot grant a role at or above your own');
     const { password: pw, ...rest } = req.body;
+    const emailChanged = rest.email !== undefined && rest.email !== target.email;
     Object.assign(target, rest);
     if (pw) target.passwordHash = await hashPassword(pw);
-    if (pw || rest.status === 'disabled' || rest.role) {
+    if (pw || emailChanged || rest.status === 'disabled' || rest.role) {
       target.tokenVersion = (target.tokenVersion ?? 0) + 1;
       await Session.deleteMany({ userId: target._id });
     }

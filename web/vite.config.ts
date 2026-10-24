@@ -35,7 +35,8 @@ export default defineConfig({
             // Show last-known data when officers are offline / on weak signal.
             urlPattern: ({ url }) => url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/auth'),
             handler: 'NetworkFirst',
-            options: { cacheName: 'api', networkTimeoutSeconds: 5, expiration: { maxEntries: 100, maxAgeSeconds: 86400 } },
+            // Cache is only a fallback when the network fails (no timeout race); it is cleared on login/logout/user change (lib/auth.tsx).
+            options: { cacheName: 'api', cacheableResponse: { statuses: [200] }, expiration: { maxEntries: 100, maxAgeSeconds: 86400 } },
           },
         ],
       },
@@ -43,7 +44,7 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
-    proxy: { '/api': 'http://127.0.0.1:4000' }, // IPv4: another local app may hold [::1]:4000
+    proxy: { '/api': process.env.API_PROXY ?? 'http://127.0.0.1:4000' }, // IPv4: another local app may hold [::1]:4000
   },
   build: {
     rollupOptions: {
